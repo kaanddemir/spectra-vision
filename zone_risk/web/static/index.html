@@ -193,6 +193,7 @@
             <div class="preview-status" id="preview-status" hidden></div>
             <figcaption class="preview-empty" id="empty-video">No video uploaded</figcaption>
             <figcaption class="preview-empty" id="empty-depth" hidden>No depth data available</figcaption>
+            <figcaption class="preview-empty" id="empty-road" hidden>No road tracking available</figcaption>
             <figcaption class="preview-empty" id="empty-motion" hidden>No motion data available</figcaption>
 
             <!-- Center play button -->
@@ -209,11 +210,6 @@
                     <use href="#icon-info"></use>
                   </svg>
                 </button>
-                <button class="side-bar-btn" data-toggle="side-panel-legend" title="Road Tracking">
-                  <svg>
-                    <use href="#icon-lane"></use>
-                  </svg>
-                </button>
                 <div class="side-bar-sep"></div>
                 <button class="side-bar-btn is-active" data-view="video" title="Original Video">
                   <svg>
@@ -223,6 +219,11 @@
                 <button class="side-bar-btn" data-view="depth" title="Depth Map View">
                   <svg>
                     <use href="#icon-zones"></use>
+                  </svg>
+                </button>
+                <button class="side-bar-btn" data-view="road" title="Road Tracking View">
+                  <svg>
+                    <use href="#icon-lane"></use>
                   </svg>
                 </button>
                 <button class="side-bar-btn" data-view="motion" title="Motion Flow View">
@@ -239,20 +240,12 @@
                     <div>Est. Frames: -</div>
                   </div>
                 </div>
-                <div class="side-bar-panel" id="side-panel-legend" hidden>
-                  <h6>Road Tracking</h6>
-                  <div class="legend-list">
-                    <span><i class="dot lane"></i>Lane Marking</span>
-                    <span><i class="dot roi"></i>Road ROI</span>
-                    <span><i class="dot trace"></i>Predicted Path</span>
-                    <span><i class="dot detect"></i>Zone Boundary</span>
-                  </div>
-                </div>
               </div>
             </div>
 
             <!-- Extra Main Overlays -->
             <img id="visual-depth-main" class="preview-overlay main-mode-overlay" alt="Depth map main" hidden>
+            <img id="visual-road-main" class="preview-overlay main-mode-overlay" alt="Road tracking main" hidden>
             <img id="visual-motion-main" class="preview-overlay main-mode-overlay" alt="Motion flow main" hidden>
 
             <!-- Player bar overlay -->
@@ -300,6 +293,17 @@
               <div class="map-indicator-scale">
                 <span>Stable</span>
                 <span>High Motion</span>
+              </div>
+            </div>
+
+            <div class="map-indicator map-indicator-road" id="road-indicator" hidden>
+              <div class="map-indicator-head">
+                <span>Road Tracking</span>
+              </div>
+              <div class="legend-list">
+                <span><i class="dot lane"></i>Lane Marking</span>
+                <span><i class="dot roi"></i>Road ROI</span>
+                <span><i class="dot trace"></i>Predicted Path</span>
               </div>
             </div>
           </figure>

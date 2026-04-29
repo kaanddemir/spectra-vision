@@ -499,9 +499,9 @@ svg {
   width: 14px; height: 3px; display: inline-block;
   border-radius: 4px;
 }
-.dot.lane   { background: #3b82f6; }
-.dot.roi    { background: #22c55e; }
-.dot.trace  { background: var(--red); border: 1px dashed var(--red); height: 0; border-bottom-style: dashed; }
+.dot.lane   { background: #ffffff; border: 1px solid rgba(255,255,255,0.4); }
+.dot.roi    { background: #288cb4; }
+.dot.trace  { background: #22c55e; }
 .dot.detect { background: linear-gradient(90deg, #fde047 0 50%, var(--red) 50% 100%); }
 .dot.path   { background: var(--red); }
 

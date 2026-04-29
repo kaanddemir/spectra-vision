@@ -116,6 +116,7 @@ def _serialize_event(
             ("original", "original_rgb"),
             ("depth", "depth_rgb"),
             ("segmentation", "segmentation_rgb"),
+            ("road", "road_rgb"),
             ("motion", "motion_rgb"),
             ("blend", "overlay_rgb"),
         )

@@ -151,7 +151,7 @@
       previewFrame.classList.remove("has-media", "is-playing");
       
       // Also clear overlays
-      ["depth", "motion"].forEach(name => {
+      ["depth", "road", "motion"].forEach(name => {
         const img = byId(`visual-${name}-main`);
         if (img) { img.hidden = true; img.removeAttribute("src"); }
       });
@@ -170,7 +170,7 @@
     previewVideo.hidden = false;
     previewFrame.classList.add("has-media");
     // Hide all empty-state labels so the center play button becomes visible
-    ["empty-video", "empty-depth", "empty-motion"].forEach(id => {
+    ["empty-video", "empty-depth", "empty-road", "empty-motion"].forEach(id => {
       const el = byId(id);
       if (el) el.hidden = true;
     });
@@ -211,14 +211,15 @@
   function refreshEmptyStates(switchingView) {
     const vEmpty = byId("empty-video");
     const dEmpty = byId("empty-depth");
+    const rEmpty = byId("empty-road");
     const mEmpty = byId("empty-motion");
-    if (!vEmpty || !dEmpty || !mEmpty) return;
+    if (!vEmpty || !dEmpty || !rEmpty || !mEmpty) return;
 
     const mode = state.activeMainView || "video";
     const hasVideo = !!(previewVideo.src && previewVideo.src !== location.href);
 
     // Always hide all empty labels first
-    vEmpty.hidden = dEmpty.hidden = mEmpty.hidden = true;
+    vEmpty.hidden = dEmpty.hidden = rEmpty.hidden = mEmpty.hidden = true;
 
     if (mode === "video") {
       if (!hasVideo) {
@@ -237,6 +238,16 @@
         previewVideo.hidden = true;
         previewBlend.hidden = true;
       }
+    } else if (mode === "road") {
+      const img = byId("visual-road-main");
+      const hasSrc = img && img.getAttribute("src");
+      if (!hasSrc) rEmpty.hidden = false;
+      else img.hidden = false;
+      if (switchingView) {
+        // KEEP video visible for road mode so player controls work
+        previewVideo.hidden = false;
+        previewBlend.hidden = true;
+      }
     } else if (mode === "motion") {
       const img = byId("visual-motion-main");
       const hasSrc = img && img.getAttribute("src");
@@ -252,6 +263,7 @@
   function updateMapIndicators() {
     const depthIndicator = byId("depth-indicator");
     const motionIndicator = byId("motion-indicator");
+    const roadIndicator = byId("road-indicator");
     const depthValue = byId("depth-indicator-value");
     const motionValue = byId("motion-indicator-value");
     const motionFill = byId("motion-indicator-fill");
@@ -260,9 +272,11 @@
     const metrics = result?.metrics || {};
     const hasDepthMap = !!byId("visual-depth-main")?.getAttribute("src");
     const hasMotionMap = !!byId("visual-motion-main")?.getAttribute("src");
+    const hasRoadMap = !!byId("visual-road-main")?.getAttribute("src");
 
     if (depthIndicator) depthIndicator.hidden = mode !== "depth" || !hasDepthMap;
     if (motionIndicator) motionIndicator.hidden = mode !== "motion" || !hasMotionMap;
+    if (roadIndicator) roadIndicator.hidden = mode !== "road" || !hasRoadMap;
 
     if (depthValue) {
       const near = num(metrics.nearScore, null);
@@ -323,6 +337,7 @@
         original: rawImages.original,
         depth: rawImages.depth,
         segmentation: rawImages.segmentation,
+        road: rawImages.road,
         motion: rawImages.motion,
         blend: rawImages.blend,
       },
@@ -365,7 +380,7 @@
     if (!previewVideo || !previewVideo.duration || !Number.isFinite(previewVideo.duration)) return;
     const dur = formatSeconds(previewVideo.duration);
     const w = previewVideo.videoWidth, h = previewVideo.videoHeight;
-
+    
     state.sourceMeta = { durationSec: previewVideo.duration, width: w, height: h };
     timeTotal.textContent = dur;
     timeCurrent.textContent = "00:00";
@@ -707,6 +722,35 @@
       sc,
       timeTag: `Live: <span>${formatSeconds(num(row["Time (s)"], 0))}</span>`,
     });
+
+    if (state.activeMainView !== "video") {
+      updateMainImageFromTime(t, state.activeMainView);
+    }
+  }
+
+  function updateMainImageFromTime(timeSec, viewMode) {
+    if (!viewMode || viewMode === "video") return;
+    const events = state.events || [];
+    if (!events.length) return;
+
+    let bestEvent = null;
+    let minDiff = Infinity;
+    for (const ev of events) {
+      const diff = Math.abs(ev.timestampSec - timeSec);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestEvent = ev;
+      }
+    }
+
+    if (bestEvent && bestEvent.images && bestEvent.images[viewMode]) {
+      const mainImg = byId(`visual-${viewMode}-main`);
+      if (mainImg) {
+        const src = mediaSrc(bestEvent.images[viewMode]);
+        if (mainImg.src !== src) mainImg.src = src;
+        mainImg.hidden = false;
+      }
+    }
   }
 
   // ─── full render ─────────────────────────────────────────
@@ -718,6 +762,7 @@
 
     setMiniMedia("depth", result.images.depth);
     setMiniMedia("segmentation", result.images.segmentation);
+    setMiniMedia("road", result.images.road);
     setMiniMedia("motion", result.images.motion);
 
     showPreviewOverlay(result.images.blend);
@@ -738,6 +783,7 @@
     state.events = [];
     setMiniMedia("depth", "");
     setMiniMedia("segmentation", "");
+    setMiniMedia("road", "");
     setMiniMedia("motion", "");
     hidePreviewOverlay();
     renderStatRow(null);
@@ -1078,8 +1124,10 @@
           // Reset all view buttons and overlays
           document.querySelectorAll(".side-bar-btn[data-view]").forEach(b => b.classList.remove("is-active"));
           const mainDepth = byId("visual-depth-main");
+          const mainRoad = byId("visual-road-main");
           const mainMotion = byId("visual-motion-main");
           if (mainDepth) mainDepth.hidden = true;
+          if (mainRoad) mainRoad.hidden = true;
           if (mainMotion) mainMotion.hidden = true;
 
           if (viewMode === "video" || isActive) {
@@ -1096,16 +1144,16 @@
             }
           }
 
-          // Center play button and player bar only in video mode
+          // Center play button and player bar only in video and road mode
           const centerBtn = byId("center-play-btn");
           const playerBar = document.querySelector(".preview-bar");
-          const isVideo = (state.activeMainView === "video");
+          const isVideoOrRoad = (state.activeMainView === "video" || state.activeMainView === "road");
 
           if (centerBtn) {
-            centerBtn.classList.toggle("force-hide", !isVideo);
+            centerBtn.classList.toggle("force-hide", !isVideoOrRoad);
           }
           if (playerBar) {
-            playerBar.classList.toggle("force-hide", !isVideo);
+            playerBar.classList.toggle("force-hide", !isVideoOrRoad);
           }
 
           refreshEmptyStates(true);

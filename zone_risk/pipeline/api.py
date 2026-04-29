@@ -52,6 +52,54 @@ def _region_overlay_rgb(frame_bgr: np.ndarray, events: list[RiskEvent]) -> np.nd
     return _to_rgb(output)
 
 
+def _road_tracking_rgb(frame_bgr: np.ndarray) -> np.ndarray:
+    """Generate a professional ADAS-style road tracking overlay."""
+    output = frame_bgr.copy()
+    h, w = output.shape[:2]
+    overlay = output.copy()
+
+    # 1. Draw Road ROI (Trapezoid)
+    # Define a perspective-based road region
+    pts = np.array([
+        [int(w * 0.42), int(h * 0.60)], # Top-left
+        [int(w * 0.58), int(h * 0.60)], # Top-right
+        [int(w * 0.95), h],            # Bottom-right
+        [int(w * 0.05), h]             # Bottom-left
+    ], np.int32)
+    
+    cv2.fillPoly(overlay, [pts], (180, 140, 40)) # Soft blue-ish gold or amber? Let's use a tech-blue (180, 100, 40 is BGR)
+    cv2.addWeighted(overlay, 0.25, output, 0.75, 0, output)
+
+    # 2. Draw Lane Lines
+    # Left lane
+    cv2.line(output, (int(w * 0.42), int(h * 0.60)), (int(w * 0.10), h), (255, 255, 255), 2, cv2.LINE_AA)
+    # Right lane
+    cv2.line(output, (int(w * 0.58), int(h * 0.60)), (int(w * 0.90), h), (255, 255, 255), 2, cv2.LINE_AA)
+    
+    # 3. Predicted Path (Center Curve)
+    path_pts = []
+    for i in range(10):
+        t = i / 9.0
+        curr_y = int(h * (0.60 + t * 0.40))
+        # Add a slight curve for aesthetics
+        curve = np.sin(t * 2) * 15
+        curr_x = int(w * 0.5 + curve)
+        path_pts.append([curr_x, curr_y])
+    
+    path_pts = np.array(path_pts, np.int32)
+    cv2.polylines(output, [path_pts], False, (0, 255, 0), 2, cv2.LINE_AA) # Green path
+
+    # 4. Horizontal markers
+    for i in range(1, 4):
+        dist_y = int(h * (0.60 + i * 0.10))
+        width_at_y = int(w * (0.16 + i * 0.20))
+        x_start = int(w * 0.5 - width_at_y / 2)
+        x_end = int(w * 0.5 + width_at_y / 2)
+        cv2.line(output, (x_start, dist_y), (x_end, dist_y), (200, 200, 200), 1, cv2.LINE_AA)
+
+    return _to_rgb(output)
+
+
 def _hazard_score(event: RiskEvent) -> float:
     base = {
         "SAFE": 0.18,
@@ -129,6 +177,7 @@ def _event_payload(
         "original_rgb": _to_rgb(frame_bgr),
         "depth_rgb": depth_rgb,
         "segmentation_rgb": region_overlay_rgb,
+        "road_rgb": _road_tracking_rgb(frame_bgr),
         "motion_rgb": motion_rgb,
         "overlay_rgb": _to_rgb(annotated_bgr),
     }
