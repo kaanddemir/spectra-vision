@@ -1,10 +1,6 @@
 (() => {
   const MISSING = "—";
-  const presets = {
-    balanced:  { max_processed_frames: "180", depth_every: "3" },
-    fast:      { max_processed_frames: "90",  depth_every: "5" },
-    precision: { max_processed_frames: "300", depth_every: "2" },
-  };
+
 
   const form = document.querySelector("#analysis-form");
   const fileInput = document.querySelector("#source-file");
@@ -13,7 +9,7 @@
   const removeBtn = document.querySelector("#remove-source");
   const selectedChip = document.querySelector("#selected-chip");
   const settingsDrawer = document.querySelector("#settings-drawer");
-  const presetPicker = document.querySelector("#preset-picker");
+
   const previewVideo = document.querySelector("#visual-original-video");
   const previewBlend = document.querySelector("#visual-blend");
   const previewFrame = document.querySelector("#frame-original");
@@ -633,7 +629,8 @@
 
     // Smooth points for display
     const smoothed = points.map((p, i) => {
-      const window = points.slice(Math.max(0, i - 1), Math.min(points.length, i + 2));
+      // 5-point moving average window (2 before, 2 after)
+      const window = points.slice(Math.max(0, i - 2), Math.min(points.length, i + 3));
       const avg = window.reduce((a, b) => a + b.ttc, 0) / window.length;
       return { ...p, ttc: avg };
     });
@@ -905,27 +902,7 @@
     setTimeout(() => { if (!modal.classList.contains("is-open")) modal.hidden = true; }, 400);
   }
 
-  function applyPreset() {
-    const values = presets[presetPicker?.value] || presets.balanced;
-    Object.entries(values).forEach(([name, value]) => {
-      const hidden = formField(name);
-      if (hidden) hidden.value = value;
-      
-      const sliderEl = document.querySelector(`input[data-param="${name}"]`);
-      if (sliderEl) {
-        sliderEl.value = value;
-        if (sliderEl.type === "range") setRangeFill(sliderEl);
-      }
 
-      const segmented = document.querySelector(`.segmented-control[data-param="${name}"]`);
-      if (segmented) {
-        segmented.querySelectorAll(".segmented-btn").forEach(btn => {
-          const isActive = btn.dataset.value === String(value);
-          btn.classList.toggle("active", isActive);
-        });
-      }
-    });
-  }
 
   function setupSegmentedControls() {
     document.querySelectorAll(".segmented-control").forEach(ctrl => {
@@ -1044,7 +1021,7 @@
       }
     });
 
-    presetPicker?.addEventListener("change", applyPreset);
+
     fileInput.addEventListener("change", handleFileSelection);
     form.addEventListener("submit", analyzeSelectedFile);
     uploadButton.addEventListener("click", () => fileInput.click());

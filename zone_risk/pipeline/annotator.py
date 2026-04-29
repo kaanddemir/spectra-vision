@@ -53,20 +53,41 @@ def annotate_frame(
     zone_events: list[RiskEvent],
 ) -> np.ndarray:
     output = frame_bgr.copy()
+    height, width = output.shape[:2]
     color = COLORS.get(primary_event.state, (220, 220, 220))
 
+    # 1. Draw Collision Cone (Trapezoid) with dynamic risk color
+    # Match the logic in fusion.py: Bottom 50%, Top 10%
+    pt_bl = (int(width * 0.25), height)
+    pt_br = (int(width * 0.75), height)
+    pt_tl = (int(width * 0.45), 0)
+    pt_tr = (int(width * 0.55), 0)
+    
+    # Use risk-based color for the cone
+    cone_color = color # Use the already determined primary state color
+    
+    # Draw subtle cone lines and fill
+    cone_pts = np.array([pt_bl, pt_tl, pt_tr, pt_br], np.int32)
+    overlay = output.copy()
+    cv2.fillPoly(overlay, [cone_pts], cone_color)
+    cv2.addWeighted(overlay, 0.12, output, 0.88, 0, output)
+    cv2.polylines(output, [cone_pts], isClosed=False, color=cone_color, thickness=1, lineType=cv2.LINE_AA)
+
+    # 2. Draw Zones
     for event in zone_events:
         if event.bbox is None:
             continue
         x1, y1, x2, y2 = event.bbox
         zone_color = COLORS.get(event.state, (100, 120, 140))
-        cv2.rectangle(output, (x1, y1), (x2, y2), zone_color, 1)
-        cv2.putText(output, _readable_zone(event.zone), (x1 + 8, 24),
-                    _FONT, 0.42, (200, 210, 225), 1, cv2.LINE_AA)
+        
+        # Subtle zone vertical dividers
+        cv2.line(output, (x1, 0), (x1, height), (60, 70, 85), 1, cv2.LINE_AA)
+        
+        # Draw small zone label
+        cv2.putText(output, _readable_zone(event.zone), (x1 + 8, height - 12),
+                    _FONT, 0.38, (200, 210, 225), 1, cv2.LINE_AA)
 
-    if primary_event.bbox is not None:
-        x1, y1, x2, y2 = primary_event.bbox
-        cv2.rectangle(output, (x1, y1), (x2, y2), color, 3)
+    # (Primary event rectangle removed to localize risk visualization)
 
     ttc_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
     near_pct = int(round((primary_event.near_score or 0) * 100))
@@ -82,11 +103,23 @@ def annotate_frame(
     detail_segs  = [f"Nearness {near_pct}%", f"Closing Speed {vel_pct}%"]
     detail_cols  = [(190, 205, 220), (190, 205, 220)]
 
-    box_y1, box_y2 = 12, 82
-    box_w = min(output.shape[1] - 24, 620)
+    # 3. Draw HUD (Top-Left)
+    box_y1, box_y2 = 10, 54
+    # Calculate box width based on text
+    max_w = 0
+    for row_segs, scale in [(header_segs, 0.52), (detail_segs, 0.38)]:
+        tw_total = 0
+        for s in row_segs:
+            (tw, _), _ = cv2.getTextSize(s, _FONT, scale, 1)
+            tw_total += tw + 20
+        max_w = max(max_w, tw_total)
+    
+    box_w = max_w + 12
     cv2.rectangle(output, (12, box_y1), (12 + box_w, box_y2), (8, 12, 20), thickness=-1)
+    cv2.rectangle(output, (12, box_y1), (12 + box_w, box_y2), (40, 50, 65), thickness=1) # Subtle border
 
-    _hud_row(output, header_segs, header_cols, 0.68, 2, 42, sep=False)
-    _hud_row(output, detail_segs, detail_cols, 0.48, 1, 68, sep=False)
+    # Draw rows centered in the box
+    _hud_row(output, header_segs, header_cols, 0.52, 1, 32, x0=12+10, sep=False)
+    _hud_row(output, detail_segs, detail_cols, 0.38, 1, 47, x0=12+10, sep=False)
 
     return output

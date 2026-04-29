@@ -23,7 +23,7 @@ VIDEO_TYPES = {"mp4", "mov", "avi", "mkv", "m4v"}
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "web" / "static"
 
-app = FastAPI(title="Spectrum", version="1.0.0")
+app = FastAPI(title="Spectra", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -201,8 +201,8 @@ def analyze_endpoint(
     mode: str = Form("video"),
     max_processed_frames: int = Form(180),
     max_saved_events: int = Form(6),
-    resize_max_side: int = Form(768),
-    depth_every: int = Form(3),
+    resize_max_side: int = Form(640),
+    depth_every: int = Form(10),
 ) -> dict[str, Any]:
     if mode.strip().lower() != "video":
         raise HTTPException(status_code=400, detail="Only video analysis is supported.")

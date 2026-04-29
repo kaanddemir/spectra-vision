@@ -141,6 +141,43 @@ def calculate_region_risk(
     )
 
 
+class StateStabilizer:
+    """Smoothes risk state transitions using consecutive frame counts (hysteresis)."""
+    def __init__(self, upgrade_frames: int = 3, downgrade_frames: int = 5):
+        self.current_state = "SAFE"
+        self.pending_state = "SAFE"
+        self.counter = 0
+        self.upgrade_frames = upgrade_frames
+        self.downgrade_frames = downgrade_frames
+
+    def process(self, raw_state: str) -> str:
+        if raw_state == self.current_state:
+            self.pending_state = raw_state
+            self.counter = 0
+            return self.current_state
+
+        if raw_state != self.pending_state:
+            self.pending_state = raw_state
+            self.counter = 1
+        else:
+            self.counter += 1
+
+        # Determine if we should transition
+        r_curr = self._rank(self.current_state)
+        r_pend = self._rank(self.pending_state)
+        
+        required = self.upgrade_frames if r_pend > r_curr else self.downgrade_frames
+        
+        if self.counter >= required:
+            self.current_state = self.pending_state
+            self.counter = 0
+            
+        return self.current_state
+
+    def _rank(self, state: str) -> int:
+        return {"SAFE": 0, "CAUTION": 1, "DANGER": 2}.get(state, 0)
+
+
 def select_primary_event(events: list[RiskEvent]) -> RiskEvent:
     if not events:
         raise ValueError("At least one risk event is required.")

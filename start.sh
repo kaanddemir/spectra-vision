@@ -11,7 +11,7 @@ else
 fi
 
 echo "========================================"
-echo "Starting Spectrum Server..."
+echo "Starting Spectra Server..."
 echo "========================================"
 
 # Set PYTHONPATH to include the base directory so zone_risk can be imported

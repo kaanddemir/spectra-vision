@@ -8,7 +8,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from .fusion import fuse_frame_risk
+from .fusion import compute_quick_risk, fuse_frame_risk
 from ..vision.depth_estimator import DepthResult, estimate_frame_depth
 from ..vision.optical_flow import compute_velocity, flow_to_rgb
 from ..vision.preprocess import preprocess_frame
@@ -36,18 +36,19 @@ def _depth_rgb(depth: DepthResult) -> np.ndarray:
 def _region_overlay_rgb(frame_bgr: np.ndarray, events: list[RiskEvent]) -> np.ndarray:
     output = frame_bgr.copy()
     height, width = output.shape[:2]
-    for x in (width // 3, 2 * width // 3):
-        cv2.line(output, (x, 0), (x, height), (96, 165, 250), 2)
-    labels = [("left", width // 6), ("center", width // 2), ("right", 5 * width // 6)]
-    for label, x in labels:
-        cv2.putText(output, label, (x - 28, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 236, 245), 1)
+    
+    # Draw subtle top guides for zones
+    w25 = int(width * 0.25)
+    w75 = int(width * 0.75)
+    
+    # Just draw subtle markers at the top
+    for x in (w25, w75):
+        cv2.line(output, (x, 0), (x, 12), (70, 80, 95), 1)
 
-    for event in events:
-        if event.bbox is None:
-            continue
-        x1, y1, x2, y2 = event.bbox
-        color = (40, 50, 255) if event.state == "DANGER" else (0, 180, 255) if event.state == "CAUTION" else (80, 210, 120)
-        cv2.rectangle(output, (x1 + 2, y1 + 2), (x2 - 2, y2 - 2), color, 1)
+    labels = [("Left", w25 // 2), ("Same", width // 2), ("Right", (width + w75) // 2)]
+    for label, x in labels:
+        cv2.putText(output, label, (x - 20, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 190, 210), 1, cv2.LINE_AA)
+
     return _to_rgb(output)
 
 
@@ -139,7 +140,7 @@ def analyze_zone_video(
     max_processed_frames: int,
     max_saved_events: int,
     resize_max_side: int,
-    depth_every: int = 3,
+    depth_every: int = 10,
 ) -> dict[str, Any]:
     """Run zone-based risk analysis and return the UI-compatible result shape."""
 
@@ -149,6 +150,8 @@ def analyze_zone_video(
     last_depth: DepthResult | None = None
     saved_events: list[dict[str, Any]] = []
     timeline_rows: list[dict[str, Any]] = []
+    from .risk_calculator import StateStabilizer
+    stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
     processed_frames = 0
 
     for video_frame in loader.frames():
@@ -156,15 +159,31 @@ def analyze_zone_video(
         flow = compute_velocity(previous_gray, frame.gray)
         previous_gray = frame.gray
 
-        if last_depth is None or video_frame.frame_index % max(depth_every, 1) == 0:
+        # 1. Fast Analysis: Estimate quick risk from motion (optical flow)
+        quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
+
+        # 2. Decisions:
+        # - High risk: if motion-based risk is above threshold
+        # - Periodic: recompute depth every N frames even if low risk
+        is_high_risk = quick_risk > 0.15
+        is_periodic = video_frame.frame_index % max(depth_every, 1) == 0
+
+        if last_depth is None or is_high_risk or is_periodic:
             last_depth = estimate_frame_depth(frame)
 
+        # 3. Final Fusion: Combine flow and current (or reused) depth
         primary_event, all_events = fuse_frame_risk(
             frame_index=video_frame.frame_index,
             timestamp_sec=video_frame.timestamp_sec,
             depth=last_depth,
             flow=flow,
         )
+
+        # 4. Smooth State Transitions (Hysteresis)
+        stabilized_state = stabilizer.process(primary_event.state)
+        # Update primary_event with stabilized state
+        from dataclasses import replace
+        primary_event = replace(primary_event, state=stabilized_state)
 
         annotated = annotate_frame(frame.bgr, primary_event, all_events)
         event_payload = _event_payload(

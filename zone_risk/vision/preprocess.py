@@ -29,7 +29,7 @@ def resize_preserving_aspect(frame_bgr: np.ndarray, max_side: int) -> np.ndarray
     return cv2.resize(frame_bgr, new_size, interpolation=cv2.INTER_AREA)
 
 
-def preprocess_frame(frame_bgr: np.ndarray, max_side: int = 720) -> PreprocessedFrame:
+def preprocess_frame(frame_bgr: np.ndarray, max_side: int = 640) -> PreprocessedFrame:
     """Resize and enhance a BGR frame."""
 
     resized_bgr = resize_preserving_aspect(frame_bgr, max_side=max_side)

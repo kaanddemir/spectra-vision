@@ -1,6 +1,6 @@
-# Spectrum
+# Spectra
 
-Spectrum is a zone-based video risk analysis tool. It processes uploaded driving-view videos, splits each frame into left, center, and right zones, estimates visual nearness and optical flow, then reports risk state, TTC, and timeline events.
+Spectra is a zone-based video risk analysis tool. It processes uploaded driving-view videos, splits each frame into left, center, and right zones, estimates visual nearness and optical flow, then reports risk state, TTC, and timeline events.
 
 The current pipeline is zone-only and does not use object detection or external narrative services.
 
