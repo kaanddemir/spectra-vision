@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import List
 
 import cv2
@@ -26,16 +27,17 @@ def _normalize_to_unit(image: np.ndarray) -> np.ndarray:
     return (image - min_value) / (max_value - min_value)
 
 
+@lru_cache(maxsize=1)
 def build_gabor_filter_bank() -> List[np.ndarray]:
-    """Create a Gabor filter bank with 6 orientations and 4 frequencies.
+    """Create a compact Gabor filter bank with 4 orientations and 2 frequencies.
 
     Returns:
         A list of Gabor kernels.
     """
 
     kernels: List[np.ndarray] = []
-    orientations = np.linspace(0.0, np.pi, 6, endpoint=False)
-    frequencies = [0.05, 0.1, 0.2, 0.3]
+    orientations = np.linspace(0.0, np.pi, 4, endpoint=False)
+    frequencies = [0.1, 0.2]
 
     for theta in orientations:
         for frequency in frequencies:

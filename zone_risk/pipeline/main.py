@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
+
 from .fusion import fuse_frame_risk
 from ..vision.depth_estimator import DepthResult, estimate_frame_depth
 from ..vision.optical_flow import compute_velocity
@@ -12,6 +14,9 @@ from ..vision.preprocess import preprocess_frame
 from .annotator import annotate_frame
 from .video_loader import VideoLoader
 from .video_writer import JsonlEventWriter, VideoWriter
+
+
+_DEPTH_BLEND_ALPHA = 0.6
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,8 +52,16 @@ def run(args: argparse.Namespace) -> dict[str, int | str]:
             flow = compute_velocity(previous_gray, frame.gray)
             previous_gray = frame.gray
 
-            if last_depth is None or video_frame.frame_index % max(args.depth_every, 1) == 0:
+            if last_depth is None:
                 last_depth = estimate_frame_depth(frame)
+            elif video_frame.frame_index % max(args.depth_every, 1) == 0:
+                new_depth = estimate_frame_depth(frame)
+                blended_near = (
+                    _DEPTH_BLEND_ALPHA * new_depth.near_map
+                    + (1.0 - _DEPTH_BLEND_ALPHA) * last_depth.near_map
+                ).astype(np.float32)
+                blended_uint8 = np.clip(blended_near * 255.0, 0, 255).astype(np.uint8)
+                last_depth = DepthResult(depth_map=blended_uint8, near_map=blended_near)
 
             primary_event, all_events = fuse_frame_risk(
                 frame_index=video_frame.frame_index,
