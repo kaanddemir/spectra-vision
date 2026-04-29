@@ -5,8 +5,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Spectrum</title>
-  <link rel="stylesheet" href="/static/style.css?v=128">
-  <script src="/static/app.js?v=118" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=137">
+  <script src="/static/app.js?v=125" defer></script>
 </head>
 
 <body>
@@ -275,6 +275,32 @@
                   <use href="#icon-expand"></use>
                 </svg>
               </button>
+            </div>
+
+            <div class="map-indicator map-indicator-depth" id="depth-indicator" hidden>
+              <div class="map-indicator-head">
+                <span>Depth Map</span>
+                <strong id="depth-indicator-value">—</strong>
+              </div>
+              <div class="depth-scale" aria-hidden="true"></div>
+              <div class="map-indicator-scale">
+                <span>Far</span>
+                <span>Near</span>
+              </div>
+            </div>
+
+            <div class="map-indicator map-indicator-motion" id="motion-indicator" hidden>
+              <div class="map-indicator-head">
+                <span>Motion Map</span>
+                <strong id="motion-indicator-value">—</strong>
+              </div>
+              <div class="motion-scale" aria-hidden="true">
+                <span id="motion-indicator-fill"></span>
+              </div>
+              <div class="map-indicator-scale">
+                <span>Stable</span>
+                <span>High Motion</span>
+              </div>
             </div>
           </figure>
 

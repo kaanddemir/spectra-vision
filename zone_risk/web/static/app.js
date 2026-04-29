@@ -166,12 +166,18 @@
       seekBar.style.setProperty("--fill", "0%");
       previewStatus.hidden = true;
       hidePreviewOverlay();
+      updateMapIndicators();
       refreshEmptyStates(true);
       return;
     }
     previewVideo.src = resolved;
     previewVideo.hidden = false;
     previewFrame.classList.add("has-media");
+    // Hide all empty-state labels so the center play button becomes visible
+    ["empty-video", "empty-depth", "empty-motion"].forEach(id => {
+      const el = byId(id);
+      if (el) el.hidden = true;
+    });
   }
 
   function setMiniMedia(name, source) {
@@ -244,6 +250,36 @@
         previewVideo.hidden = true;
         previewBlend.hidden = true;
       }
+    }
+  }
+
+  function updateMapIndicators() {
+    const depthIndicator = byId("depth-indicator");
+    const motionIndicator = byId("motion-indicator");
+    const depthValue = byId("depth-indicator-value");
+    const motionValue = byId("motion-indicator-value");
+    const motionFill = byId("motion-indicator-fill");
+    const mode = state.activeMainView || "video";
+    const result = state.lastResult;
+    const metrics = result?.metrics || {};
+    const hasDepthMap = !!byId("visual-depth-main")?.getAttribute("src");
+    const hasMotionMap = !!byId("visual-motion-main")?.getAttribute("src");
+
+    if (depthIndicator) depthIndicator.hidden = mode !== "depth" || !hasDepthMap;
+    if (motionIndicator) motionIndicator.hidden = mode !== "motion" || !hasMotionMap;
+
+    if (depthValue) {
+      const near = num(metrics.nearScore, null);
+      depthValue.textContent = near === null ? MISSING : `${Math.round(clamp(near, 0, 1) * 100)}% Near`;
+    }
+
+    if (motionValue || motionFill) {
+      const motion = num(metrics.motionMagnitude, null);
+      const closing = num(metrics.closingSpeed, null);
+      const signal = motion !== null ? motion : closing;
+      const pct = signal === null ? 0 : Math.round(clamp(signal, 0, 1) * 100);
+      if (motionValue) motionValue.textContent = signal === null ? MISSING : `${pct}% Motion`;
+      if (motionFill) motionFill.style.width = `${pct}%`;
     }
   }
 
@@ -482,7 +518,8 @@
       const m = ev.metrics || ev || {};
       const ttcVal = m.ttc !== undefined ? m.ttc : m.estimatedTtcSec;
       const nearVal = num(m.nearScore, null);
-      
+      const speedVal = num(m.closingSpeed ?? m.velocityMagnitude, null);
+
       card.innerHTML = `
         <div class="card-visual">
           ${thumbImg ? `<img src="${thumbImg}" alt="Event">` : '<div style="height:100%; display:grid; place-items:center; color:var(--muted); font-size:11px; font-weight:700;">—</div>'}
@@ -506,8 +543,8 @@
               <span class="m-value">${nearVal !== null ? (nearVal * 100).toFixed(0) + '%' : '—'}</span>
             </div>
             <div class="metric-box">
-              <span class="m-label">Lane</span>
-              <span class="m-value">${shortLane(ev.lane || m.lane)}</span>
+              <span class="m-label">Speed</span>
+              <span class="m-value">${speedVal !== null ? (speedVal * 100).toFixed(0) + '%' : '—'}</span>
             </div>
             <div class="metric-box">
               <span class="m-label">Type</span>
@@ -695,6 +732,7 @@
     renderZoneBars(result);
     renderTimeline(result);
     renderTtcChart(result);
+    updateMapIndicators();
   }
 
   function renderEmptyState() {
@@ -713,6 +751,7 @@
     renderTtcChart({ timelineRows: [] });
 
     updateChartCursor(0);
+    updateMapIndicators();
   }
 
   // ─── analysis flow ───────────────────────────────────────
@@ -821,6 +860,7 @@
     document.querySelectorAll(".side-bar-btn[data-view]").forEach(b => {
       b.classList.toggle("is-active", b.dataset.view === "video");
     });
+    updateMapIndicators();
 
     if (!file) { setPreviewMedia(""); state.sourceMeta = null; return; }
     state.previewUrl = URL.createObjectURL(file);
@@ -955,9 +995,13 @@
       if (previewVideo.duration) previewVideo.currentTime = ratio * previewVideo.duration;
     });
     byId("center-play-btn")?.addEventListener("click", () => {
-      if (previewVideo.hidden || !previewVideo.src) return;
-      hidePreviewOverlay();
-      previewVideo.play().catch(() => {});
+      if (!previewVideo.src) return;
+      if (previewVideo.paused) {
+        hidePreviewOverlay();
+        previewVideo.play().catch(() => {});
+      } else {
+        previewVideo.pause();
+      }
     });
     byId("preview-expand")?.addEventListener("click", () => expandMedia(previewVideo.src, "video"));
   }
@@ -1088,17 +1132,10 @@
           }
 
           refreshEmptyStates(true);
+          updateMapIndicators();
         }
       });
     });
-
-    const centerPlayBtn = byId("center-play-btn");
-    if (centerPlayBtn) {
-      centerPlayBtn.addEventListener("click", () => {
-        if (previewVideo.hidden || !previewVideo.src) return;
-        if (previewVideo.paused) previewVideo.play().catch(() => {}); else previewVideo.pause();
-      });
-    }
 
     renderEmptyState();
   }
