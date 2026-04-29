@@ -1,4 +1,4 @@
-"""Video frame loading helpers for the real-time danger pipeline."""
+"""Video frame loading helpers for the zone-based risk pipeline."""
 
 from __future__ import annotations
 

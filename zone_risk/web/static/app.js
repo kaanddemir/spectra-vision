@@ -1,9 +1,9 @@
 (() => {
   const MISSING = "—";
   const presets = {
-    balanced:  { max_processed_frames: "180", depth_every: "3", detect_every: "3" },
-    fast:      { max_processed_frames: "90",  depth_every: "5", detect_every: "5" },
-    precision: { max_processed_frames: "300", depth_every: "2", detect_every: "2" },
+    balanced:  { max_processed_frames: "180", depth_every: "3" },
+    fast:      { max_processed_frames: "90",  depth_every: "5" },
+    precision: { max_processed_frames: "300", depth_every: "2" },
   };
 
   const form = document.querySelector("#analysis-form");
@@ -14,7 +14,6 @@
   const selectedChip = document.querySelector("#selected-chip");
   const settingsDrawer = document.querySelector("#settings-drawer");
   const presetPicker = document.querySelector("#preset-picker");
-  const detectorButtons = document.querySelectorAll("[data-detector]");
   const previewVideo = document.querySelector("#visual-original-video");
   const previewBlend = document.querySelector("#visual-blend");
   const previewFrame = document.querySelector("#frame-original");
@@ -491,7 +490,7 @@
       fill.style.width = `${pct}%`;
       value.textContent = String(pct);
       let sc = "safe";
-      if ((ttc !== null && ttc < 1.5) || score >= 0.75) sc = "danger";
+      if ((ttc !== null && ttc < 1.0) || score >= 0.75) sc = "danger";
       else if ((ttc !== null && ttc < 3.0) || score >= 0.45) sc = "caution";
       row.classList.add(`is-${sc}`);
     });
@@ -882,7 +881,6 @@
     if (label) label.textContent = isRunning ? "Analyzing…" : "Start Analysis";
     runButton.disabled = isRunning;
     if (removeBtn) removeBtn.disabled = isRunning;
-    detectorButtons.forEach((b) => (b.disabled = isRunning));
   }
 
   async function analyzeSelectedFile(event) {
@@ -1016,21 +1014,6 @@
     if (hidden) hidden.value = String(input.value);
   }
 
-  function setDetectorMode(mode) {
-    const normalized = mode === "yolo" ? "yolo" : "zone";
-    const hidden = formField("enable_yolo");
-    if (hidden) hidden.value = normalized === "yolo" ? "true" : "false";
-    detectorButtons.forEach((btn) => {
-      const isActive = btn.dataset.detector === normalized;
-      btn.classList.toggle("active", isActive);
-      btn.setAttribute("aria-pressed", String(isActive));
-    });
-
-  }
-
-
-
-
   // ─── preview controls ────────────────────────────────────
   function setupPreviewControls() {
     if (!previewVideo) return;
@@ -1116,7 +1099,6 @@
     form.addEventListener("submit", analyzeSelectedFile);
     uploadButton.addEventListener("click", () => fileInput.click());
     removeBtn?.addEventListener("click", clearSelectedSource);
-    detectorButtons.forEach((b) => b.addEventListener("click", () => setDetectorMode(b.dataset.detector)));
 
     byId("open-settings")?.addEventListener("click", openDrawer);
     byId("open-help")?.addEventListener("click", openHelpModal);
@@ -1223,8 +1205,6 @@
         if (previewVideo.paused) previewVideo.play().catch(() => {}); else previewVideo.pause();
       });
     }
-
-    setDetectorMode(formField("enable_yolo")?.value === "true" ? "yolo" : "zone");
 
     renderEmptyState();
   }

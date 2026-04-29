@@ -24,7 +24,6 @@ class RiskEvent:
     bbox: tuple[int, int, int, int] | None
     reason: str
     object_id: int | None = None
-    llm_message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -147,4 +146,3 @@ def select_primary_event(events: list[RiskEvent]) -> RiskEvent:
     if not events:
         raise ValueError("At least one risk event is required.")
     return max(events, key=score_event)
-

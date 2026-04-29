@@ -1,4 +1,4 @@
-"""Monocular depth estimation for the real-time danger pipeline."""
+"""Monocular depth estimation for the zone-based risk pipeline."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from depth_project.depth_estimator import estimate_depth
-from depth_project.edge_detector import detect_edges
-from depth_project.texture_analyzer import analyze_texture
+from .depth_cues import estimate_depth
+from .edge_detector import detect_edges
+from .texture_analyzer import analyze_texture
 
 from .preprocess import PreprocessedFrame
 
@@ -30,7 +30,7 @@ def estimate_frame_depth(
 ) -> DepthResult:
     """Estimate a normalized near-depth map.
 
-    Current depth_project semantics treat larger values as nearer regions.
+    Current zone-risk semantics treat larger values as nearer regions.
     """
 
     edge_map = detect_edges(frame.enhanced_gray)
@@ -48,4 +48,3 @@ def estimate_frame_depth(
     )
     near_map = depth_map.astype(np.float32) / 255.0
     return DepthResult(raw_depth=raw_depth, depth_map=depth_map, near_map=near_map)
-

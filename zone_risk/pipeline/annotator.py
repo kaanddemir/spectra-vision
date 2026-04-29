@@ -1,4 +1,4 @@
-"""Draw risk information on video frames."""
+"""Draw zone-based risk information on video frames."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import cv2
 import numpy as np
 
 from .risk_calculator import RiskEvent
-from .vehicle_detector import Detection
 
 
 COLORS = {
@@ -19,16 +18,19 @@ COLORS = {
 def annotate_frame(
     frame_bgr: np.ndarray,
     primary_event: RiskEvent,
-    detections: list[Detection],
+    zone_events: list[RiskEvent],
 ) -> np.ndarray:
     output = frame_bgr.copy()
     color = COLORS.get(primary_event.state, (220, 220, 220))
 
-    for detection in detections:
-        x1, y1, x2, y2 = detection.bbox
-        cv2.rectangle(output, (x1, y1), (x2, y2), (100, 120, 140), 1)
-        label = f"{detection.label} {detection.confidence:.2f}"
-        cv2.putText(output, label, (x1, max(16, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 226, 235), 1)
+    for event in zone_events:
+        if event.bbox is None:
+            continue
+        x1, y1, x2, y2 = event.bbox
+        zone_color = COLORS.get(event.state, (100, 120, 140))
+        cv2.rectangle(output, (x1, y1), (x2, y2), zone_color, 1)
+        label = f"{event.zone} {event.state}"
+        cv2.putText(output, label, (x1 + 8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 226, 235), 1)
 
     if primary_event.bbox is not None:
         x1, y1, x2, y2 = primary_event.bbox
@@ -45,4 +47,3 @@ def annotate_frame(
     cv2.putText(output, detail, (24, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (232, 236, 241), 1, cv2.LINE_AA)
 
     return output
-

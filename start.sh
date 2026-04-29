@@ -11,13 +11,11 @@ else
 fi
 
 echo "========================================"
-echo "Starting Spectra Server..."
+echo "Starting Spectrum Server..."
 echo "========================================"
 
-# Set PYTHONPATH to include the base directory so realtime_danger can be imported
+# Set PYTHONPATH to include the base directory so zone_risk can be imported
 export PYTHONPATH="${DIR}:${PYTHONPATH}"
 
-# Change to depth_project directory and start uvicorn
-cd "${DIR}/depth_project"
 echo "Server will be available at: http://localhost:8000"
-python -m uvicorn app:app --host localhost --port 8000 --reload
+python -m uvicorn zone_risk.app:app --host localhost --port 8000 --reload

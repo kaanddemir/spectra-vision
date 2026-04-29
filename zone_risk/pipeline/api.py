@@ -1,4 +1,4 @@
-"""FastAPI-facing realtime danger analysis adapter."""
+"""FastAPI-facing zone-based risk analysis adapter."""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ import cv2
 import numpy as np
 
 
-from .annotator import annotate_frame
-from .depth_estimator import DepthResult, estimate_frame_depth
 from .fusion import fuse_frame_risk
-from .optical_flow import compute_velocity, flow_to_rgb
-from .preprocess import preprocess_frame
+from ..vision.depth_estimator import DepthResult, estimate_frame_depth
+from ..vision.optical_flow import compute_velocity, flow_to_rgb
+from ..vision.preprocess import preprocess_frame
+from .annotator import annotate_frame
 from .risk_calculator import RiskEvent, score_event
-from .vehicle_detector import Detection, VehicleDetector
 from .video_loader import VideoLoader
 
 
@@ -35,29 +34,14 @@ def _depth_rgb(depth: DepthResult) -> np.ndarray:
     return _to_rgb(colorized)
 
 
-def _region_overlay_rgb(frame_bgr: np.ndarray, detections: list[Detection], events: list[RiskEvent]) -> np.ndarray:
+def _region_overlay_rgb(frame_bgr: np.ndarray, events: list[RiskEvent]) -> np.ndarray:
     output = frame_bgr.copy()
     height, width = output.shape[:2]
-    if detections:
-        for detection in detections:
-            x1, y1, x2, y2 = detection.bbox
-            cv2.rectangle(output, (x1, y1), (x2, y2), (96, 165, 250), 2)
-            cv2.putText(
-                output,
-                detection.label,
-                (x1, max(16, y1 - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.48,
-                (230, 236, 245),
-                1,
-                cv2.LINE_AA,
-            )
-    else:
-        for x in (width // 3, 2 * width // 3):
-            cv2.line(output, (x, 0), (x, height), (96, 165, 250), 2)
-        labels = [("left", width // 6), ("center", width // 2), ("right", 5 * width // 6)]
-        for label, x in labels:
-            cv2.putText(output, label, (x - 28, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 236, 245), 1)
+    for x in (width // 3, 2 * width // 3):
+        cv2.line(output, (x, 0), (x, height), (96, 165, 250), 2)
+    labels = [("left", width // 6), ("center", width // 2), ("right", 5 * width // 6)]
+    for label, x in labels:
+        cv2.putText(output, label, (x - 28, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 236, 245), 1)
 
     for event in events:
         if event.bbox is None:
@@ -150,25 +134,20 @@ def _event_payload(
     }
 
 
-def analyze_realtime_video(
+def analyze_zone_video(
     video_path: str | Path,
     *,
     max_processed_frames: int,
     max_saved_events: int,
     resize_max_side: int,
     depth_every: int = 3,
-    detect_every: int = 3,
-    yolo_model: str = "yolov8s.pt",
-    enable_yolo: bool = True,
 ) -> dict[str, Any]:
-    """Run realtime danger analysis and return the UI-compatible result shape."""
+    """Run zone-based risk analysis and return the UI-compatible result shape."""
 
     loader = VideoLoader(video_path, max_frames=max_processed_frames)
-    detector = VehicleDetector(model_name=yolo_model, enabled=enable_yolo)
 
     previous_gray: np.ndarray | None = None
     last_depth: DepthResult | None = None
-    last_detections: list[Detection] = []
     saved_events: list[dict[str, Any]] = []
     timeline_rows: list[dict[str, Any]] = []
     processed_frames = 0
@@ -182,25 +161,21 @@ def analyze_realtime_video(
             if last_depth is None or video_frame.frame_index % max(depth_every, 1) == 0:
                 last_depth = estimate_frame_depth(frame)
 
-            if video_frame.frame_index % max(detect_every, 1) == 0:
-                last_detections = detector.detect(frame.bgr)
-
             primary_event, all_events = fuse_frame_risk(
                 frame_index=video_frame.frame_index,
                 timestamp_sec=video_frame.timestamp_sec,
                 depth=last_depth,
                 flow=flow,
-                detections=last_detections,
             )
 
 
-            annotated = annotate_frame(frame.bgr, primary_event, last_detections)
+            annotated = annotate_frame(frame.bgr, primary_event, all_events)
             event_payload = _event_payload(
                 event=primary_event,
                 all_events=all_events,
                 frame_bgr=frame.bgr,
                 annotated_bgr=annotated,
-                region_overlay_rgb=_region_overlay_rgb(frame.bgr, last_detections, all_events),
+                region_overlay_rgb=_region_overlay_rgb(frame.bgr, all_events),
                 depth_rgb=_depth_rgb(last_depth),
                 motion_rgb=flow_to_rgb(flow.flow),
             )
@@ -240,7 +215,7 @@ def analyze_realtime_video(
     peak_event = saved_events[0] if saved_events else None
     return {
         "media_type": "video",
-        "pipeline": "realtime_danger",
+        "pipeline": "zone_risk",
         "fps": loader.fps,
         "frame_count": loader.frame_count,
         "processed_frames": processed_frames,
@@ -249,7 +224,7 @@ def analyze_realtime_video(
         "events": saved_events,
         "peak_event": peak_event,
         "summary": None if peak_event is None else peak_event["heuristic_summary"],
-        "yolo_enabled": detector.enabled,
+        "analysis_mode": "zone",
     }
 
 

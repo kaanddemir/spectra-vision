@@ -1,10 +1,10 @@
 #!/bin/bash
-# This script stops the running Spectra server.
+# This script stops the running Spectrum server.
 
-echo "Stopping Spectra server..."
+echo "Stopping Spectrum server..."
 
-# Kill the uvicorn process that runs app:app
-if pkill -f "uvicorn app:app"; then
+# Kill the uvicorn process that runs the Spectrum app
+if pkill -f "uvicorn zone_risk.app:app"; then
     echo "Server stopped successfully."
 else
     echo "No running server found."

@@ -1,4 +1,4 @@
-"""FastAPI UI and API for realtime video danger analysis."""
+"""FastAPI UI and API for zone-based video risk analysis."""
 
 from __future__ import annotations
 
@@ -16,15 +16,15 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from realtime_danger.api import analyze_realtime_video
+from zone_risk.pipeline.api import analyze_zone_video
 
 
 VIDEO_TYPES = {"mp4", "mov", "avi", "mkv", "m4v"}
 
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR = BASE_DIR / "web" / "static"
 
-app = FastAPI(title="Spectra", version="1.0.0")
+app = FastAPI(title="Spectrum", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -205,9 +205,6 @@ def analyze_endpoint(
     max_saved_events: int = Form(6),
     resize_max_side: int = Form(768),
     depth_every: int = Form(3),
-    detect_every: int = Form(3),
-    enable_yolo: bool = Form(True),
-    yolo_model: str = Form("yolov8s.pt"),
 ) -> dict[str, Any]:
     if mode.strip().lower() != "video":
         raise HTTPException(status_code=400, detail="Only video analysis is supported.")
@@ -226,16 +223,12 @@ def analyze_endpoint(
             source_path = Path(temp_dir) / source_name
             source_path.write_bytes(upload_bytes)
 
-            result = analyze_realtime_video(
+            result = analyze_zone_video(
                 video_path=source_path,
                 max_processed_frames=max(1, int(max_processed_frames)),
                 max_saved_events=max(1, int(max_saved_events)),
                 resize_max_side=max(128, int(resize_max_side)),
                 depth_every=max(1, int(depth_every)),
-                detect_every=max(1, int(detect_every)),
-                yolo_model=yolo_model.strip() or "yolov8s.pt",
-                enable_yolo=bool(enable_yolo),
-
             )
     except HTTPException:
         raise

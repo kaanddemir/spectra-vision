@@ -1,4 +1,4 @@
-"""Frame preprocessing for real-time danger detection."""
+"""Frame preprocessing for zone-based risk detection."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from depth_project.preprocess import preprocess_image
+from .image_preprocess import preprocess_image
 
 
 @dataclass(frozen=True)
