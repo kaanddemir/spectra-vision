@@ -204,6 +204,8 @@ def analyze_endpoint(
     max_saved_events: int = Form(6),
     resize_max_side: int = Form(640),
     depth_every: int = Form(10),
+    start_sec: float = Form(0.0),
+    end_sec: float = Form(0.0),
 ) -> dict[str, Any]:
     if mode.strip().lower() != "video":
         raise HTTPException(status_code=400, detail="Only video analysis is supported.")
@@ -227,6 +229,8 @@ def analyze_endpoint(
                 max_saved_events=max(1, int(max_saved_events)),
                 resize_max_side=max(128, int(resize_max_side)),
                 depth_every=max(1, int(depth_every)),
+                start_sec=float(start_sec),
+                end_sec=float(end_sec) if float(end_sec) > 0 else None,
             )
     except HTTPException:
         raise

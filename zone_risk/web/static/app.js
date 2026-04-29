@@ -244,8 +244,8 @@
       if (!hasSrc) rEmpty.hidden = false;
       else img.hidden = false;
       if (switchingView) {
-        // KEEP video visible for road mode so player controls work
-        previewVideo.hidden = false;
+        // Hide video in road mode as requested
+        previewVideo.hidden = true;
         previewBlend.hidden = true;
       }
     } else if (mode === "motion") {
@@ -392,7 +392,16 @@
       meta.innerHTML = `<div>Duration: ${dur}</div><div>Est. Frames: ${estFrames}</div>`;
       meta.hidden = false;
     }
-    renderTimeline(null);
+    // Update temporal window constraints
+    const startInp = byId("start-time-input");
+    const endInp = byId("end-time-input");
+    if (startInp) startInp.max = String(previewVideo.duration);
+    if (endInp) {
+      endInp.max = String(previewVideo.duration);
+      endInp.value = String(previewVideo.duration);
+      const hidden = formField("end_sec");
+      if (hidden) hidden.value = String(previewVideo.duration);
+    }
 
     // Auto-set the max frames input to the total estimated frames
     const framesInput = document.querySelector('input[data-param="max_processed_frames"]');
@@ -402,6 +411,8 @@
       const hidden = formField("max_processed_frames");
       if (hidden) hidden.value = String(estFrames);
     }
+
+    renderTimeline(null);
   }
 
   // ─── stat row ─────────────────────────────────────────────
@@ -917,6 +928,14 @@
     setSelectedFile(null);
     setPreviewMedia("");
     renderEmptyState();
+
+    // Reset frames input to default
+    const input = byId("max-frames-input");
+    if (input) {
+      input.value = "180";
+      input.max = "360";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }
 
   // ─── settings drawer ─────────────────────────────────────
@@ -1086,7 +1105,11 @@
     byId("frames-max")?.addEventListener("click", () => {
       const input = byId("max-frames-input");
       if (input) {
-        input.value = "360";
+        let val = 360;
+        if (state.sourceMeta && state.sourceMeta.durationSec) {
+          val = Math.round(state.sourceMeta.durationSec * 30);
+        }
+        input.value = String(val);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
     });
@@ -1144,16 +1167,16 @@
             }
           }
 
-          // Center play button and player bar only in video and road mode
+          // Center play button and player bar only in original video mode
           const centerBtn = byId("center-play-btn");
           const playerBar = document.querySelector(".preview-bar");
-          const isVideoOrRoad = (state.activeMainView === "video" || state.activeMainView === "road");
+          const isVideoMode = (state.activeMainView === "video");
 
           if (centerBtn) {
-            centerBtn.classList.toggle("force-hide", !isVideoOrRoad);
+            centerBtn.classList.toggle("force-hide", !isVideoMode);
           }
           if (playerBar) {
-            playerBar.classList.toggle("force-hide", !isVideoOrRoad);
+            playerBar.classList.toggle("force-hide", !isVideoMode);
           }
 
           refreshEmptyStates(true);

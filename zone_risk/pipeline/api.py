@@ -190,10 +190,12 @@ def analyze_zone_video(
     max_saved_events: int,
     resize_max_side: int,
     depth_every: int = 10,
+    start_sec: float = 0.0,
+    end_sec: float | None = None,
 ) -> dict[str, Any]:
     """Run zone-based risk analysis and return the UI-compatible result shape."""
 
-    loader = VideoLoader(video_path, max_frames=max_processed_frames)
+    loader = VideoLoader(video_path, max_frames=max_processed_frames, start_sec=start_sec, end_sec=end_sec)
 
     previous_gray: np.ndarray | None = None
     last_depth: DepthResult | None = None

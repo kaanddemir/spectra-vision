@@ -20,9 +20,11 @@ class VideoFrame:
 class VideoLoader:
     """Small wrapper around OpenCV video capture."""
 
-    def __init__(self, source: str | Path, max_frames: int | None = None) -> None:
+    def __init__(self, source: str | Path, max_frames: int | None = None, start_sec: float = 0.0, end_sec: float | None = None) -> None:
         self.source = str(source)
         self.max_frames = max_frames
+        self.start_sec = start_sec
+        self.end_sec = end_sec
         self.capture = cv2.VideoCapture(self.source)
         if not self.capture.isOpened():
             raise RuntimeError(f"Failed to open video source: {self.source}")
@@ -32,10 +34,20 @@ class VideoLoader:
         self.width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
         self.height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
 
+        self.start_frame = 0
+        if self.start_sec > 0 and self.fps > 0:
+            self.start_frame = int(self.start_sec * self.fps)
+            self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
+
     def frames(self) -> Iterator[VideoFrame]:
-        frame_index = 0
+        frame_index = self.start_frame
         try:
-            while self.max_frames is None or frame_index < self.max_frames:
+            while self.max_frames is None or (frame_index - self.start_frame) < self.max_frames:
+                if self.end_sec and self.end_sec > 0:
+                    current_sec = frame_index / self.fps if self.fps > 0 else frame_index
+                    if current_sec > self.end_sec:
+                        break
+
                 ok, frame = self.capture.read()
                 if not ok:
                     break
