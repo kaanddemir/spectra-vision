@@ -33,7 +33,6 @@ def fuse_frame_risk(
             timestamp_sec=timestamp_sec,
             bbox=region.bbox,
             object_type=region.label,
-            detector_confidence=0.0,
             near_map=depth.near_map,
             magnitude_norm=flow.magnitude_norm,
             divergence_norm=flow.divergence_norm,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import io
-import json
 import tempfile
 import time
 from pathlib import Path
@@ -200,7 +199,6 @@ def health_head() -> Response:
 def analyze_endpoint(
     file: UploadFile = File(...),
     mode: str = Form("video"),
-
     max_processed_frames: int = Form(180),
     max_saved_events: int = Form(6),
     resize_max_side: int = Form(768),
@@ -213,7 +211,6 @@ def analyze_endpoint(
     upload_bytes = file.file.read()
     if not upload_bytes:
         raise HTTPException(status_code=400, detail="Upload is empty.")
-
 
     source_name = Path(file.filename or f"upload.{_extension(file.filename)}").name
 

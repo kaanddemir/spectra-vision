@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import cv2
 import numpy as np
@@ -12,11 +11,8 @@ import numpy as np
 @dataclass(frozen=True)
 class FlowResult:
     flow: np.ndarray
-    magnitude: np.ndarray
     magnitude_norm: np.ndarray
     divergence_norm: np.ndarray
-    mean_magnitude: float
-    p95_magnitude: float
 
 
 def _normalize_to_unit(values: np.ndarray) -> np.ndarray:
@@ -28,17 +24,14 @@ def _normalize_to_unit(values: np.ndarray) -> np.ndarray:
     return (values - min_value) / (max_value - min_value)
 
 
-def empty_flow(shape: Tuple[int, int]) -> FlowResult:
+def empty_flow(shape: tuple[int, int]) -> FlowResult:
     height, width = shape
     flow = np.zeros((height, width, 2), dtype=np.float32)
     zeros = np.zeros((height, width), dtype=np.float32)
     return FlowResult(
         flow=flow,
-        magnitude=zeros,
         magnitude_norm=zeros,
         divergence_norm=zeros,
-        mean_magnitude=0.0,
-        p95_magnitude=0.0,
     )
 
 
@@ -71,11 +64,8 @@ def compute_velocity(previous_gray: np.ndarray | None, current_gray: np.ndarray)
 
     return FlowResult(
         flow=flow.astype(np.float32),
-        magnitude=magnitude.astype(np.float32),
         magnitude_norm=_normalize_to_unit(magnitude),
         divergence_norm=_normalize_to_unit(divergence_positive),
-        mean_magnitude=float(np.mean(magnitude)),
-        p95_magnitude=float(np.percentile(magnitude, 95)),
     )
 
 
@@ -91,16 +81,3 @@ def flow_to_rgb(flow: np.ndarray) -> np.ndarray:
     hsv[..., 0] = (ang * 180 / np.pi / 2).astype(np.uint8)
     hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-
-
-def crop_stats(values: np.ndarray, bbox: tuple[int, int, int, int]) -> tuple[float, float]:
-    x1, y1, x2, y2 = bbox
-    x1 = max(0, min(values.shape[1], x1))
-    x2 = max(0, min(values.shape[1], x2))
-    y1 = max(0, min(values.shape[0], y1))
-    y2 = max(0, min(values.shape[0], y2))
-    if x2 <= x1 or y2 <= y1:
-        return 0.0, 0.0
-    crop = values[y1:y2, x1:x2]
-    return float(np.mean(crop)), float(np.percentile(crop, 85))
-

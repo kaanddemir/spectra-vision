@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import cv2
 import numpy as np
 
 
-def preprocess_image(image_rgb: np.ndarray, image_gray: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def preprocess_image(image_rgb: np.ndarray, image_gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Enhance luminance, denoise, and convert to LAB space.
 
     Args:
@@ -18,7 +16,6 @@ def preprocess_image(image_rgb: np.ndarray, image_gray: np.ndarray) -> Tuple[np.
     Returns:
         A tuple of:
             - CLAHE-enhanced grayscale image
-            - LAB image with enhanced luminance
             - Denoised RGB image reconstructed from the enhanced LAB image
     """
 
@@ -35,4 +32,4 @@ def preprocess_image(image_rgb: np.ndarray, image_gray: np.ndarray) -> Tuple[np.
     enhanced_lab = cv2.merge((enhanced_l, a_channel, b_channel))
     denoised_rgb = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
 
-    return enhanced_gray, enhanced_lab, denoised_rgb
+    return enhanced_gray, denoised_rgb

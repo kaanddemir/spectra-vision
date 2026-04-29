@@ -8,13 +8,12 @@ from typing import Any
 import cv2
 import numpy as np
 
-
 from .fusion import fuse_frame_risk
 from ..vision.depth_estimator import DepthResult, estimate_frame_depth
 from ..vision.optical_flow import compute_velocity, flow_to_rgb
 from ..vision.preprocess import preprocess_frame
 from .annotator import annotate_frame
-from .risk_calculator import RiskEvent, score_event
+from .risk_calculator import RiskEvent
 from .video_loader import VideoLoader
 
 
@@ -152,65 +151,60 @@ def analyze_zone_video(
     timeline_rows: list[dict[str, Any]] = []
     processed_frames = 0
 
-    try:
-        for video_frame in loader.frames():
-            frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
-            flow = compute_velocity(previous_gray, frame.gray)
-            previous_gray = frame.gray
+    for video_frame in loader.frames():
+        frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
+        flow = compute_velocity(previous_gray, frame.gray)
+        previous_gray = frame.gray
 
-            if last_depth is None or video_frame.frame_index % max(depth_every, 1) == 0:
-                last_depth = estimate_frame_depth(frame)
+        if last_depth is None or video_frame.frame_index % max(depth_every, 1) == 0:
+            last_depth = estimate_frame_depth(frame)
 
-            primary_event, all_events = fuse_frame_risk(
-                frame_index=video_frame.frame_index,
-                timestamp_sec=video_frame.timestamp_sec,
-                depth=last_depth,
-                flow=flow,
-            )
+        primary_event, all_events = fuse_frame_risk(
+            frame_index=video_frame.frame_index,
+            timestamp_sec=video_frame.timestamp_sec,
+            depth=last_depth,
+            flow=flow,
+        )
 
+        annotated = annotate_frame(frame.bgr, primary_event, all_events)
+        event_payload = _event_payload(
+            event=primary_event,
+            all_events=all_events,
+            frame_bgr=frame.bgr,
+            annotated_bgr=annotated,
+            region_overlay_rgb=_region_overlay_rgb(frame.bgr, all_events),
+            depth_rgb=_depth_rgb(last_depth),
+            motion_rgb=flow_to_rgb(flow.flow),
+        )
+        # Deduplicate events within 1.0 second window
+        new_score = score_event_payload(event_payload)
+        replaced = False
+        for i, saved in enumerate(saved_events):
+            if abs(saved["timestamp_sec"] - primary_event.timestamp_sec) <= 1.0:
+                if new_score > score_event_payload(saved):
+                    saved_events[i] = event_payload
+                replaced = True
+                break
 
-            annotated = annotate_frame(frame.bgr, primary_event, all_events)
-            event_payload = _event_payload(
-                event=primary_event,
-                all_events=all_events,
-                frame_bgr=frame.bgr,
-                annotated_bgr=annotated,
-                region_overlay_rgb=_region_overlay_rgb(frame.bgr, all_events),
-                depth_rgb=_depth_rgb(last_depth),
-                motion_rgb=flow_to_rgb(flow.flow),
-            )
-            # Deduplicate events within 1.0 second window
-            new_score = score_event_payload(event_payload)
-            replaced = False
-            for i, saved in enumerate(saved_events):
-                if abs(saved["timestamp_sec"] - primary_event.timestamp_sec) <= 1.0:
-                    if new_score > score_event_payload(saved):
-                        saved_events[i] = event_payload
-                    replaced = True
-                    break
-            
-            if not replaced:
-                saved_events.append(event_payload)
+        if not replaced:
+            saved_events.append(event_payload)
 
-            saved_events = sorted(saved_events, key=lambda item: score_event_payload(item), reverse=True)[:max_saved_events]
+        saved_events = sorted(saved_events, key=lambda item: score_event_payload(item), reverse=True)[:max_saved_events]
 
-            timeline_rows.append(
-                {
-                    "Frame": primary_event.frame_index,
-                    "Time (s)": round(primary_event.timestamp_sec, 2),
-                    "State": primary_event.state,
-                    "Band": BAND_BY_STATE.get(primary_event.state, "low"),
-                    "Zone": primary_event.zone,
-                    "Direction": primary_event.direction,
-                    "TTC (s)": primary_event.ttc_sec,
-                    "Near": primary_event.near_score,
-                    "Closing": primary_event.closing_speed,
-                }
-            )
-            processed_frames += 1
-
-    finally:
-        pass
+        timeline_rows.append(
+            {
+                "Frame": primary_event.frame_index,
+                "Time (s)": round(primary_event.timestamp_sec, 2),
+                "State": primary_event.state,
+                "Band": BAND_BY_STATE.get(primary_event.state, "low"),
+                "Zone": primary_event.zone,
+                "Direction": primary_event.direction,
+                "TTC (s)": primary_event.ttc_sec,
+                "Near": primary_event.near_score,
+                "Closing": primary_event.closing_speed,
+            }
+        )
+        processed_frames += 1
 
     peak_event = saved_events[0] if saved_events else None
     return {

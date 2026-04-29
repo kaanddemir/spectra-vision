@@ -80,7 +80,6 @@ def calculate_region_risk(
     timestamp_sec: float,
     bbox: tuple[int, int, int, int],
     object_type: str,
-    detector_confidence: float,
     near_map: np.ndarray,
     magnitude_norm: np.ndarray,
     divergence_norm: np.ndarray,

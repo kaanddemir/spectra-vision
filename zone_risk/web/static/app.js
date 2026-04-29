@@ -21,14 +21,12 @@
   const seekBar = document.querySelector("#seek-bar");
   const timeCurrent = document.querySelector("#time-current");
   const timeTotal = document.querySelector("#time-total");
-  const previewQuality = null;
 
   const previewStatus = document.querySelector("#preview-status");
 
   const state = {
     previewUrl: "",
     lastResult: null,
-    viewMode: "original",
     sourceMeta: null,
     analyzing: false,
 
@@ -36,10 +34,8 @@
     progressStart: 0,
     timelineRows: [],
     events: [],
-    peakMetrics: null,
     syncFollowVideo: true,
     activeMainView: "video",
-    bboxCrop: null,
   };
 
   const byId = (id) => document.getElementById(id);
@@ -114,13 +110,6 @@
     return "risk-low";
   };
 
-  const englishApproach = (approach) => {
-    if (!isReal(approach)) return MISSING;
-    const v = String(approach).toLowerCase();
-    if (v.includes("approach") || v.includes("clos")) return "Approaching";
-    if (v.includes("stable")) return "Stable";
-    return titleCase(approach) || MISSING;
-  };
   const englishLane = (lane) => {
     if (!isReal(lane)) return MISSING;
     const v = String(lane).toLowerCase();
@@ -157,10 +146,6 @@
     return "Normal traffic flow";
   };
 
-  // ─── toast / status (stubs – currently no-op) ────────────
-  function showToast() {}
-  function setStatus() {}
-
   // ─── preview / video ──────────────────────────────────────
   function setPreviewMedia(source) {
     const resolved = mediaSrc(source);
@@ -175,7 +160,6 @@
         if (img) { img.hidden = true; img.removeAttribute("src"); }
       });
       
-      previewQuality && (previewQuality.hidden = true);
       timeCurrent.textContent = "00:00";
       timeTotal.textContent = "00:00";
       seekBar.value = 0;
@@ -353,7 +337,6 @@
     state.sourceMeta = { durationSec: previewVideo.duration, width: w, height: h };
     timeTotal.textContent = dur;
     timeCurrent.textContent = "00:00";
-    if (previewQuality) previewQuality.hidden = true;
     
     // Estimate total frames (assume 30fps for UI placeholder)
     const estFrames = Math.round(previewVideo.duration * 30);
@@ -409,62 +392,6 @@
   }
 
 
-  function applyBboxCrop(img, container, bbox) {
-    if (!container) return;
-    container.classList.remove("is-cropped");
-    img.style.cssText = "";
-    if (!Array.isArray(bbox) || bbox.length < 4 || !img.naturalWidth || !img.naturalHeight) return;
-    const [x1, y1, x2, y2] = bbox.map(Number);
-    if (![x1, y1, x2, y2].every(Number.isFinite)) return;
-    const bboxW = Math.max(1, x2 - x1);
-    const bboxH = Math.max(1, y2 - y1);
-    const cw = container.clientWidth || 110;
-    const ch = container.clientHeight || 110;
-    const pad = 0.2; // 20% padding around bbox so it's not too tight
-    const targetW = bboxW * (1 + pad);
-    const targetH = bboxH * (1 + pad);
-    const scale = Math.min(cw / targetW, ch / targetH);
-    const cx = (x1 + x2) / 2;
-    const cy = (y1 + y2) / 2;
-    const left = cw / 2 - cx * scale;
-    const top = ch / 2 - cy * scale;
-    img.style.position = "absolute";
-    img.style.width = `${img.naturalWidth * scale}px`;
-    img.style.height = `${img.naturalHeight * scale}px`;
-    img.style.left = `${left}px`;
-    img.style.top = `${top}px`;
-    img.style.maxWidth = "none";
-    img.style.objectFit = "none";
-    container.classList.add("is-cropped");
-  }
-
-  // ─── Analysis Modal Control ──────────────────────────────
-  function openAnalysisModal(mode) {
-    const res = state.lastResult;
-    if (!res) return;
-    const src = res.images?.[mode];
-    if (!src) return;
-
-    const modal = byId("analysis-modal");
-    const modalImg = byId("modal-image");
-    const modalTitle = byId("modal-title");
-
-    const titles = {
-      depth: "Depth Map Detail",
-      motion: "Motion Flow Detail",
-      segmentation: "Segmentation Detail"
-    };
-
-    modalTitle.textContent = titles[mode] || "Analysis Detail";
-    modalImg.src = mediaSrc(src);
-    modal.hidden = false;
-  }
-
-  function closeAnalysisModal() {
-    const modal = byId("analysis-modal");
-    if (modal) modal.hidden = true;
-  }
-
   // ─── Zone Risk bars ──────────────────────────────────────
   function renderZoneBars(result) {
     const zones = result?.zoneMetrics || [];
@@ -496,20 +423,6 @@
     });
   }
 
-  function renderMotionMagnitude(mag) {
-    const textEl = byId("motion-current");
-    const barEl = byId("motion-bar-fill");
-    if (!textEl || !barEl) return;
-    if (mag === null) {
-      textEl.textContent = "0.0";
-      barEl.style.width = "0%";
-      return;
-    }
-    textEl.textContent = mag.toFixed(1);
-    const pct = clamp((mag / 40) * 100, 0, 100);
-    barEl.style.width = `${pct}%`;
-  }
-
   // ─── Timeline + event strip ──────────────────────────────
   function renderTimeline(result) {
     const events = result?.events || [];
@@ -530,17 +443,14 @@
     track.replaceChildren();
     const strip = byId("event-strip");
     strip.replaceChildren();
-    const countTag = byId("event-count");
 
     if (!events.length) {
       const e = document.createElement("div");
       e.className = "event-empty";
       e.textContent = "No events yet";
       strip.appendChild(e);
-      if (countTag) countTag.textContent = "0";
       return;
     }
-    if (countTag) countTag.textContent = events.length;
 
     events.forEach((ev, idx) => {
       const ts = num(ev.timestampSec, null);
@@ -656,7 +566,6 @@
   function renderTtcChart(result) {
     const path = byId("chart-line");
     const area = byId("chart-area");
-    const peakRiskEl = byId("stat-peak-risk");
     const avgTtcEl = byId("stat-avg-ttc");
     if (!path) return;
 
@@ -672,16 +581,13 @@
     if (!points.length) {
       path.setAttribute("d", "");
       area.setAttribute("d", "");
-      if (peakRiskEl) peakRiskEl.textContent = "—";
       if (avgTtcEl) avgTtcEl.textContent = "—";
       updateChartAxisX(totalDur || 1);
       return;
     }
 
     // Calculate stats on raw points
-    const minTtc = Math.min(...points.map(p => p.ttc));
     const avgTtc = points.reduce((acc, p) => acc + p.ttc, 0) / points.length;
-    if (peakRiskEl) peakRiskEl.textContent = `${minTtc.toFixed(1)}s`;
     if (avgTtcEl) avgTtcEl.textContent = `${avgTtc.toFixed(1)}s`;
 
     // Update consolidated statistics grid
@@ -775,7 +681,6 @@
     state.lastResult = result;
     state.timelineRows = result.timelineRows || [];
     state.events = result.events || [];
-    state.peakMetrics = result.metrics;
 
     setMiniMedia("depth", result.images.depth);
     setMiniMedia("segmentation", result.images.segmentation);
@@ -788,7 +693,6 @@
     renderRiskBannerFromMetrics(result.metrics);
 
     renderZoneBars(result);
-    renderMotionMagnitude(result.metrics.motionMagnitude);
     renderTimeline(result);
     renderTtcChart(result);
   }
@@ -797,7 +701,6 @@
     state.lastResult = null;
     state.timelineRows = [];
     state.events = [];
-    state.peakMetrics = null;
     setMiniMedia("depth", "");
     setMiniMedia("segmentation", "");
     setMiniMedia("motion", "");
@@ -806,7 +709,6 @@
     renderRiskBannerFromMetrics({ state: null, band: null, ttc: null, lane: null });
 
     renderZoneBars({ zoneMetrics: [] });
-    renderMotionMagnitude(null);
     renderTimeline({ events: [] });
     renderTtcChart({ timelineRows: [] });
 
@@ -886,7 +788,7 @@
   async function analyzeSelectedFile(event) {
     event?.preventDefault();
     if (!fileInput.files.length) {
-      showToast("Please select a video first.", "warning");
+      uploadButton?.focus();
       return;
     }
     if (state.analyzing) return;
@@ -923,7 +825,6 @@
     if (!file) { setPreviewMedia(""); state.sourceMeta = null; return; }
     state.previewUrl = URL.createObjectURL(file);
     setPreviewMedia(state.previewUrl);
-    setStatus("Source ready. Run the analysis.", false);
   }
   function clearSelectedSource() {
     if (state.analyzing) return;
@@ -952,11 +853,16 @@
   // ─── help modal ──────────────────────────────────────────
   function openHelpModal() {
     const modal = byId("help-modal");
-    if (modal) modal.hidden = false;
+    if (!modal) return;
+    modal.hidden = false;
+    void modal.offsetHeight;
+    modal.classList.add("is-open");
   }
   function closeHelpModal() {
     const modal = byId("help-modal");
-    if (modal) modal.hidden = true;
+    if (!modal) return;
+    modal.classList.remove("is-open");
+    setTimeout(() => { if (!modal.classList.contains("is-open")) modal.hidden = true; }, 400);
   }
 
   function applyPreset() {
@@ -1121,24 +1027,12 @@
     document.querySelectorAll("[data-drawer-close]").forEach((el) => el.addEventListener("click", closeDrawer));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
-    document.querySelectorAll(".mini-expand-btn").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openAnalysisModal(btn.dataset.view);
-      });
-    });
-
-    document.querySelectorAll("[data-modal-close]").forEach(el => {
-      el.addEventListener("click", closeAnalysisModal);
-    });
-
     document.querySelectorAll("[data-help-close]").forEach(el => {
       el.addEventListener("click", closeHelpModal);
     });
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        closeAnalysisModal();
         closeHelpModal();
       }
     });

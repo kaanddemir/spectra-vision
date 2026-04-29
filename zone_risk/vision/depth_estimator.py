@@ -15,7 +15,6 @@ from .preprocess import PreprocessedFrame
 
 @dataclass(frozen=True)
 class DepthResult:
-    raw_depth: np.ndarray
     depth_map: np.ndarray
     near_map: np.ndarray
 
@@ -35,7 +34,7 @@ def estimate_frame_depth(
 
     edge_map = detect_edges(frame.enhanced_gray)
     texture_map = analyze_texture(frame.enhanced_gray)
-    raw_depth, depth_map = estimate_depth(
+    depth_map = estimate_depth(
         frame.denoised_rgb,
         frame.enhanced_gray,
         texture_map,
@@ -47,4 +46,4 @@ def estimate_frame_depth(
         bilateral_sigma=bilateral_sigma,
     )
     near_map = depth_map.astype(np.float32) / 255.0
-    return DepthResult(raw_depth=raw_depth, depth_map=depth_map, near_map=near_map)
+    return DepthResult(depth_map=depth_map, near_map=near_map)

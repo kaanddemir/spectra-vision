@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import cv2
 import numpy as np
 
@@ -104,7 +102,7 @@ def estimate_depth(
     edge_weight: float = 0.20,
     atmosphere_weight: float = 0.15,
     bilateral_sigma: int = 75,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """Fuse classical monocular cues into a depth estimate.
 
     Args:
@@ -119,9 +117,7 @@ def estimate_depth(
         bilateral_sigma: Bilateral filter strength for post-processing.
 
     Returns:
-        A tuple of:
-            - Raw fused depth map as float32 in [0, 1]
-            - Final uint8 depth map in [0, 255]
+        Final uint8 depth map in [0, 255].
     """
 
     weights = np.array(
@@ -138,16 +134,16 @@ def estimate_depth(
     edge_cue = _normalize_to_unit(edge_map)
     atmospheric_cue = _compute_atmospheric_near_cue(image_gray)
 
-    raw_depth = (
+    fused_depth = (
         weights[0] * texture_cue
         + weights[1] * position_cue
         + weights[2] * edge_cue
         + weights[3] * atmospheric_cue
     ).astype(np.float32)
-    raw_depth = _normalize_to_unit(raw_depth)
+    fused_depth = _normalize_to_unit(fused_depth)
 
     bilateral_filtered = cv2.bilateralFilter(
-        raw_depth,
+        fused_depth,
         d=9,
         sigmaColor=float(bilateral_sigma),
         sigmaSpace=float(bilateral_sigma),
@@ -158,4 +154,4 @@ def estimate_depth(
     guided = _normalize_to_unit(guided)
     final_depth = np.clip(guided * 255.0, 0, 255).astype(np.uint8)
 
-    return raw_depth.astype(np.float32), final_depth
+    return final_depth

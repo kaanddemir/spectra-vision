@@ -526,9 +526,6 @@
     </div>
   </div>
 
-  <!-- ─── Toast container ──────────────────────────────────── -->
-  <div id="toast-container" class="toast-container" aria-live="assertive" aria-atomic="false"></div>
-
   <!-- Help Modal for Zone Risk -->
   <div class="help-modal" id="help-modal" hidden>
     <div class="modal-backdrop" data-help-close></div>
@@ -598,11 +595,13 @@
             </div>
             <div class="help-step">
               <div class="step-num">06</div>
-              <h5>Annotation & Response</h5>
-              <p>The selected risk event, overlays, depth map, motion map, timeline, and zone metrics are returned to the dashboard.</p>
+              <h5>Annotation, Response & Output</h5>
+              <p>The dashboard receives overlays, maps, timeline, and zone metrics; the CLI path can also write annotated video and JSONL output.</p>
               <div class="step-files">
                 <code>zone_risk/pipeline/annotator.py</code>
                 <code>zone_risk/pipeline/api.py</code>
+                <code>zone_risk/pipeline/video_writer.py</code>
+                <code>zone_risk/pipeline/main.py</code>
                 <code>zone_risk/app.py</code>
               </div>
             </div>
@@ -676,19 +675,6 @@
     </div>
   </div>
 
-  <!-- Modal for expanded maps -->
-  <div class="analysis-modal" id="analysis-modal" hidden>
-    <div class="modal-backdrop" data-modal-close></div>
-    <div class="modal-content">
-      <header class="modal-header">
-        <h3 id="modal-title">Analysis Detail</h3>
-        <button class="modal-close" data-modal-close>&times;</button>
-      </header>
-      <div class="modal-body">
-        <img id="modal-image" src="" alt="Expanded View">
-      </div>
-    </div>
-  </div>
 </body>
 
 </html>
