@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Spectra · Hazard Detection</title>
+    <link rel="stylesheet" href="/static/style.css?v=128">
+    <script src="/static/app.js?v=118" defer></script>
+  </head>
+  <body>
+    <svg class="icon-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="icon-shield" viewBox="0 0 24 24">
+        <path d="M12 3 4 6v6c0 4.6 3.2 8.4 8 9 4.8-.6 8-4.4 8-9V6l-8-3Z"/>
+        <path d="m9.5 12 1.8 1.8L15 10.4"/>
+      </symbol>
+      <symbol id="icon-upload" viewBox="0 0 24 24">
+        <path d="M5 15v3.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V15"/>
+        <path d="M12 4v11"/>
+        <path d="m7.5 8.5 4.5-4.5 4.5 4.5"/>
+      </symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24">
+        <path d="M5 15v3.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V15"/>
+        <path d="M12 4v11"/>
+        <path d="m7.5 10.5 4.5 4.5 4.5-4.5"/>
+      </symbol>
+      <symbol id="icon-stop" viewBox="0 0 24 24">
+        <rect x="6" y="6" width="12" height="12" rx="1.5"/>
+      </symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24">
+        <path d="M7 5v14l12-7L7 5Z"/>
+      </symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24">
+        <rect x="6" y="5" width="4" height="14" rx="1"/>
+        <rect x="14" y="5" width="4" height="14" rx="1"/>
+      </symbol>
+      <symbol id="icon-alert" viewBox="0 0 24 24">
+        <path d="M12 3 2.6 20h18.8L12 3Z"/>
+        <path d="M12 9v6"/>
+        <path d="M12 17.5h.01"/>
+      </symbol>
+      <symbol id="icon-info" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 10v6"/>
+        <path d="M12 7h.01"/>
+      </symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24">
+        <path d="m5 12 5 5L19 7"/>
+      </symbol>
+      <symbol id="icon-check-circle" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="m8 12 3 3 5-6"/>
+      </symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24">
+        <path d="M6 6l12 12"/>
+        <path d="M18 6 6 18"/>
+      </symbol>
+      <symbol id="icon-expand" viewBox="0 0 24 24">
+        <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4"/>
+      </symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24">
+        <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2a2 2 0 0 1-4 0V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H2.8a2 2 0 0 1 0-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7A2 2 0 0 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2a2 2 0 0 1 4 0V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z"/>
+      </symbol>
+      <symbol id="icon-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 7v5l3.5 2"/>
+      </symbol>
+      <symbol id="icon-list" viewBox="0 0 24 24">
+        <path d="M8 6h12M8 12h12M8 18h12"/>
+        <circle cx="4" cy="6" r="1"/>
+        <circle cx="4" cy="12" r="1"/>
+        <circle cx="4" cy="18" r="1"/>
+      </symbol>
+      <symbol id="icon-robot" viewBox="0 0 24 24">
+        <rect x="4" y="8" width="16" height="11" rx="2.5"/>
+        <path d="M12 4v4"/>
+        <circle cx="9" cy="13" r="1.2"/>
+        <circle cx="15" cy="13" r="1.2"/>
+        <path d="M9 17h6"/>
+        <path d="M2 13v3M22 13v3"/>
+      </symbol>
+      <symbol id="icon-car" viewBox="0 0 24 24">
+        <path d="m5 12 1.7-5h10.6l1.7 5"/>
+        <path d="M4 12h16v6H4v-6Z"/>
+        <path d="M7 18v2m10-2v2"/>
+        <circle cx="7.5" cy="15.5" r="1"/>
+        <circle cx="16.5" cy="15.5" r="1"/>
+      </symbol>
+      <symbol id="icon-lane" viewBox="0 0 24 24">
+        <path d="M7 20 10 4M17 20 14 4M12 20v-3M12 13v-2M12 7V4"/>
+      </symbol>
+      <symbol id="icon-zones" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="6" height="14" rx="1"/>
+        <rect x="9.5" y="5" width="5" height="14" rx="1"/>
+        <rect x="15" y="5" width="6" height="14" rx="1"/>
+      </symbol>
+      <symbol id="icon-pulse" viewBox="0 0 24 24">
+        <path d="M3 12h4l2-7 4 14 2-7h6"/>
+      </symbol>
+      <symbol id="icon-chevron-down" viewBox="0 0 24 24">
+        <path d="m6 9 6 6 6-6"/>
+      </symbol>
+      <symbol id="icon-chevron-right" viewBox="0 0 24 24">
+        <path d="m9 18 6-6-6-6"/>
+      </symbol>
+      <symbol id="icon-scan-play" viewBox="0 0 24 24">
+        <path d="M4 7V5.5A1.5 1.5 0 0 1 5.5 4H7"/>
+        <path d="M17 4h1.5A1.5 1.5 0 0 1 20 5.5V7"/>
+        <path d="M20 17v1.5a1.5 1.5 0 0 1-1.5 1.5H17"/>
+        <path d="M7 20H5.5A1.5 1.5 0 0 1 4 18.5V17"/>
+        <path d="M9 8.5v7l6-3.5-6-3.5Z"/>
+        <path d="M4 12h3"/>
+        <path d="M17 12h3"/>
+      </symbol>
+      <symbol id="icon-help" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+        <path d="M12 17h.01"/>
+      </symbol>
+    </svg>
+
+    <form id="analysis-form" class="hidden-form" autocomplete="off">
+      <input id="source-file" name="file" type="file" accept=".mp4,.mov,.avi,.mkv,.m4v">
+      <input type="hidden" name="mode" value="video">
+      <input type="hidden" name="enable_yolo" value="false">
+      <input type="hidden" name="yolo_model" value="yolov8s.pt">
+      <input type="hidden" name="max_processed_frames" value="180">
+      <input type="hidden" name="depth_every" value="3">
+      <input type="hidden" name="detect_every" value="3">
+    </form>
+
+    <div class="app-shell">
+
+      <!-- ─── Top header ─────────────────────────────────────── -->
+      <header class="app-header">
+        <div class="brand-block">
+          <span class="brand-mark"><svg><use href="#icon-shield"></use></svg></span>
+          <div class="brand-text">
+            <h1>Spectra</h1>
+            <p>Neural Analysis</p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button id="open-help" class="header-btn" type="button" aria-label="How it works">
+            <svg><use href="#icon-help"></use></svg>
+            <span>How it works?</span>
+          </button>
+          <button id="open-settings" class="header-btn" type="button" aria-label="Analysis settings">
+            <svg><use href="#icon-settings"></use></svg>
+            <span>Settings</span>
+          </button>
+          <div class="file-block">
+            <button id="top-upload" class="header-btn" type="button">
+              <svg><use href="#icon-upload"></use></svg>
+              <span>Upload Video</span>
+            </button>
+
+            <div class="selected-file-group" id="selected-chip" hidden>
+              <span class="selected-file-name" id="selected-name">—</span>
+              <button id="remove-source" class="remove-btn" type="button" aria-label="Remove source">
+                <svg><use href="#icon-x"></use></svg>
+              </button>
+            </div>
+          </div>
+          <button id="run-analysis" class="header-btn primary-btn" type="submit" form="analysis-form">
+            <span>Start Analysis</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- ─── Main grid ──────────────────────────────────────── -->
+      <main class="dashboard">
+
+        <!-- ── LEFT column ───────────────────────────────────── -->
+        <section class="left-col">
+
+          <!-- Unified Analysis Card -->
+          <article class="card unified-analysis-card">
+            <figure id="frame-original" class="preview-frame">
+              <video id="visual-original-video" muted playsinline preload="metadata" hidden></video>
+              <img id="visual-blend" class="preview-overlay" alt="Risk overlay" hidden>
+
+              <div class="preview-status" id="preview-status" hidden></div>
+              <figcaption class="preview-empty" id="empty-video">No video uploaded</figcaption>
+              <figcaption class="preview-empty" id="empty-depth" hidden>No depth data available</figcaption>
+              <figcaption class="preview-empty" id="empty-motion" hidden>No motion data available</figcaption>
+
+              <!-- Center play button -->
+              <button class="center-play-btn" id="center-play-btn" type="button" aria-label="Play">
+                <svg><use href="#icon-play"></use></svg>
+              </button>
+
+              <div class="side-bar-dock">
+                <div class="side-bar-toolbar">
+                  <button class="side-bar-btn" data-toggle="side-panel-info" title="Video Info">
+                    <svg><use href="#icon-info"></use></svg>
+                  </button>
+                  <button class="side-bar-btn" data-toggle="side-panel-legend" title="Road Tracking">
+                    <svg><use href="#icon-lane"></use></svg>
+                  </button>
+                  <div class="side-bar-sep"></div>
+                  <button class="side-bar-btn is-active" data-view="video" title="Original Video">
+                    <svg><use href="#icon-car"></use></svg>
+                  </button>
+                  <button class="side-bar-btn" data-view="depth" title="Depth Map View">
+                    <svg><use href="#icon-zones"></use></svg>
+                  </button>
+                  <button class="side-bar-btn" data-view="motion" title="Motion Flow View">
+                    <svg><use href="#icon-pulse"></use></svg>
+                  </button>
+                </div>
+                <div class="side-bar-panels">
+                  <div class="side-bar-panel" id="side-panel-info" hidden>
+                    <h6>Video Info</h6>
+                    <div class="preview-meta-v" id="selected-meta">
+                      <div>Duration: -</div>
+                      <div>Est. Frames: -</div>
+                    </div>
+                  </div>
+                  <div class="side-bar-panel" id="side-panel-legend" hidden>
+                    <h6>Road Tracking</h6>
+                    <div class="legend-list">
+                      <span><i class="dot lane"></i>Lane Marking</span>
+                      <span><i class="dot roi"></i>Road ROI</span>
+                      <span><i class="dot trace"></i>Predicted Path</span>
+                      <span><i class="dot detect"></i>Detected Object</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Extra Main Overlays -->
+              <img id="visual-depth-main" class="preview-overlay main-mode-overlay" alt="Depth map main" hidden>
+              <img id="visual-motion-main" class="preview-overlay main-mode-overlay" alt="Motion flow main" hidden>
+
+              <!-- Player bar overlay -->
+              <div class="preview-bar">
+                <button class="play-toggle" id="play-toggle" type="button" aria-label="Play / Pause">
+                  <svg class="ic-play"><use href="#icon-play"></use></svg>
+                  <svg class="ic-pause"><use href="#icon-pause"></use></svg>
+                </button>
+                <div class="seek-track">
+                  <input id="seek-bar" type="range" min="0" max="1000" value="0" step="1" aria-label="Video progress">
+                </div>
+                <span class="time-readout"><span id="time-current">00:00</span> / <span id="time-total">00:00</span></span>
+                <button class="bar-btn" id="preview-expand" type="button" aria-label="Fullscreen">
+                  <svg><use href="#icon-expand"></use></svg>
+                </button>
+              </div>
+            </figure>
+
+            <div class="timeline-content">
+              <header class="cockpit-header" style="border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); flex-direction: row; justify-content: space-between; align-items: center;">
+                <h2>Event Timeline</h2>
+                <div class="header-row"></div>
+              </header>
+              <div class="timeline-track">
+                <div class="timeline-axis" id="timeline-axis">
+                  <span>00:00</span>
+                  <span>00:01</span>
+                  <span>00:02</span>
+                  <span>00:03</span>
+                  <span>00:04</span>
+                  <span>00:05</span>
+                </div>
+                <div class="timeline-rail">
+                  <div class="timeline-events" id="timeline-events"></div>
+                  <div class="timeline-cursor" id="timeline-cursor" style="left: 0%"></div>
+                </div>
+              </div>
+
+            <div class="event-strip" id="event-strip">
+              <div class="event-empty">No events yet</div>
+            </div>
+            
+            <!-- Analysis details are integrated into the horizontal cards above -->
+            </div>
+          </article>
+
+        </section>
+
+        <!-- ── RIGHT column ──────────────────────────────────── -->
+        <aside class="right-col">
+
+          <!-- Right column starts here -->
+
+
+
+
+          
+          <!-- Risk banner -->
+          <article class="card risk-banner risk-none" id="risk-banner">
+            <header class="cockpit-header" style="flex-direction: row; justify-content: space-between; align-items: center;">
+              <h2>Risk Level</h2>
+              <div class="header-row">
+                <span id="risk-time-tag" class="detail-ts" hidden></span>
+              </div>
+            </header>
+            <div class="risk-banner-body">
+              <div class="risk-banner-upper">
+                <div class="risk-banner-main">
+                  <div class="risk-icon"><svg><use href="#icon-alert"></use></svg></div>
+                  <div class="risk-text">
+                    <h1 id="risk-band-main">—</h1>
+                    <p class="risk-ttc">TTC: <strong id="alert-ttc">—</strong></p>
+                    <p class="risk-subtitle" id="risk-subtitle">No analysis yet</p>
+                  </div>
+                </div>
+                <ul class="risk-legend">
+                  <li class="leg-danger"><i></i><span>DANGER</span><small>0.0 – 1.5s</small></li>
+                  <li class="leg-caution"><i></i><span>CAUTION</span><small>1.5 – 3.0s</small></li>
+                  <li class="leg-safe"><i></i><span>SAFE</span><small>&gt; 3.0s</small></li>
+                </ul>
+              </div>
+              
+              <div class="risk-banner-lower">
+                <ul class="zone-bars" id="zone-bars">
+                  <li class="zone-row" data-zone="left">
+                    <span class="zone-label">Left</span>
+                    <div class="zone-track"><span class="zone-fill" style="width:0%"></span></div>
+                    <span class="zone-value">—</span>
+                  </li>
+                  <li class="zone-row" data-zone="center">
+                    <span class="zone-label">Center</span>
+                    <div class="zone-track"><span class="zone-fill" style="width:0%"></span></div>
+                    <span class="zone-value">—</span>
+                  </li>
+                  <li class="zone-row" data-zone="right">
+                    <span class="zone-label">Right</span>
+                    <div class="zone-track"><span class="zone-fill" style="width:0%"></span></div>
+                    <span class="zone-value">—</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div class="risk-banner-chart">
+                <header class="chart-mini-header">
+                  <h3>Temporal Analysis</h3>
+                  <span></span>
+                </header>
+                <div class="chart-container">
+                  <div class="chart-y-axis">
+                    <span>6.0s</span>
+                    <span>4.0s</span>
+                    <span>2.0s</span>
+                    <span>0.0s</span>
+                  </div>
+                  <div class="chart-stage">
+                    <div class="chart-grid-bg"></div>
+                    <svg id="chart-svg" viewBox="0 0 400 150" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="ttc-area-grad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stop-color="#ef4444" stop-opacity="0.25"/>
+                          <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+                        </linearGradient>
+                      </defs>
+                      <line x1="0" y1="25"  x2="400" y2="25"  stroke="rgba(16,185,129,0.35)" stroke-width="1" stroke-dasharray="4 3"/>
+                      <line x1="0" y1="100" x2="400" y2="100" stroke="rgba(245,158,11,0.35)" stroke-width="1" stroke-dasharray="4 3"/>
+                      <line x1="0" y1="125" x2="400" y2="125" stroke="rgba(239,68,68,0.35)"  stroke-width="1" stroke-dasharray="4 3"/>
+                      <path id="chart-area" d="" fill="url(#ttc-area-grad)" stroke="none"/>
+                      <path id="chart-line" d="" fill="none" stroke="#ef4444" stroke-width="2" stroke-linejoin="round"/>
+                      <line id="chart-cursor" class="chart-cursor" x1="-4" y1="0" x2="-4" y2="150" stroke="white" stroke-width="1.5" opacity="0"/>
+                    </svg>
+                  </div>
+                  <div class="chart-x-axis" id="chart-axis-x"></div>
+                  <div class="chart-annotations">
+                    <span class="ann-safe">SAFE</span>
+                    <span class="ann-caution">CAUTION</span>
+                    <span class="ann-danger">DANGER</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="analysis-stats">
+                <header class="chart-mini-header" style="border-top: 1px solid var(--border-soft); padding-top: 15px; margin-top: 5px;">
+                  <h3>Analysis Statistics</h3>
+                </header>
+                <div class="stats-grid">
+                  <div class="stat-item">
+                    <span class="stat-label">Total Events</span>
+                    <span class="stat-value" id="stat-total-events">—</span>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-label">Avg TTC</span>
+                    <span class="stat-value" id="stat-avg-ttc">—</span>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-label">Test 3</span>
+                    <span class="stat-value" id="stat-test-3">—</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </article>
+
+        </aside>
+      </main>
+    </div>
+
+    <!-- ─── Settings drawer ──────────────────────────────────── -->
+    <div id="settings-drawer" class="settings-drawer" hidden>
+      <div class="drawer-backdrop" data-drawer-close></div>
+      <aside class="drawer-panel">
+        <header>
+          <h2>Analysis Settings</h2>
+          <button class="drawer-close" type="button" data-drawer-close aria-label="Close">
+            <svg><use href="#icon-x"></use></svg>
+          </button>
+        </header>
+        <div class="drawer-body">
+          <div class="drawer-section">
+            <div class="drawer-section-header">
+              <h3>Configuration</h3>
+              <span class="info-tip">
+                <svg><use href="#icon-info"></use></svg>
+                <div class="tooltip-content">
+                  Analysis preset selection for balancing speed and precision.
+                </div>
+              </span>
+            </div>
+            <label class="drawer-row">
+              <span>Analysis Preset</span>
+              <select id="preset-picker">
+                <option value="balanced">Balanced (Default)</option>
+                <option value="fast">Fast (Lower Precision)</option>
+                <option value="precision">High Precision (Slower)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="drawer-section">
+            <div class="drawer-section-header">
+              <h3>Detection Engine</h3>
+              <span class="info-tip">
+                <svg><use href="#icon-info"></use></svg>
+                <div class="tooltip-content">
+                  Choose between neural architectures for object detection.
+                </div>
+              </span>
+            </div>
+            <div class="detector-toggle">
+              <button class="detector-choice" type="button" data-detector="yolo" aria-pressed="false" disabled title="Currently unavailable">
+                <svg><use href="#icon-car"></use></svg>
+                <span>YOLO v8</span>
+              </button>
+              <button class="detector-choice active" type="button" data-detector="zone" aria-pressed="true">
+                <svg><use href="#icon-zones"></use></svg>
+                <span>Zone Flow</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="drawer-section">
+            <div class="drawer-section-header">
+              <h3>Fine-tuning</h3>
+              <span class="info-tip">
+                <svg><use href="#icon-info"></use></svg>
+                <div class="tooltip-content">
+                  <div class="tip-row"><strong>Frames:</strong> Max frames to process from start.</div>
+                  <div class="tip-row"><strong>Depth:</strong> Frequency of depth generation.</div>
+                  <div class="tip-row"><strong>Detect:</strong> Frequency of object detection.</div>
+                </div>
+              </span>
+            </div>
+            <label class="drawer-row">
+              <span>Max Processed Frames</span>
+              <div class="input-with-shortcuts">
+                <input id="max-frames-input" data-param="max_processed_frames" type="number" min="1" step="1" value="180">
+                <div class="input-shortcuts">
+                  <button type="button" class="shortcut-btn" id="frames-min">MIN</button>
+                  <button type="button" class="shortcut-btn" id="frames-max">MAX</button>
+                </div>
+              </div>
+            </label>
+            
+            <label class="drawer-row">
+              <span>Depth Sampling</span>
+              <div class="segmented-control" data-param="depth_every">
+                <button type="button" class="segmented-btn" data-value="1">1x</button>
+                <button type="button" class="segmented-btn" data-value="2">2x</button>
+                <button type="button" class="segmented-btn active" data-value="3">3x</button>
+                <button type="button" class="segmented-btn" data-value="5">5x</button>
+                <button type="button" class="segmented-btn" data-value="10">10x</button>
+              </div>
+            </label>
+
+            <label class="drawer-row">
+              <span>Detection Sampling</span>
+              <div class="segmented-control" data-param="detect_every">
+                <button type="button" class="segmented-btn" data-value="1">1x</button>
+                <button type="button" class="segmented-btn" data-value="2">2x</button>
+                <button type="button" class="segmented-btn active" data-value="3">3x</button>
+                <button type="button" class="segmented-btn" data-value="5">5x</button>
+                <button type="button" class="segmented-btn" data-value="10">10x</button>
+              </div>
+            </label>
+          </div>
+
+
+
+        </div>
+      </aside>
+    </div>
+
+    <!-- ─── Analysis progress popover ────────────────────────── -->
+    <div id="analysis-progress" class="analysis-progress" hidden>
+      <div class="ap-header">
+        <span id="ap-label" class="ap-label">Analyzing</span>
+        <span id="ap-timer" class="ap-timer">0.0s</span>
+      </div>
+      <p id="ap-status" class="ap-status">Preparing…</p>
+      <div class="ap-bar"><div class="ap-fill"></div></div>
+    </div>
+
+    <!-- ─── Toast container ──────────────────────────────────── -->
+    <div id="toast-container" class="toast-container" aria-live="assertive" aria-atomic="false"></div>
+
+    <!-- Help Modal for Zone Flow -->
+    <div class="help-modal" id="help-modal" hidden>
+      <div class="modal-backdrop" data-help-close></div>
+      <div class="help-content">
+        <header class="help-header">
+          <div class="help-title-group">
+            <div class="help-icon-main"><svg><use href="#icon-help"></use></svg></div>
+            <div>
+              <h3>How Zone Flow Works</h3>
+            </div>
+          </div>
+          <button class="modal-close" data-help-close>&times;</button>
+        </header>
+        
+        <div class="help-body">
+          <section class="help-section">
+            <h4>Processing Pipeline</h4>
+            <div class="help-steps">
+              <div class="help-step">
+                <div class="step-num">01</div>
+                <h5>Loading & Pre-processing</h5>
+                <p>Frames are loaded and normalized for velocity analysis.</p>
+                <div class="step-files">
+                  <code>video_loader.py</code>
+                  <code>preprocess.py</code>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="step-num">02</div>
+                <h5>Optical Flow</h5>
+                <p>Calculates dense pixel-level motion vectors using Farneback's algorithm.</p>
+                <div class="step-files">
+                  <code>optical_flow.py</code>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="step-num">03</div>
+                <h5>Depth Estimation</h5>
+                <p>A neural estimator predicts the nearness (inverse depth) of every pixel.</p>
+                <div class="step-files">
+                  <code>depth_estimator.py</code>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="step-num">04</div>
+                <h5>Risk Fusion & TTC</h5>
+                <p>Combines motion and depth to calculate Time-to-Collision (TTC).</p>
+                <div class="step-files">
+                  <code>fusion.py</code>
+                  <code>risk_calculator.py</code>
+                </div>
+              </div>
+              <div class="help-step">
+                <div class="step-num">05</div>
+                <h5>Annotation & UI</h5>
+                <p>Results are visualized and sent to the dashboard via API.</p>
+                <div class="step-files">
+                  <code>annotator.py</code>
+                  <code>api.py</code>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="help-grid">
+            <section class="help-section">
+              <div class="help-section-header">
+                <h4>Logic Details</h4>
+              </div>
+              <div class="logic-grid">
+                <div class="logic-card">
+                  <h5>Zone Mapping</h5>
+                  <p>When autonomous object detection (YOLO) is disabled, the system segments the field of view into three distinct monitoring zones:</p>
+                  <div class="zone-visual-mini">
+                    <div class="zv-bar">
+                      <div class="zv-seg">Left<span>0 - 1/3</span></div>
+                      <div class="zv-seg highlight">Center<span>1/3 - 2/3</span></div>
+                      <div class="zv-seg">Right<span>2/3 - 1</span></div>
+                    </div>
+                  </div>
+                  <p class="logic-note">Spatial risk is analyzed by aggregating depth and motion vectors within these coordinate boundaries.</p>
+                </div>
+                <div class="logic-card">
+                  <h5>Risk Scoring</h5>
+                  <p>A weighted fusion algorithm determines the overall hazard level by combining spatial and temporal metrics:</p>
+                  <div class="formula-box">
+                    <div class="formula-main">
+                      <span class="f-res">Hazard</span>
+                      <span class="f-op">=</span>
+                      <span class="f-term">0.6 <small>Nearness</small></span>
+                      <span class="f-op">+</span>
+                      <span class="f-term">0.4 <small>Speed</small></span>
+                    </div>
+                  </div>
+                  <div class="formula-legend">
+                    <span title="Inverse depth: 1.0 is touching camera">Nearness: Depth proximity</span>
+                    <span title="Rate of optical expansion">Speed: Closing velocity</span>
+                  </div>
+                </div>
+                <div class="logic-card">
+                  <h5>Alert Thresholds</h5>
+                  <p>System triggers critical events based on the predicted Time-to-Collision (TTC) window:</p>
+                  <div class="threshold-stack">
+                    <div class="t-row is-danger">
+                      <div class="t-dot"></div>
+                      <span class="t-label">DANGER</span>
+                      <span class="t-val">&lt; 1.5s</span>
+                    </div>
+                    <div class="t-row is-caution">
+                      <div class="t-dot"></div>
+                      <span class="t-label">CAUTION</span>
+                      <span class="t-val">1.5s - 3.0s</span>
+                    </div>
+                    <div class="t-row is-safe">
+                      <div class="t-dot"></div>
+                      <span class="t-label">SAFE</span>
+                      <span class="t-val">&gt; 3.0s</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        
+        <footer class="help-footer">
+          <button class="header-btn primary-btn" data-help-close style="width: auto; padding: 0 24px;">Got it</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Modal for expanded maps -->
+    <div class="analysis-modal" id="analysis-modal" hidden>
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="modal-title">Analysis Detail</h3>
+          <button class="modal-close" data-modal-close>&times;</button>
+        </header>
+        <div class="modal-body">
+          <img id="modal-image" src="" alt="Expanded View">
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

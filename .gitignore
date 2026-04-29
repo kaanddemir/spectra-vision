@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+.vscode/
+data/
+outputs/
+*.mp4
+*.avi
