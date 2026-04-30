@@ -11,6 +11,7 @@ from .fusion import compute_quick_risk, fuse_frame_risk
 from ..vision.depth_estimator import DepthResult, estimate_frame_depth
 from ..vision.optical_flow import compute_velocity
 from ..vision.preprocess import preprocess_frame
+from ..vision.road_roi import estimate_road_roi
 from .annotator import annotate_frame
 from .video_loader import VideoLoader
 from .video_writer import JsonlEventWriter, VideoWriter
@@ -27,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-side", type=int, default=640, help="Resize longest frame side before analysis.")
     parser.add_argument("--max-frames", type=int, default=None, help="Optional frame processing limit.")
     parser.add_argument("--depth-every", type=int, default=10, help="Run depth estimation every N frames.")
+    parser.add_argument("--enable-road-roi", action="store_true", help="Limit zone scoring to detected road/lane ROI.")
     return parser.parse_args()
 
 
@@ -47,6 +49,7 @@ def run(args: argparse.Namespace) -> dict[str, int | str]:
     try:
         for video_frame in loader.frames():
             frame = preprocess_frame(video_frame.bgr, max_side=args.max_side)
+            road_roi = estimate_road_roi(frame.bgr) if args.enable_road_roi else None
 
             if writer is None:
                 height, width = frame.bgr.shape[:2]
@@ -70,6 +73,7 @@ def run(args: argparse.Namespace) -> dict[str, int | str]:
                 timestamp_sec=video_frame.timestamp_sec,
                 depth=last_depth,
                 flow=flow,
+                road_roi=road_roi,
             )
 
             # 4. Smooth State Transitions (Hysteresis)

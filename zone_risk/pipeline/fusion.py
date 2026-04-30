@@ -8,6 +8,7 @@ from typing import Iterable
 
 from ..vision.depth_estimator import DepthResult
 from ..vision.optical_flow import FlowResult
+from ..vision.road_roi import RoadROI
 from .risk_calculator import RiskEvent, calculate_region_risk, select_primary_event
 
 
@@ -64,6 +65,7 @@ def fuse_frame_risk(
     timestamp_sec: float,
     depth: DepthResult,
     flow: FlowResult,
+    road_roi: RoadROI | None = None,
 ) -> tuple[RiskEvent, list[RiskEvent]]:
     height, width = depth.near_map.shape
     regions = list(zone_regions(width, height))
@@ -79,6 +81,7 @@ def fuse_frame_risk(
             divergence_norm=flow.divergence_norm,
             flow=flow.flow,
             object_id=region.id,
+            roi_mask=None if road_roi is None else road_roi.mask,
         )
         for region in regions
     ]

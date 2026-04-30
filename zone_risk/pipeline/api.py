@@ -13,6 +13,7 @@ from .fusion import compute_quick_risk, fuse_frame_risk
 from ..vision.depth_estimator import DepthResult, estimate_frame_depth
 from ..vision.optical_flow import compute_velocity, flow_to_rgb
 from ..vision.preprocess import preprocess_frame
+from ..vision.road_roi import RoadROI, estimate_road_roi, fallback_road_roi
 from .annotator import annotate_frame
 from .risk_calculator import RiskEvent
 from .video_loader import VideoLoader
@@ -53,52 +54,62 @@ def _region_overlay_rgb(frame_bgr: np.ndarray, events: list[RiskEvent]) -> np.nd
     return _to_rgb(output)
 
 
-def _road_tracking_rgb(frame_bgr: np.ndarray) -> np.ndarray:
-    """Generate a professional ADAS-style road tracking overlay."""
+def _road_tracking_rgb(frame_bgr: np.ndarray, road_roi: RoadROI | None = None) -> np.ndarray:
+    """Generate an ADAS-style road tracking overlay from the active ROI."""
+
+    road_roi = road_roi or fallback_road_roi(frame_bgr.shape)
     output = frame_bgr.copy()
     h, w = output.shape[:2]
     overlay = output.copy()
 
-    # 1. Draw Road ROI (Trapezoid)
-    # Define a perspective-based road region
-    pts = np.array([
-        [int(w * 0.42), int(h * 0.60)], # Top-left
-        [int(w * 0.58), int(h * 0.60)], # Top-right
-        [int(w * 0.95), h],            # Bottom-right
-        [int(w * 0.05), h]             # Bottom-left
-    ], np.int32)
-    
-    cv2.fillPoly(overlay, [pts], (180, 140, 40)) # Soft blue-ish gold or amber? Let's use a tech-blue (180, 100, 40 is BGR)
+    pts = road_roi.polygon.astype(np.int32)
+    cv2.fillPoly(overlay, [pts], (180, 140, 40))
     cv2.addWeighted(overlay, 0.25, output, 0.75, 0, output)
+    cv2.polylines(output, [pts], True, (180, 180, 120), 1, cv2.LINE_AA)
 
-    # 2. Draw Lane Lines
-    # Left lane
-    cv2.line(output, (int(w * 0.42), int(h * 0.60)), (int(w * 0.10), h), (255, 255, 255), 2, cv2.LINE_AA)
-    # Right lane
-    cv2.line(output, (int(w * 0.58), int(h * 0.60)), (int(w * 0.90), h), (255, 255, 255), 2, cv2.LINE_AA)
+    for line in (road_roi.left_line, road_roi.right_line):
+        if line is None:
+            continue
+        x1, y1, x2, y2 = line
+        cv2.line(output, (x1, y1), (x2, y2), (255, 255, 255), 2, cv2.LINE_AA)
     
-    # 3. Predicted Path (Center Curve)
     path_pts = []
+    left_line = road_roi.left_line
+    right_line = road_roi.right_line
     for i in range(10):
         t = i / 9.0
-        curr_y = int(h * (0.60 + t * 0.40))
-        # Add a slight curve for aesthetics
-        curve = np.sin(t * 2) * 15
-        curr_x = int(w * 0.5 + curve)
+        curr_y = int(h * (0.60 + t * 0.39))
+        if left_line is not None and right_line is not None:
+            lx = _line_x_at_y(left_line, curr_y)
+            rx = _line_x_at_y(right_line, curr_y)
+            curr_x = int((lx + rx) / 2)
+        else:
+            curr_x = int(w * 0.5)
         path_pts.append([curr_x, curr_y])
     
     path_pts = np.array(path_pts, np.int32)
-    cv2.polylines(output, [path_pts], False, (0, 255, 0), 2, cv2.LINE_AA) # Green path
+    cv2.polylines(output, [path_pts], False, (0, 255, 0), 2, cv2.LINE_AA)
 
-    # 4. Horizontal markers
     for i in range(1, 4):
         dist_y = int(h * (0.60 + i * 0.10))
-        width_at_y = int(w * (0.16 + i * 0.20))
-        x_start = int(w * 0.5 - width_at_y / 2)
-        x_end = int(w * 0.5 + width_at_y / 2)
+        if left_line is not None and right_line is not None:
+            x_start = _line_x_at_y(left_line, dist_y)
+            x_end = _line_x_at_y(right_line, dist_y)
+        else:
+            width_at_y = int(w * (0.16 + i * 0.20))
+            x_start = int(w * 0.5 - width_at_y / 2)
+            x_end = int(w * 0.5 + width_at_y / 2)
         cv2.line(output, (x_start, dist_y), (x_end, dist_y), (200, 200, 200), 1, cv2.LINE_AA)
 
     return _to_rgb(output)
+
+
+def _line_x_at_y(line: tuple[int, int, int, int], y: int) -> int:
+    x1, y1, x2, y2 = line
+    if y2 == y1:
+        return int((x1 + x2) / 2)
+    t = (y - y1) / float(y2 - y1)
+    return int(round(x1 + ((x2 - x1) * t)))
 
 
 def _risk_score(event: RiskEvent) -> float:
@@ -135,6 +146,7 @@ def _event_payload(
     region_overlay_rgb: np.ndarray,
     depth_rgb: np.ndarray,
     motion_rgb: np.ndarray,
+    road_roi: RoadROI | None = None,
 ) -> dict[str, Any]:
     band = BAND_BY_STATE.get(event.state, "low")
     confidence_pct = round(event.confidence * 100.0, 1)
@@ -178,7 +190,7 @@ def _event_payload(
         "original_rgb": _to_rgb(frame_bgr),
         "depth_rgb": depth_rgb,
         "segmentation_rgb": region_overlay_rgb,
-        "road_rgb": _road_tracking_rgb(frame_bgr),
+        "road_rgb": _road_tracking_rgb(frame_bgr, road_roi),
         "motion_rgb": motion_rgb,
         "overlay_rgb": _to_rgb(annotated_bgr),
     }
@@ -204,6 +216,7 @@ def analyze_zone_video(
     max_saved_events: int,
     resize_max_side: int,
     depth_every: int = 10,
+    enable_road_roi: bool = False,
     start_sec: float = 0.0,
     end_sec: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -229,6 +242,7 @@ def analyze_zone_video(
 
     for video_frame in loader.frames():
         frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
+        road_roi = estimate_road_roi(frame.bgr) if enable_road_roi else fallback_road_roi(frame.bgr.shape)
         flow = compute_velocity(previous_gray, frame.gray)
         previous_gray = frame.gray
 
@@ -250,6 +264,7 @@ def analyze_zone_video(
             timestamp_sec=video_frame.timestamp_sec,
             depth=last_depth,
             flow=flow,
+            road_roi=road_roi if enable_road_roi else None,
         )
 
         # 4. Smooth State Transitions (Hysteresis)
@@ -267,6 +282,7 @@ def analyze_zone_video(
             region_overlay_rgb=_region_overlay_rgb(frame.bgr, all_events),
             depth_rgb=_depth_rgb(last_depth),
             motion_rgb=flow_to_rgb(flow.flow),
+            road_roi=road_roi,
         )
         # Deduplicate events within 1.0 second window
         new_score = score_event_payload(event_payload)

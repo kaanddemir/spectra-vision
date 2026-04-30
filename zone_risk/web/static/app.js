@@ -1378,6 +1378,14 @@
           const hidden = formField(key);
           if (hidden) hidden.value = String(input.value);
         });
+      } else if (input.type === "checkbox") {
+        const key = input.dataset.param;
+        const hidden = formField(key);
+        if (hidden) input.checked = String(hidden.value) === "1" || String(hidden.value).toLowerCase() === "true";
+        input.addEventListener("change", () => {
+          const field = formField(key);
+          if (field) field.value = input.checked ? "1" : "0";
+        });
       }
     });
 

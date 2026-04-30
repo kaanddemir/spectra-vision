@@ -1786,6 +1786,55 @@ svg {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.drawer-toggle-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 38px;
+}
+.toggle-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 26px;
+  cursor: pointer;
+}
+.toggle-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--panel-hi);
+  transition: background 200ms ease, border-color 200ms ease;
+}
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 200ms ease, background 200ms ease;
+}
+.toggle-switch input:checked + .toggle-track {
+  border-color: rgba(239,68,68,0.65);
+  background: rgba(239,68,68,0.24);
+}
+.toggle-switch input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(20px);
+  background: var(--red);
+}
+.toggle-switch input:focus-visible + .toggle-track {
+  box-shadow: 0 0 0 3px var(--red-soft);
+}
 .drawer-row select,
 .drawer-row input[type=password],
 .drawer-row input[type=number],

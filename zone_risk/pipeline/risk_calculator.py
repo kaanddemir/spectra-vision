@@ -85,6 +85,7 @@ def calculate_region_risk(
     divergence_norm: np.ndarray,
     flow: np.ndarray,
     object_id: int | None = None,
+    roi_mask: np.ndarray | None = None,
 ) -> RiskEvent:
     height, width = near_map.shape
     x1, y1, x2, y2 = bbox
@@ -104,10 +105,27 @@ def calculate_region_risk(
         velocity_crop = magnitude_norm[y1:y2, x1:x2]
         divergence_crop = divergence_norm[y1:y2, x1:x2]
         flow_x_crop = flow[y1:y2, x1:x2, 0]
-        near_score = float(np.percentile(near_crop, 80))
-        velocity_magnitude = float(np.percentile(velocity_crop, 80))
-        divergence = float(np.percentile(divergence_crop, 80))
-        flow_x_mean = float(np.mean(flow_x_crop))
+        if roi_mask is not None:
+            mask_crop = roi_mask[y1:y2, x1:x2]
+            if mask_crop.shape == near_crop.shape:
+                mask_crop = mask_crop.astype(bool)
+            else:
+                mask_crop = np.ones_like(near_crop, dtype=bool)
+        else:
+            mask_crop = np.ones_like(near_crop, dtype=bool)
+
+        valid_pixels = int(np.count_nonzero(mask_crop))
+        min_valid_pixels = max(16, int(mask_crop.size * 0.01))
+        if valid_pixels < min_valid_pixels:
+            near_score = 0.0
+            velocity_magnitude = 0.0
+            divergence = 0.0
+            flow_x_mean = 0.0
+        else:
+            near_score = float(np.percentile(near_crop[mask_crop], 80))
+            velocity_magnitude = float(np.percentile(velocity_crop[mask_crop], 80))
+            divergence = float(np.percentile(divergence_crop[mask_crop], 80))
+            flow_x_mean = float(np.mean(flow_x_crop[mask_crop]))
 
     closing_speed = float(np.clip((0.65 * velocity_magnitude) + (0.35 * divergence), 0.0, 1.0))
     ttc_sec = compute_ttc(near_score, closing_speed)

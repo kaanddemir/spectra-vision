@@ -138,6 +138,7 @@
     <input type="hidden" name="mode" value="video">
     <input type="hidden" name="max_processed_frames" value="180">
     <input type="hidden" name="depth_every" value="10">
+    <input type="hidden" name="enable_road_roi" value="0">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
   </form>
@@ -549,6 +550,14 @@
               <button type="button" class="segmented-btn active" data-value="10">10x</button>
             </div>
           </label>
+
+          <div class="drawer-row drawer-toggle-row">
+            <span>Dynamic Road ROI</span>
+            <label class="toggle-switch" aria-label="Dynamic Road ROI">
+              <input id="road-roi-toggle" data-param="enable_road_roi" type="checkbox">
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
         </div>
 
         <div class="drawer-section">
@@ -632,8 +641,7 @@
               <h5>Road & Lane Tracking</h5>
               <p>Dynamic detection of road boundaries and lane markers defines the Region of Interest (ROI) and filters non-threat background motion.</p>
               <div class="step-files">
-                <code>zone_risk/vision/road_tracker.py</code>
-                <code>zone_risk/vision/lane_detector.py</code>
+                <code>zone_risk/vision/road_roi.py</code>
               </div>
             </div>
             <div class="help-step">
