@@ -653,7 +653,7 @@
     const ts = num(ev.timestampSec, null);
     if (ts !== null) {
       seekPreviewVideo(ts);
-      applyTimelineStateAt(ts, { labelPrefix: `Event #${idx + 1}` });
+      applyTimelineStateAt(ts, { labelPrefix: "Live" });
     }
     
     // Highlighting active card
