@@ -2778,3 +2778,64 @@ svg {
 .json-pre::-webkit-scrollbar { width: 6px; height: 6px; }
 .json-pre::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; }
 .json-pre::-webkit-scrollbar-track { background: transparent; }
+
+/* ─── Help Logic Flow ────────────────────────────────────── */
+.logic-flow-mini {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0,0,0,0.2);
+  padding: 12px;
+  border-radius: 6px;
+  margin: 10px 0;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.lf-frames {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.f-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+}
+.f-dot.danger {
+  background: var(--red-hi);
+  box-shadow: 0 0 8px var(--red);
+  transform: scale(1.2);
+}
+.lf-label {
+  font-size: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.lf-arrow {
+  width: 20px; height: 1px;
+  background: var(--border-soft);
+  position: relative;
+}
+.lf-arrow::after {
+  content: '';
+  position: absolute;
+  right: 0; top: -2px;
+  border-left: 4px solid var(--border-soft);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}
+.lf-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.res-tag {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red-hi);
+  border-radius: 3px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  text-align: center;
+}

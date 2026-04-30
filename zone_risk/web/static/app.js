@@ -97,6 +97,11 @@
     }
     return undefined;
   };
+  const rowValue = (row, key, legacyKey) => {
+    if (!row) return undefined;
+    if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+    return legacyKey ? row[legacyKey] : undefined;
+  };
 
   const stateClass = (stateOrBand) => {
     const v = String(stateOrBand || "").toLowerCase();
@@ -352,26 +357,27 @@
 
   function normalizePayload(response) {
     const payload = cleanResponsePayload(response);
+    const metadata = payload?.metadata || {};
     const event = payload?.peakEvent || {};
     const rawImages = event.images || {};
     const sources = [event, payload];
 
-    const riskRaw = firstValue(sources, ["hazardScore", "riskScore", "risk_score"]);
+    const riskRaw = firstValue(sources, ["riskScore", "hazardScore", "risk_score"]);
     const riskNum = num(riskRaw, null);
     const riskScore = riskNum === null ? null : clamp(Math.round(riskNum <= 1 ? riskNum * 100 : riskNum), 0, 100);
-    const explicitBand = firstValue(sources, ["hazardBand", "riskBand", "riskLevel", "band"]);
+    const explicitBand = firstValue(sources, ["riskBand", "hazardBand", "riskLevel", "band"]);
     const riskState = firstValue(sources, ["riskState", "risk_state"]);
 
     const metrics = {
       riskScore,
       band: titleCase(explicitBand),
       state: riskState ? String(riskState).toUpperCase() : null,
-      ttc: num(firstValue(sources, ["estimatedTtcSec", "estimated_ttc_sec", "ttc"]), null),
+      ttc: num(firstValue(sources, ["ttcSec", "estimatedTtcSec", "estimated_ttc_sec", "ttc"]), null),
       nearScore: num(firstValue(sources, ["nearScore", "near_score"]), null),
       closingSpeed: num(firstValue(sources, ["closingSpeed", "closing_speed"]), null),
       objectType: titleCase(firstValue(sources, ["objectType", "object_type"])),
       approach: titleCase(firstValue(sources, ["approach"])),
-      lane: titleCase(firstValue(sources, ["lane", "primaryZone", "primary_zone"])),
+      lane: titleCase(firstValue(sources, ["zone", "lane", "primaryZone", "primary_zone"])),
       bbox: event.bbox || null,
       motionMagnitude: num(firstValue(sources, ["velocityMagnitude", "velocity_magnitude", "motionMagnitude", "motion_magnitude"]), null),
     };
@@ -402,18 +408,18 @@
         blend: rawImages.blend,
       },
       metrics,
-      elapsedSec: num(payload?.elapsedSec ?? payload?.elapsed_sec, null),
-      fps: num(payload?.fps, null),
-      frameCount: num(payload?.frameCount, null),
-      processedFrames: num(payload?.processedFrames, null),
-      sampledFrames: num(payload?.sampledFrames, null),
+      elapsedSec: num(metadata.elapsedSec ?? payload?.elapsedSec ?? payload?.elapsed_sec, null),
+      fps: num(metadata.fps ?? payload?.fps, null),
+      frameCount: num(metadata.frameCount ?? payload?.frameCount, null),
+      processedFrames: num(metadata.processedFrames ?? payload?.processedFrames, null),
+      sampledFrames: num(metadata.sampledFrames ?? payload?.sampledFrames, null),
       summary: event.summary || payload?.summary || null,
       reasons: Array.isArray(event.reasons) ? event.reasons : [],
       zoneMetrics: Array.isArray(event.zoneMetrics) ? event.zoneMetrics : [],
 
       events,
       timelineRows: Array.isArray(payload?.timelineRows) ? payload.timelineRows : [],
-      sourceName: payload?.sourceName || fileInput.files[0]?.name || null,
+      sourceName: metadata.sourceName || payload?.sourceName || fileInput.files[0]?.name || null,
     };
   }
 
@@ -530,7 +536,7 @@
         return;
       }
       const score = num(z.score, 0);
-      const ttc = num(z.estimated_ttc_sec, null);
+      const ttc = num(z.ttcSec ?? z.estimated_ttc_sec, null);
       const pct = clamp(Math.round(score * 100), 0, 100);
       fill.style.width = `${pct}%`;
       value.textContent = String(pct);
@@ -577,10 +583,10 @@
       const left = clamp((ts / totalDur) * 100, 0, 100);
       const dot = document.createElement("button");
       dot.type = "button";
-      const sc = stateClass(ev.riskState || ev.hazardBand);
+      const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
       dot.className = `timeline-event ev-${sc}`;
       dot.style.left = `${left}%`;
-      dot.title = `#${idx + 1} · ${formatSeconds(ts)} · ${ev.riskState || ev.hazardBand || ""}`;
+      dot.title = `#${idx + 1} · ${formatSeconds(ts)} · ${ev.riskState || ev.riskBand || ev.hazardBand || ""}`;
       dot.addEventListener("click", () => focusEvent(idx));
       
 
@@ -589,7 +595,7 @@
     });
 
     events.forEach((ev, idx) => {
-      const sc = stateClass(ev.riskState || ev.hazardBand);
+      const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
       const ts = num(ev.timestampSec, 0);
       const card = document.createElement("button");
       card.type = "button";
@@ -599,7 +605,7 @@
 
       const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || fallbackImages.original || fallbackImages.blend);
       const m = ev.metrics || ev || {};
-      const ttcVal = m.ttc !== undefined ? m.ttc : m.estimatedTtcSec;
+      const ttcVal = m.ttc !== undefined ? m.ttc : (m.ttcSec ?? m.estimatedTtcSec);
       const nearVal = num(m.nearScore, null);
       const speedVal = num(m.closingSpeed ?? m.velocityMagnitude, null);
 
@@ -611,7 +617,7 @@
           <div class="card-metrics-grid">
             <div class="metric-box m-risk">
               <span class="m-label">Status</span>
-              <span class="m-value" style="color:rgba(var(--evrgb),1);">${(ev.riskState || ev.hazardBand || "UNKNOWN").toUpperCase()}</span>
+              <span class="m-value" style="color:rgba(var(--evrgb),1);">${(ev.riskState || ev.riskBand || ev.hazardBand || "UNKNOWN").toUpperCase()}</span>
             </div>
             <div class="metric-box">
               <span class="m-label">Time</span>
@@ -677,7 +683,7 @@
 
     const rows = result?.timelineRows || [];
     const points = rows
-      .map((r) => ({ t: num(r["Time (s)"], null), ttc: num(r["TTC (s)"], null) }))
+      .map((r) => ({ t: num(rowValue(r, "timeSec", "Time (s)"), null), ttc: num(rowValue(r, "ttcSec", "TTC (s)"), null) }))
       .filter((p) => p.t !== null && p.ttc !== null && p.ttc >= 0)
       .sort((a, b) => a.t - b.t);
 
@@ -815,19 +821,21 @@
 
     const row = findTimelineRowAt(t);
     if (!row) return;
-    const rowTime = num(row["Time (s)"], t);
-    const stateLabel = row.State ? String(row.State).toUpperCase() : null;
+    const rowTime = num(rowValue(row, "timeSec", "Time (s)"), t);
+    const rowState = rowValue(row, "riskState", "State");
+    const stateLabel = rowState ? String(rowState).toUpperCase() : null;
     const sc = stateClass(stateLabel);
     applyRiskBannerState({
       stateLabel,
-      ttc: row["TTC (s)"],
-      lane: row.Zone,
+      ttc: rowValue(row, "ttcSec", "TTC (s)"),
+      lane: rowValue(row, "zone", "Zone"),
       sc,
       timeTag: `${labelPrefix}: <span>${formatSeconds(rowTime)}</span>`,
     });
 
-    if (row.ZoneScores) {
-      const zoneMetrics = Object.entries(row.ZoneScores).map(([zone, score]) => ({ zone, score }));
+    const scores = rowValue(row, "zoneScores", "ZoneScores");
+    if (scores) {
+      const zoneMetrics = Object.entries(scores).map(([zone, score]) => ({ zone, score }));
       renderZoneBars({ zoneMetrics });
     }
 
@@ -843,7 +851,7 @@
     if (!rows.length) return null;
     let best = 0, bestDiff = Infinity;
     for (let i = 0; i < rows.length; i++) {
-      const t = num(rows[i]["Time (s)"], null);
+      const t = num(rowValue(rows[i], "timeSec", "Time (s)"), null);
       if (t === null) continue;
       const diff = Math.abs(t - timeSec);
       if (diff < bestDiff) { bestDiff = diff; best = i; }
@@ -1295,9 +1303,19 @@
     document.body.appendChild(overlay);
   }
 
+  function telemetryExportPayload() {
+    if (!state.lastResult) return null;
+    return JSON.parse(JSON.stringify(state.lastResult, (key, value) => {
+      if (key === "images" && value && typeof value === "object" && !Array.isArray(value)) {
+        return Object.fromEntries(Object.keys(value).map((imageKey) => [imageKey, "[embedded image omitted]"]));
+      }
+      return value;
+    }));
+  }
+
   function openJsonView() {
     if (!state.lastResult) return;
-    const json = JSON.stringify(state.lastResult, null, 2);
+    const json = JSON.stringify(telemetryExportPayload(), null, 2);
     const view = byId("telemetry-json-view");
     if (view) view.textContent = json;
 
@@ -1318,11 +1336,12 @@
 
   function downloadJson() {
     if (!state.lastResult) return;
-    const blob = new Blob([JSON.stringify(state.lastResult, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(telemetryExportPayload(), null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const sourceName = cleanResponsePayload(state.lastResult).sourceName;
+    const payload = cleanResponsePayload(state.lastResult);
+    const sourceName = payload?.metadata?.sourceName || payload?.sourceName;
     const baseName = sourceName ? sourceName.split('.')[0] : 'spectra';
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16).replace('T', '_');
     a.download = `${baseName}_telemetry_${dateStr}.json`;
@@ -1332,7 +1351,7 @@
 
   async function copyJson() {
     if (!state.lastResult) return;
-    const text = JSON.stringify(state.lastResult, null, 2);
+    const text = JSON.stringify(telemetryExportPayload(), null, 2);
     try {
       await navigator.clipboard.writeText(text);
       const btn = byId("copy-json-btn");

@@ -72,10 +72,10 @@ def _serialize_event(
     payload = {
         "frameIndex": event.get("frame_index"),
         "timestampSec": event.get("timestamp_sec"),
-        "hazardScore": event.get("hazard_score"),
-        "hazardBand": event.get("hazard_band"),
-        "primaryZone": event.get("primary_zone"),
-        "estimatedTtcSec": event.get("estimated_ttc_sec"),
+        "riskScore": event.get("risk_score", event.get("hazard_score")),
+        "riskBand": event.get("risk_band", event.get("hazard_band")),
+        "zone": event.get("primary_zone"),
+        "ttcSec": event.get("estimated_ttc_sec"),
         "uncertaintyPct": event.get("uncertainty_pct"),
         "summary": event.get("heuristic_summary"),
         "reasons": event.get("reasons", []),
@@ -83,7 +83,6 @@ def _serialize_event(
         "riskState": event.get("risk_state"),
         "objectType": event.get("object_type"),
         "approach": event.get("approach"),
-        "lane": event.get("lane"),
         "bbox": event.get("bbox"),
         "nearScore": event.get("near_score"),
         "closingSpeed": event.get("closing_speed"),
@@ -114,34 +113,30 @@ def _is_same_event(left: dict[str, Any] | None, right: dict[str, Any] | None) ->
 
 
 def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name: str) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "mediaType": result.get("media_type"),
-        "sourceName": source_name,
-        "summary": result.get("summary"),
-        "elapsedSec": round(elapsed_sec, 3),
-    }
-
     peak_event = result.get("peak_event")
-    payload.update(
-        {
+    payload: dict[str, Any] = {
+        "summary": result.get("summary"),
+        "metadata": {
+            "mediaType": result.get("media_type"),
+            "sourceName": source_name,
             "fps": result.get("fps"),
             "frameCount": result.get("frame_count"),
             "processedFrames": result.get("processed_frames"),
             "sampledFrames": result.get("sampled_frames"),
-
-            "timelineRows": result.get("timeline_rows", []),
-            "peakEvent": None if peak_event is None else _serialize_event(peak_event),
-            "events": [
-                _serialize_event(
-                    event,
-                    include_images=True,
-                    image_fields=(("blend", "overlay_rgb"),),
-                )
-                for event in result.get("events", [])
-                if not _is_same_event(event, peak_event)
-            ],
-        }
-    )
+            "elapsedSec": round(elapsed_sec, 3),
+        },
+        "timelineRows": result.get("timeline_rows", []),
+        "peakEvent": None if peak_event is None else _serialize_event(peak_event),
+        "events": [
+            _serialize_event(
+                event,
+                include_images=True,
+                image_fields=(("blend", "overlay_rgb"),),
+            )
+            for event in result.get("events", [])
+            if not _is_same_event(event, peak_event)
+        ],
+    }
     return {"payload": payload}
 
 

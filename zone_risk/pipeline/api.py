@@ -101,7 +101,7 @@ def _road_tracking_rgb(frame_bgr: np.ndarray) -> np.ndarray:
     return _to_rgb(output)
 
 
-def _hazard_score(event: RiskEvent) -> float:
+def _risk_score(event: RiskEvent) -> float:
     base = {
         "SAFE": 0.18,
         "CAUTION": 0.56,
@@ -114,15 +114,15 @@ def _hazard_score(event: RiskEvent) -> float:
 def _zone_metric(event: RiskEvent) -> dict[str, Any]:
     return {
         "zone": event.zone,
-        "score": _hazard_score(event),
-        "mean_depth": event.near_score,
-        "motion_energy": event.velocity_magnitude,
-        "expansion_energy": event.closing_speed,
-        "structure_signal": event.confidence,
-        "near_ratio": event.near_score,
-        "estimated_ttc_sec": event.ttc_sec,
-        "direction_hint": event.direction,
-        "object_type": event.object_type,
+        "score": _risk_score(event),
+        "meanDepth": event.near_score,
+        "motionEnergy": event.velocity_magnitude,
+        "expansionEnergy": event.closing_speed,
+        "structureSignal": event.confidence,
+        "nearRatio": event.near_score,
+        "ttcSec": event.ttc_sec,
+        "directionHint": event.direction,
+        "objectType": event.object_type,
     }
 
 
@@ -148,8 +148,8 @@ def _event_payload(
     return {
         "frame_index": event.frame_index,
         "timestamp_sec": event.timestamp_sec,
-        "hazard_score": _hazard_score(event),
-        "hazard_band": band,
+        "risk_score": _risk_score(event),
+        "risk_band": band,
         "risk_state": event.state,
         "primary_zone": event.zone,
         "estimated_ttc_sec": event.ttc_sec,
@@ -287,20 +287,20 @@ def analyze_zone_video(
         zone_scores = {}
         for ev in all_events:
             z_key = str(ev.zone).lower().split()[0] # "left", "center", "right"
-            zone_scores[z_key] = _hazard_score(ev)
+            zone_scores[z_key] = _risk_score(ev)
 
         timeline_rows.append(
             {
-                "Frame": primary_event.frame_index,
-                "Time (s)": round(primary_event.timestamp_sec, 2),
-                "State": primary_event.state,
-                "Band": BAND_BY_STATE.get(primary_event.state, "low"),
-                "Zone": primary_event.zone,
-                "Direction": primary_event.direction,
-                "TTC (s)": primary_event.ttc_sec,
-                "Near": primary_event.near_score,
-                "Closing": primary_event.closing_speed,
-                "ZoneScores": zone_scores,
+                "frameIndex": primary_event.frame_index,
+                "timeSec": round(primary_event.timestamp_sec, 2),
+                "riskState": primary_event.state,
+                "riskBand": BAND_BY_STATE.get(primary_event.state, "low"),
+                "zone": primary_event.zone,
+                "direction": primary_event.direction,
+                "ttcSec": primary_event.ttc_sec,
+                "nearScore": primary_event.near_score,
+                "closingSpeed": primary_event.closing_speed,
+                "zoneScores": zone_scores,
             }
         )
         processed_frames += 1
@@ -321,7 +321,7 @@ def analyze_zone_video(
             zone_metrics_payload = [
                 {
                     "zone": ev.zone,
-                    "score": _hazard_score(ev),
+                    "score": _risk_score(ev),
                     "estimated_ttc_sec": None if ev.ttc_sec is None else float(ev.ttc_sec),
                     "near_score": float(ev.near_score),
                     "closing_speed": float(ev.closing_speed),
@@ -332,10 +332,10 @@ def analyze_zone_video(
             worst_zone = window_worst_zone or primary_event.zone
             window_ttc = window_min_ttc
             timeline_row_payload = {
-                "Time (s)": round(float(primary_event.timestamp_sec), 2),
-                "State": worst_state,
-                "TTC (s)": None if window_ttc is None else float(window_ttc),
-                "Zone": worst_zone,
+                "timeSec": round(float(primary_event.timestamp_sec), 2),
+                "riskState": worst_state,
+                "ttcSec": None if window_ttc is None else float(window_ttc),
+                "zone": worst_zone,
             }
             try:
                 progress_callback(
