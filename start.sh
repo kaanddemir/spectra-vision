@@ -3,8 +3,13 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
+# Check if .venv exists
 if [ -d ".venv" ]; then
-    source .venv/bin/activate
+    # Use the python inside the venv directly to be robust against directory renames
+    PYTHON_EXEC="$DIR/.venv/bin/python3"
+    if [ ! -f "$PYTHON_EXEC" ]; then
+        PYTHON_EXEC="$DIR/.venv/bin/python"
+    fi
 else
     echo "Error: .venv directory not found! Please set up the virtual environment first."
     exit 1
@@ -18,4 +23,4 @@ echo "========================================"
 export PYTHONPATH="${DIR}:${PYTHONPATH}"
 
 echo "Server will be available at: http://localhost:8000"
-python -m uvicorn zone_risk.app:app --host localhost --port 8000 --reload
+"$PYTHON_EXEC" -m uvicorn zone_risk.app:app --host localhost --port 8000 --reload

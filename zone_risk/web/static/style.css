@@ -289,6 +289,17 @@ svg {
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
 }
+.event-count-simple {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.event-count-simple span {
+  color: var(--text-soft);
+  margin-left: 2px;
+}
+
 .timeline-content {
   flex: 1;
   display: flex;
@@ -544,7 +555,7 @@ svg {
 .center-play-btn {
   position: absolute;
   top: 50%; left: 50%;
-  transform: translate(-50%, -50%) scale(1);
+  transform: translate(-50%, -50%) scale(0.9);
   width: 64px; height: 64px;
   border-radius: 50%;
   background: rgba(239, 68, 68, 0.9);
@@ -553,8 +564,10 @@ svg {
   display: grid; place-items: center;
   z-index: 7;
   cursor: pointer;
-  transition: transform 200ms ease-out, opacity 200ms ease-out, background 200ms ease-out;
+  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms ease-out, background 200ms ease-out;
   box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  opacity: 0;
+  pointer-events: none;
 }
 .center-play-btn.force-hide {
   display: none !important;
@@ -572,10 +585,18 @@ svg {
 .center-play-btn:active {
   transform: translate(-50%, -50%) scale(0.95);
 }
-.preview-frame.is-playing .center-play-btn {
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -50%) scale(0.8);
+
+.preview-frame:hover .center-play-btn:not(.force-hide) {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  pointer-events: auto;
+}
+
+.preview-frame.is-playing .center-play-btn,
+.preview-frame.is-analyzing .center-play-btn {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: translate(-50%, -50%) scale(0.8) !important;
 }
 .preview-frame .preview-empty:not([hidden]) ~ .center-play-btn {
   display: none;
@@ -2739,3 +2760,21 @@ svg {
     flex: 1;
   }
 }
+.json-pre {
+  background: #0d0e13;
+  color: #10b981;
+  padding: 24px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  max-width: 85vw;
+  max-height: 85vh;
+  overflow: auto;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  scrollbar-width: thin;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.json-pre::-webkit-scrollbar { width: 6px; height: 6px; }
+.json-pre::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; }
+.json-pre::-webkit-scrollbar-track { background: transparent; }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import tempfile
@@ -10,12 +11,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from zone_risk.pipeline.api import analyze_zone_video
+
+
+_PREVIEW_QUEUES: dict[str, asyncio.Queue] = {}
+_PREVIEW_QUEUE_MAX = 24
 
 
 VIDEO_TYPES = {"mp4", "mov", "avi", "mkv", "m4v"}
@@ -47,30 +52,6 @@ def _image_to_png_bytes(image: Any) -> bytes:
 def _image_data_uri(image: Any) -> str:
     encoded = base64.b64encode(_image_to_png_bytes(image)).decode("ascii")
     return f"data:image/png;base64,{encoded}"
-
-
-def _sanitize_for_json(value: Any) -> Any:
-    """Remove display arrays and normalize NumPy values for telemetry export."""
-
-    if isinstance(value, dict):
-        return {
-            key: _sanitize_for_json(item)
-            for key, item in value.items()
-            if not key.endswith("_rgb")
-        }
-    if isinstance(value, list):
-        return [_sanitize_for_json(item) for item in value]
-    if isinstance(value, tuple):
-        return [_sanitize_for_json(item) for item in value]
-    if isinstance(value, np.ndarray):
-        return "<array omitted>"
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, Path):
-        return str(value)
-    return value
 
 
 def _event_image_payload(event: dict[str, Any], fields: Iterable[tuple[str, str]]) -> dict[str, str]:
@@ -107,8 +88,6 @@ def _serialize_event(
         "nearScore": event.get("near_score"),
         "closingSpeed": event.get("closing_speed"),
         "velocityMagnitude": event.get("velocity_magnitude"),
-
-        "telemetry": _sanitize_for_json(event.get("payload", {})),
     }
 
     if include_images:
@@ -125,17 +104,25 @@ def _serialize_event(
     return payload
 
 
+def _is_same_event(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    if not left or not right:
+        return False
+    return (
+        left.get("frame_index") == right.get("frame_index")
+        and left.get("timestamp_sec") == right.get("timestamp_sec")
+    )
+
+
 def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name: str) -> dict[str, Any]:
-    base_payload: dict[str, Any] = {
+    payload: dict[str, Any] = {
         "mediaType": result.get("media_type"),
         "sourceName": source_name,
         "summary": result.get("summary"),
         "elapsedSec": round(elapsed_sec, 3),
-        "telemetry": _sanitize_for_json(result),
     }
 
     peak_event = result.get("peak_event")
-    base_payload.update(
+    payload.update(
         {
             "fps": result.get("fps"),
             "frameCount": result.get("frame_count"),
@@ -148,13 +135,14 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
                 _serialize_event(
                     event,
                     include_images=True,
-                    image_fields=(("blend", "overlay_rgb"), ("original", "original_rgb")),
+                    image_fields=(("blend", "overlay_rgb"),),
                 )
                 for event in result.get("events", [])
+                if not _is_same_event(event, peak_event)
             ],
         }
     )
-    return base_payload
+    return {"payload": payload}
 
 
 def _extension(filename: str | None) -> str:
@@ -196,8 +184,42 @@ def health_head() -> Response:
     return Response(status_code=200, media_type="application/json")
 
 
+def _get_or_create_preview_queue(session_id: str) -> asyncio.Queue:
+    queue = _PREVIEW_QUEUES.get(session_id)
+    if queue is None:
+        queue = asyncio.Queue(maxsize=_PREVIEW_QUEUE_MAX)
+        _PREVIEW_QUEUES[session_id] = queue
+    return queue
+
+
+@app.websocket("/ws/preview/{session_id}")
+async def preview_websocket(websocket: WebSocket, session_id: str) -> None:
+    await websocket.accept()
+    queue = _get_or_create_preview_queue(session_id)
+    try:
+        while True:
+            message = await queue.get()
+            if message is None:
+                try:
+                    await websocket.send_json({"type": "done"})
+                except Exception:
+                    pass
+                break
+            await websocket.send_json(message)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        _PREVIEW_QUEUES.pop(session_id, None)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @app.post("/api/analyze")
-def analyze_endpoint(
+async def analyze_endpoint(
     file: UploadFile = File(...),
     mode: str = Form("video"),
     max_processed_frames: int = Form(180),
@@ -206,16 +228,39 @@ def analyze_endpoint(
     depth_every: int = Form(10),
     start_sec: float = Form(0.0),
     end_sec: float = Form(0.0),
+    session_id: str = Form(""),
 ) -> dict[str, Any]:
     if mode.strip().lower() != "video":
         raise HTTPException(status_code=400, detail="Only video analysis is supported.")
     _validate_video_upload(file)
 
-    upload_bytes = file.file.read()
+    upload_bytes = await file.read()
     if not upload_bytes:
         raise HTTPException(status_code=400, detail="Upload is empty.")
 
     source_name = Path(file.filename or f"upload.{_extension(file.filename)}").name
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue | None = None
+    session_key = session_id.strip() if isinstance(session_id, str) else ""
+    if session_key:
+        queue = _get_or_create_preview_queue(session_key)
+
+    def _push(payload: Any) -> None:
+        if queue is None:
+            return
+        try:
+            queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+    def progress_callback(payload: dict[str, Any]) -> None:
+        if queue is None:
+            return
+        try:
+            loop.call_soon_threadsafe(_push, payload)
+        except RuntimeError:
+            pass
 
     start_time = time.perf_counter()
     try:
@@ -223,7 +268,8 @@ def analyze_endpoint(
             source_path = Path(temp_dir) / source_name
             source_path.write_bytes(upload_bytes)
 
-            result = analyze_zone_video(
+            result = await asyncio.to_thread(
+                analyze_zone_video,
                 video_path=source_path,
                 max_processed_frames=max(1, int(max_processed_frames)),
                 max_saved_events=max(1, int(max_saved_events)),
@@ -231,11 +277,28 @@ def analyze_endpoint(
                 depth_every=max(1, int(depth_every)),
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
+                progress_callback=progress_callback if queue is not None else None,
             )
     except HTTPException:
+        if queue is not None:
+            try:
+                loop.call_soon_threadsafe(_push, None)
+            except RuntimeError:
+                pass
         raise
     except Exception as exc:
+        if queue is not None:
+            try:
+                loop.call_soon_threadsafe(_push, None)
+            except RuntimeError:
+                pass
         raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
+
+    if queue is not None:
+        try:
+            loop.call_soon_threadsafe(_push, None)
+        except RuntimeError:
+            pass
 
     elapsed_sec = time.perf_counter() - start_time
     return _serialize_result(result, elapsed_sec=elapsed_sec, source_name=source_name)

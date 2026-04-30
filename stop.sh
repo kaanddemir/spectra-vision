@@ -1,5 +1,6 @@
 #!/bin/bash
 # This script stops the running Spectra server.
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 echo "Stopping Spectra server..."
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -183,6 +184,19 @@ def _event_payload(
     }
 
 
+def _encode_preview_jpeg(annotated_bgr: np.ndarray, quality: int = 70) -> str | None:
+    """Encode an annotated BGR frame as a base64 JPEG data URI for live preview."""
+
+    try:
+        ok, buffer = cv2.imencode(".jpg", annotated_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        if not ok:
+            return None
+        encoded = base64.b64encode(buffer.tobytes()).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}"
+    except Exception:
+        return None
+
+
 def analyze_zone_video(
     video_path: str | Path,
     *,
@@ -192,6 +206,8 @@ def analyze_zone_video(
     depth_every: int = 10,
     start_sec: float = 0.0,
     end_sec: float | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    progress_every: int = 6,
 ) -> dict[str, Any]:
     """Run zone-based risk analysis and return the UI-compatible result shape."""
 
@@ -204,6 +220,12 @@ def analyze_zone_video(
     from .risk_calculator import StateStabilizer
     stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
     processed_frames = 0
+
+    _STATE_RANK = {"SAFE": 0, "CAUTION": 1, "DANGER": 2}
+    _RANK_STATE = {v: k for k, v in _STATE_RANK.items()}
+    window_min_ttc: float | None = None
+    window_worst_rank: int = 0
+    window_worst_zone: str | None = None
 
     for video_frame in loader.frames():
         frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
@@ -261,6 +283,12 @@ def analyze_zone_video(
 
         saved_events = sorted(saved_events, key=lambda item: score_event_payload(item), reverse=True)[:max_saved_events]
 
+        # Map all zone scores for this frame to allow dynamic UI updates during playback
+        zone_scores = {}
+        for ev in all_events:
+            z_key = str(ev.zone).lower().split()[0] # "left", "center", "right"
+            zone_scores[z_key] = _hazard_score(ev)
+
         timeline_rows.append(
             {
                 "Frame": primary_event.frame_index,
@@ -272,9 +300,64 @@ def analyze_zone_video(
                 "TTC (s)": primary_event.ttc_sec,
                 "Near": primary_event.near_score,
                 "Closing": primary_event.closing_speed,
+                "ZoneScores": zone_scores,
             }
         )
         processed_frames += 1
+
+        # Track worst-case TTC and state across the interval since the last preview push
+        if primary_event.ttc_sec is not None:
+            if window_min_ttc is None or primary_event.ttc_sec < window_min_ttc:
+                window_min_ttc = float(primary_event.ttc_sec)
+        cur_rank = _STATE_RANK.get(primary_event.state, 0)
+        if cur_rank >= window_worst_rank:
+            window_worst_rank = cur_rank
+            window_worst_zone = primary_event.zone
+
+        is_first_frame = (processed_frames == 1)
+        if progress_callback is not None and (is_first_frame or processed_frames % max(1, int(progress_every)) == 0):
+            preview_uri = _encode_preview_jpeg(annotated)
+            progress_pct = min(100.0, round((processed_frames / max(1, max_processed_frames)) * 100.0, 1))
+            zone_metrics_payload = [
+                {
+                    "zone": ev.zone,
+                    "score": _hazard_score(ev),
+                    "estimated_ttc_sec": None if ev.ttc_sec is None else float(ev.ttc_sec),
+                    "near_score": float(ev.near_score),
+                    "closing_speed": float(ev.closing_speed),
+                }
+                for ev in all_events
+            ]
+            worst_state = _RANK_STATE.get(window_worst_rank, primary_event.state)
+            worst_zone = window_worst_zone or primary_event.zone
+            window_ttc = window_min_ttc
+            timeline_row_payload = {
+                "Time (s)": round(float(primary_event.timestamp_sec), 2),
+                "State": worst_state,
+                "TTC (s)": None if window_ttc is None else float(window_ttc),
+                "Zone": worst_zone,
+            }
+            try:
+                progress_callback(
+                    {
+                        "type": "preview",
+                        "frameIndex": int(primary_event.frame_index),
+                        "timestampSec": float(primary_event.timestamp_sec),
+                        "progress": progress_pct,
+                        "riskState": worst_state,
+                        "ttcSec": None if window_ttc is None else float(window_ttc),
+                        "zone": worst_zone,
+                        "frame": preview_uri,
+                        "zoneMetrics": zone_metrics_payload,
+                        "timelineRow": timeline_row_payload,
+                    }
+                )
+            except Exception:
+                pass
+            # Reset interval aggregators for the next push window
+            window_min_ttc = None
+            window_worst_rank = 0
+            window_worst_zone = None
 
     peak_event = saved_events[0] if saved_events else None
     return {

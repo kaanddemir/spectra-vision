@@ -23,15 +23,22 @@
   const state = {
     previewUrl: "",
     lastResult: null,
+    currentResult: null,
     sourceMeta: null,
     analyzing: false,
 
     progressTimer: null,
     progressStart: 0,
+    previewOverlayTimer: null,
     timelineRows: [],
     events: [],
     syncFollowVideo: true,
     activeMainView: "video",
+    previewWs: null,
+    previewSessionId: null,
+    livePreviewActive: false,
+    liveTimelineRows: [],
+    liveZoneMetrics: [],
   };
 
   const byId = (id) => document.getElementById(id);
@@ -268,7 +275,7 @@
     const motionValue = byId("motion-indicator-value");
     const motionFill = byId("motion-indicator-fill");
     const mode = state.activeMainView || "video";
-    const result = state.lastResult;
+    const result = state.currentResult;
     const metrics = result?.metrics || {};
     const hasDepthMap = !!byId("visual-depth-main")?.getAttribute("src");
     const hasMotionMap = !!byId("visual-motion-main")?.getAttribute("src");
@@ -293,23 +300,61 @@
     }
   }
 
-  function showPreviewOverlay(source) {
+  function clearPreviewOverlayTimer() {
+    if (!state.previewOverlayTimer) return;
+    clearTimeout(state.previewOverlayTimer);
+    state.previewOverlayTimer = null;
+  }
+
+  function showPreviewOverlay(source, hideAfterMs = null) {
+    clearPreviewOverlayTimer();
     const resolved = mediaSrc(source);
     if (!resolved) { hidePreviewOverlay(); return; }
     previewBlend.src = resolved;
     previewBlend.hidden = false;
+    const delay = num(hideAfterMs, null);
+    if (delay !== null && delay > 0) {
+      state.previewOverlayTimer = setTimeout(() => hidePreviewOverlay(), delay);
+    }
   }
   function hidePreviewOverlay() {
+    clearPreviewOverlayTimer();
     previewBlend.hidden = true;
     previewBlend.removeAttribute("src");
   }
 
+  function imageSetForEvent(ev) {
+    const eventImages = ev?.images || {};
+    const resultImages = state.currentResult?.images || {};
+    return {
+      original: eventImages.original || resultImages.original,
+      depth: eventImages.depth || resultImages.depth,
+      segmentation: eventImages.segmentation || resultImages.segmentation,
+      road: eventImages.road || resultImages.road,
+      motion: eventImages.motion || resultImages.motion,
+      blend: eventImages.blend || eventImages.overlay || eventImages.annotated,
+    };
+  }
+
   // ─── normalize ────────────────────────────────────────────
-  function normalizePayload(payload) {
-    const event = payload?.peakEvent || payload?.event || payload || {};
-    const telemetry = event.telemetry || payload?.telemetry || {};
-    const rawImages = payload?.images || event.images || telemetry.images || {};
-    const sources = [event, payload, telemetry];
+  function cleanResponsePayload(response) {
+    return response?.payload && typeof response.payload === "object" ? response.payload : (response || {});
+  }
+
+  function cleanResponseEnvelope(response) {
+    return { payload: cleanResponsePayload(response) };
+  }
+
+  function sameEvent(a, b) {
+    if (!a || !b) return false;
+    return a.frameIndex === b.frameIndex && num(a.timestampSec, null) === num(b.timestampSec, null);
+  }
+
+  function normalizePayload(response) {
+    const payload = cleanResponsePayload(response);
+    const event = payload?.peakEvent || {};
+    const rawImages = event.images || {};
+    const sources = [event, payload];
 
     const riskRaw = firstValue(sources, ["hazardScore", "riskScore", "risk_score"]);
     const riskNum = num(riskRaw, null);
@@ -327,12 +372,27 @@
       objectType: titleCase(firstValue(sources, ["objectType", "object_type"])),
       approach: titleCase(firstValue(sources, ["approach"])),
       lane: titleCase(firstValue(sources, ["lane", "primaryZone", "primary_zone"])),
-      bbox: event.bbox || telemetry.bbox || null,
+      bbox: event.bbox || null,
       motionMagnitude: num(firstValue(sources, ["velocityMagnitude", "velocity_magnitude", "motionMagnitude", "motion_magnitude"]), null),
     };
 
+    const eventKey = (ev) => `${ev?.frameIndex ?? ""}:${num(ev?.timestampSec, null) ?? ""}`;
+    const events = [];
+    const seenEvents = new Set();
+    if (event?.frameIndex !== undefined) {
+      events.push({ ...event, images: rawImages });
+      seenEvents.add(eventKey(event));
+    }
+    if (Array.isArray(payload?.events)) {
+      payload.events.forEach((ev) => {
+        const key = eventKey(ev);
+        if (seenEvents.has(key)) return;
+        events.push(sameEvent(ev, event) ? { ...ev, images: rawImages } : ev);
+        seenEvents.add(key);
+      });
+    }
+
     return {
-      payload, event, telemetry,
       images: {
         original: rawImages.original,
         depth: rawImages.depth,
@@ -343,7 +403,7 @@
       },
       metrics,
       elapsedSec: num(payload?.elapsedSec ?? payload?.elapsed_sec, null),
-      fps: num(payload?.fps ?? telemetry?.fps, null),
+      fps: num(payload?.fps, null),
       frameCount: num(payload?.frameCount, null),
       processedFrames: num(payload?.processedFrames, null),
       sampledFrames: num(payload?.sampledFrames, null),
@@ -351,7 +411,7 @@
       reasons: Array.isArray(event.reasons) ? event.reasons : [],
       zoneMetrics: Array.isArray(event.zoneMetrics) ? event.zoneMetrics : [],
 
-      events: Array.isArray(payload?.events) ? payload.events : [],
+      events,
       timelineRows: Array.isArray(payload?.timelineRows) ? payload.timelineRows : [],
       sourceName: payload?.sourceName || fileInput.files[0]?.name || null,
     };
@@ -484,6 +544,7 @@
   // ─── Timeline + event strip ──────────────────────────────
   function renderTimeline(result) {
     const events = result?.events || [];
+    const fallbackImages = result?.images || {};
     const dur = state.sourceMeta?.durationSec
       || (result?.frameCount && result?.fps ? result.frameCount / result.fps : null);
     const totalDur = dur || (events.length ? Math.max(...events.map((e) => num(e.timestampSec, 0))) : null) || 1;
@@ -536,7 +597,7 @@
       card.dataset.index = String(idx);
       card.addEventListener("click", () => focusEvent(idx));
 
-      const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend);
+      const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || fallbackImages.original || fallbackImages.blend);
       const m = ev.metrics || ev || {};
       const ttcVal = m.ttc !== undefined ? m.ttc : m.estimatedTtcSec;
       const nearVal = num(m.nearScore, null);
@@ -583,23 +644,11 @@
     const events = state.events || [];
     const ev = events[idx];
     if (!ev) return;
-    state.syncFollowVideo = false;
     const ts = num(ev.timestampSec, null);
     if (ts !== null) {
-      try { previewVideo.currentTime = ts; } catch {}
-      const totalDur = state.sourceMeta?.durationSec || 1;
-      const left = clamp((ts / totalDur) * 100, 0, 100);
-      const cursor = byId("timeline-cursor");
-      if (cursor) cursor.style.left = `${left}%`;
+      seekPreviewVideo(ts);
+      applyTimelineStateAt(ts, { labelPrefix: `Event #${idx + 1}` });
     }
-    const sc = stateClass(ev.riskState || ev.hazardBand);
-    applyRiskBannerState({
-      stateLabel: ev.riskState || (ev.hazardBand ? String(ev.hazardBand).toUpperCase() : null),
-      ttc: ev.estimatedTtcSec,
-      lane: ev.lane,
-      sc,
-      timeTag: ts !== null ? `Event #${idx + 1}: <span>${formatSeconds(ts)}</span>` : null,
-    });
     
     // Highlighting active card
     const strip = byId("event-strip");
@@ -609,16 +658,14 @@
       });
     }
 
-    if (ev?.images?.blend) {
-      // Auto switch back to video mode to see the overlay
+    const blendImage = imageSetForEvent(ev).blend;
+    if (blendImage) {
       if (state.activeMainView !== "video") {
         const videoBtn = document.querySelector(".side-bar-btn[data-view='video']");
         if (videoBtn) videoBtn.click();
       }
-      showPreviewOverlay(ev.images.blend);
-      setTimeout(() => { if (!state.syncFollowVideo) hidePreviewOverlay(); }, 5000);
+      showPreviewOverlay(blendImage, 5000);
     }
-    setTimeout(() => { state.syncFollowVideo = true; }, 5100);
   }
 
   // ─── TTC chart from timelineRows ─────────────────────────
@@ -653,10 +700,27 @@
     const totalEventsEl = byId("stat-total-events");
     if (totalEventsEl) totalEventsEl.textContent = result?.events?.length || "0";
 
-    // Smooth points for display
-    const smoothed = points.map((p, i) => {
-      // 5-point moving average window (2 before, 2 after)
-      const window = points.slice(Math.max(0, i - 2), Math.min(points.length, i + 3));
+    // Time-bucket dense timelines using MIN TTC per bucket so worst-case (danger) moments
+    // are preserved when downsampling for visual consistency with live preview.
+    const TARGET_POINTS = 60;
+    let dense = points;
+    if (points.length > TARGET_POINTS) {
+      const step = points.length / TARGET_POINTS;
+      dense = [];
+      for (let i = 0; i < TARGET_POINTS; i++) {
+        const startIdx = Math.floor(i * step);
+        const endIdx = Math.max(startIdx + 1, Math.floor((i + 1) * step));
+        const slice = points.slice(startIdx, endIdx);
+        if (!slice.length) continue;
+        const avgT = (i === 0) ? slice[0].t : (slice.reduce((a, b) => a + b.t, 0) / slice.length);
+        const minTtc = slice.reduce((m, b) => Math.min(m, b.ttc), Infinity);
+        dense.push({ t: avgT, ttc: minTtc });
+      }
+    }
+
+    // Smooth points for display (5-point moving average)
+    const smoothed = dense.map((p, i) => {
+      const window = dense.slice(Math.max(0, i - 2), Math.min(dense.length, i + 3));
       const avg = window.reduce((a, b) => a + b.ttc, 0) / window.length;
       return { ...p, ttc: avg };
     });
@@ -674,6 +738,13 @@
   }
 
 
+  function currentTotalDuration() {
+    return previewVideo?.duration
+      || state.sourceMeta?.durationSec
+      || (state.currentResult?.frameCount && state.currentResult?.fps ? state.currentResult.frameCount / state.currentResult.fps : null)
+      || 1;
+  }
+
   function updateChartAxisX(totalDur) {
     const axis = byId("chart-axis-x");
     if (!axis) return;
@@ -689,12 +760,80 @@
   function updateChartCursor(timeSec) {
     const cursor = byId("chart-cursor");
     if (!cursor) return;
-    const totalDur = state.sourceMeta?.durationSec || 1;
+    const totalDur = currentTotalDuration();
     const ratio = clamp(timeSec / Math.max(totalDur, 0.01), 0, 1);
     const x = ratio * 400;
     cursor.setAttribute("x1", String(x));
     cursor.setAttribute("x2", String(x));
     cursor.setAttribute("opacity", state.timelineRows.length ? "0.7" : "0");
+  }
+
+  function updateVideoTimeControls(timeSec) {
+    const t = num(timeSec, null);
+    if (t === null) return;
+    timeCurrent.textContent = formatSeconds(t);
+    const dur = previewVideo?.duration || state.sourceMeta?.durationSec || 0;
+    if (dur > 0) {
+      const ratio = clamp(t / dur, 0, 1);
+      seekBar.value = String(Math.round(ratio * 1000));
+      seekBar.style.setProperty("--fill", `${(ratio * 100).toFixed(1)}%`);
+    }
+  }
+
+  function seekPreviewVideo(timeSec) {
+    const t = num(timeSec, null);
+    if (t === null || !previewVideo || previewVideo.hidden || !previewVideo.src) return;
+    const applySeek = () => {
+      const dur = previewVideo.duration || state.sourceMeta?.durationSec || t;
+      const target = clamp(t, 0, Math.max(dur || t, 0));
+      try {
+        previewVideo.pause();
+        previewVideo.currentTime = target;
+      } catch {
+        try { previewVideo.currentTime = target; } catch {}
+      }
+      updateVideoTimeControls(target);
+    };
+    if (previewVideo.readyState >= 1) {
+      applySeek();
+    } else {
+      previewVideo.addEventListener("loadedmetadata", applySeek, { once: true });
+    }
+  }
+
+  function applyTimelineStateAt(timeSec, { labelPrefix = "Live", updateImages = true } = {}) {
+    const t = num(timeSec, 0);
+    updateChartCursor(t);
+    updateVideoTimeControls(t);
+
+    const cursor = byId("timeline-cursor");
+    if (cursor) {
+      const totalDur = currentTotalDuration();
+      const left = clamp((t / Math.max(totalDur, 0.01)) * 100, 0, 100);
+      cursor.style.left = `${left}%`;
+    }
+
+    const row = findTimelineRowAt(t);
+    if (!row) return;
+    const rowTime = num(row["Time (s)"], t);
+    const stateLabel = row.State ? String(row.State).toUpperCase() : null;
+    const sc = stateClass(stateLabel);
+    applyRiskBannerState({
+      stateLabel,
+      ttc: row["TTC (s)"],
+      lane: row.Zone,
+      sc,
+      timeTag: `${labelPrefix}: <span>${formatSeconds(rowTime)}</span>`,
+    });
+
+    if (row.ZoneScores) {
+      const zoneMetrics = Object.entries(row.ZoneScores).map(([zone, score]) => ({ zone, score }));
+      renderZoneBars({ zoneMetrics });
+    }
+
+    if (updateImages && state.activeMainView !== "video") {
+      updateMainImageFromTime(t, state.activeMainView);
+    }
   }
 
 
@@ -715,28 +854,7 @@
   function syncToVideoTime() {
     if (!state.syncFollowVideo) return;
     const t = previewVideo?.currentTime ?? 0;
-    updateChartCursor(t);
-    const cursor = byId("timeline-cursor");
-    if (cursor) {
-      const totalDur = state.sourceMeta?.durationSec || 1;
-      const left = clamp((t / Math.max(totalDur, 0.01)) * 100, 0, 100);
-      cursor.style.left = `${left}%`;
-    }
-    const row = findTimelineRowAt(t);
-    if (!row) return;
-    const stateLabel = row.State ? String(row.State).toUpperCase() : null;
-    const sc = stateClass(stateLabel);
-    applyRiskBannerState({
-      stateLabel,
-      ttc: row["TTC (s)"],
-      lane: row.Zone,
-      sc,
-      timeTag: `Live: <span>${formatSeconds(num(row["Time (s)"], 0))}</span>`,
-    });
-
-    if (state.activeMainView !== "video") {
-      updateMainImageFromTime(t, state.activeMainView);
-    }
+    applyTimelineStateAt(t);
   }
 
   function updateMainImageFromTime(timeSec, viewMode) {
@@ -754,10 +872,11 @@
       }
     }
 
-    if (bestEvent && bestEvent.images && bestEvent.images[viewMode]) {
+    const imageSource = bestEvent?.images?.[viewMode] || state.currentResult?.images?.[viewMode];
+    if (imageSource) {
       const mainImg = byId(`visual-${viewMode}-main`);
       if (mainImg) {
-        const src = mediaSrc(bestEvent.images[viewMode]);
+        const src = mediaSrc(imageSource);
         if (mainImg.src !== src) mainImg.src = src;
         mainImg.hidden = false;
       }
@@ -767,7 +886,8 @@
   // ─── full render ─────────────────────────────────────────
   function renderResult(payload) {
     const result = normalizePayload(payload);
-    state.lastResult = result;
+    state.lastResult = cleanResponseEnvelope(payload);
+    state.currentResult = result;
     state.timelineRows = result.timelineRows || [];
     state.events = result.events || [];
 
@@ -776,8 +896,7 @@
     setMiniMedia("road", result.images.road);
     setMiniMedia("motion", result.images.motion);
 
-    showPreviewOverlay(result.images.blend);
-    setTimeout(() => hidePreviewOverlay(), 5000);
+    showPreviewOverlay(result.images.blend, 5000);
 
     renderStatRow(result);
     renderRiskBannerFromMetrics(result.metrics);
@@ -790,6 +909,7 @@
 
   function renderEmptyState() {
     state.lastResult = null;
+    state.currentResult = null;
     state.timelineRows = [];
     state.events = [];
     setMiniMedia("depth", "");
@@ -808,6 +928,102 @@
     updateMapIndicators();
   }
 
+  // ─── live preview (WebSocket) ────────────────────────────
+  function generateSessionId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function handleLivePreviewMessage(msg) {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "done") {
+      state.livePreviewActive = false;
+      return;
+    }
+    if (msg.type !== "preview") return;
+
+    state.livePreviewActive = true;
+
+    if (msg.frame) {
+      showPreviewOverlay(msg.frame);
+    }
+
+    const stateLabel = msg.riskState ? String(msg.riskState).toUpperCase() : null;
+    const sc = stateClass(stateLabel);
+    const ts = num(msg.timestampSec, 0);
+    applyRiskBannerState({
+      stateLabel,
+      ttc: msg.ttcSec,
+      lane: msg.zone,
+      sc,
+      timeTag: `Live: <span>${formatSeconds(ts)}</span>`,
+    });
+
+    const status = byId("ap-status");
+    if (status && msg.progress !== undefined && msg.progress !== null) {
+      const pct = clamp(num(msg.progress, 0), 0, 100);
+      status.textContent = `Processing… ${pct.toFixed(0)}%`;
+    }
+
+    if (Array.isArray(msg.zoneMetrics) && msg.zoneMetrics.length) {
+      state.liveZoneMetrics = msg.zoneMetrics;
+      renderZoneBars({ zoneMetrics: msg.zoneMetrics });
+    }
+
+    if (msg.timelineRow) {
+      state.liveTimelineRows.push(msg.timelineRow);
+      renderTtcChart({ timelineRows: state.liveTimelineRows, events: [] });
+    }
+  }
+
+  function startLivePreview() {
+    return new Promise((resolve) => {
+      closeLivePreview();
+      const sessionId = generateSessionId();
+      state.previewSessionId = sessionId;
+
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve(sessionId);
+      };
+
+      try {
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${proto}//${window.location.host}/ws/preview/${sessionId}`);
+        ws.onopen = () => {
+          state.previewWs = ws;
+          finish();
+        };
+        ws.onmessage = (event) => {
+          try { handleLivePreviewMessage(JSON.parse(event.data)); } catch {}
+        };
+        ws.onerror = () => finish();
+        ws.onclose = () => {
+          if (state.previewWs === ws) state.previewWs = null;
+          finish();
+        };
+        // Safety: don't block analysis if the WS never opens
+        setTimeout(finish, 1500);
+      } catch {
+        finish();
+      }
+    });
+  }
+
+  function closeLivePreview() {
+    state.livePreviewActive = false;
+    state.previewSessionId = null;
+    const ws = state.previewWs;
+    state.previewWs = null;
+    if (!ws) return;
+    try { ws.onmessage = null; ws.onerror = null; ws.onclose = null; } catch {}
+    try { ws.close(); } catch {}
+  }
+
   // ─── analysis flow ───────────────────────────────────────
   function buildFormData() {
     const fd = new FormData(form);
@@ -820,8 +1036,10 @@
     if (!text) return {};
     try { return JSON.parse(text); } catch { return { detail: text }; }
   }
-  async function postAnalysis() {
-    const response = await fetch("/api/analyze", { method: "POST", body: buildFormData() });
+  async function postAnalysis(sessionId) {
+    const fd = buildFormData();
+    if (sessionId) fd.set("session_id", sessionId);
+    const response = await fetch("/api/analyze", { method: "POST", body: fd });
     const payload = await parseResponse(response);
     if (!response.ok) throw new Error(payload.detail || `Analysis failed (HTTP ${response.status}).`);
     return payload;
@@ -872,6 +1090,7 @@
   function setRunningUI(isRunning) {
     state.analyzing = isRunning;
     runButton.classList.toggle("is-running", isRunning);
+    previewFrame.classList.toggle("is-analyzing", isRunning);
     const label = runButton.querySelector("span");
     if (label) label.textContent = isRunning ? "Analyzing…" : "Start Analysis";
     runButton.disabled = isRunning;
@@ -887,11 +1106,18 @@
     if (state.analyzing) return;
     setRunningUI(true);
     showProgress();
+    state.liveTimelineRows = [];
+    state.liveZoneMetrics = [];
+    renderZoneBars({ zoneMetrics: [] });
+    renderTtcChart({ timelineRows: [], events: [] });
+    const sessionId = await startLivePreview();
     try {
-      const payload = await postAnalysis();
+      const payload = await postAnalysis(sessionId);
+      closeLivePreview();
       renderResult(payload);
       finishProgress({ label: "Completed", status: "Analysis complete." });
     } catch (err) {
+      closeLivePreview();
       renderEmptyState();
       finishProgress({ label: "Failed", status: err.message || "Analysis failed.", isError: true });
     } finally {
@@ -1069,6 +1295,56 @@
     document.body.appendChild(overlay);
   }
 
+  function openJsonView() {
+    if (!state.lastResult) return;
+    const json = JSON.stringify(state.lastResult, null, 2);
+    const view = byId("telemetry-json-view");
+    if (view) view.textContent = json;
+
+    const drawer = byId("telemetry-drawer");
+    if (drawer) {
+      drawer.hidden = false;
+      void drawer.offsetHeight;
+      drawer.classList.add("is-open");
+    }
+  }
+
+  function closeTelemetryDrawer() {
+    const drawer = byId("telemetry-drawer");
+    if (!drawer) return;
+    drawer.classList.remove("is-open");
+    setTimeout(() => { if (!drawer.classList.contains("is-open")) drawer.hidden = true; }, 400);
+  }
+
+  function downloadJson() {
+    if (!state.lastResult) return;
+    const blob = new Blob([JSON.stringify(state.lastResult, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const sourceName = cleanResponsePayload(state.lastResult).sourceName;
+    const baseName = sourceName ? sourceName.split('.')[0] : 'spectra';
+    const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16).replace('T', '_');
+    a.download = `${baseName}_telemetry_${dateStr}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyJson() {
+    if (!state.lastResult) return;
+    const text = JSON.stringify(state.lastResult, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = byId("copy-json-btn");
+      if (btn) {
+        btn.style.color = "var(--safe)";
+        setTimeout(() => { btn.style.color = ""; }, 2000);
+      }
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  }
+
 
 
   // ─── init ────────────────────────────────────────────────
@@ -1094,6 +1370,11 @@
 
     byId("open-settings")?.addEventListener("click", openDrawer);
     byId("open-help")?.addEventListener("click", openHelpModal);
+    byId("view-jsonl-btn")?.addEventListener("click", openJsonView);
+    byId("download-json-btn")?.addEventListener("click", downloadJson);
+    byId("copy-json-btn")?.addEventListener("click", copyJson);
+
+    document.querySelectorAll("[data-telemetry-close]").forEach(el => el.addEventListener("click", closeTelemetryDrawer));
     
     byId("frames-min")?.addEventListener("click", () => {
       const input = byId("max-frames-input");

@@ -4,9 +4,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Spectrum</title>
+  <title>Spectra</title>
   <link rel="stylesheet" href="/static/style.css?v=137">
-  <script src="/static/app.js?v=125" defer></script>
+  <script src="/static/app.js?v=129" defer></script>
 </head>
 
 <body>
@@ -120,6 +120,17 @@
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <path d="M12 17h.01" />
     </symbol>
+    <symbol id="icon-file-text" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
+    </symbol>
+    <symbol id="icon-copy" viewBox="0 0 24 24">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </symbol>
   </svg>
 
   <form id="analysis-form" class="hidden-form" autocomplete="off">
@@ -140,7 +151,7 @@
             <use href="#icon-shield"></use>
           </svg></span>
         <div class="brand-text">
-          <h1>Spectrum</h1>
+          <h1>Spectra</h1>
         </div>
       </div>
 
@@ -314,7 +325,9 @@
             <header class="cockpit-header"
               style="border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); flex-direction: row; justify-content: space-between; align-items: center;">
               <h2>Event Timeline</h2>
-              <div class="header-row"></div>
+              <div class="header-row">
+                <div class="event-count-simple">Total Events: <span id="stat-total-events">—</span></div>
+              </div>
             </header>
             <div class="timeline-track">
               <div class="timeline-axis" id="timeline-axis">
@@ -401,7 +414,7 @@
             <div class="risk-banner-chart">
               <header class="chart-mini-header">
                 <h3>Temporal Analysis</h3>
-                <span></span>
+                <div class="event-count-simple">Avg TTC: <span id="stat-avg-ttc">—</span></div>
               </header>
               <div class="chart-container">
                 <div class="chart-y-axis">
@@ -445,16 +458,11 @@
                 style="border-top: 1px solid var(--border-soft); padding-top: 15px; margin-top: 5px;">
                 <h3>Analysis Statistics</h3>
               </header>
-              <div class="stats-grid">
-                <div class="stat-item">
-                  <span class="stat-label">Total Events</span>
-                  <span class="stat-value" id="stat-total-events">—</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">Avg TTC</span>
-                  <span class="stat-value" id="stat-avg-ttc">—</span>
-                </div>
-
+              <div class="stats-footer" style="margin-top: 18px;">
+                <button class="header-btn" style="width: 100%; justify-content: center; gap: 10px;" type="button" id="view-jsonl-btn">
+                  <svg style="width: 14px; height: 14px;"><use href="#icon-file-text"></use></svg>
+                  <span>View Analysis JSONL</span>
+                </button>
               </div>
             </div>
 
@@ -466,6 +474,33 @@
   </div>
 
   <!-- ─── Settings drawer ──────────────────────────────────── -->
+  <!-- ─── Telemetry Drawer ────────────────────────────────────── -->
+  <div id="telemetry-drawer" class="settings-drawer" hidden>
+    <div class="drawer-backdrop" data-telemetry-close></div>
+    <aside class="drawer-panel">
+      <header>
+        <h2>Raw Telemetry</h2>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+          <button class="bar-btn" id="copy-json-btn" title="Copy to Clipboard">
+            <svg style="width: 14px; height: 14px;"><use href="#icon-copy"></use></svg>
+          </button>
+          <button class="bar-btn" id="download-json-btn" title="Download JSON Result">
+            <svg style="width: 14px; height: 14px;"><use href="#icon-download"></use></svg>
+          </button>
+          <button class="drawer-close" type="button" data-telemetry-close aria-label="Close">
+            <svg><use href="#icon-x"></use></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="drawer-body" style="padding: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <pre id="telemetry-json-view" style="margin: 0; flex: 1; padding: 24px; background: #07080c; color: #10b981; font-size: 11px; font-family: var(--font-mono); overflow: auto; scrollbar-width: thin; line-height: 1.6;"></pre>
+      </div>
+
+
+    </aside>
+  </div>
+
   <div id="settings-drawer" class="settings-drawer" hidden>
     <div class="drawer-backdrop" data-drawer-close></div>
     <aside class="drawer-panel">
@@ -566,7 +601,7 @@
               <use href="#icon-help"></use>
             </svg></div>
           <div>
-            <h3>How Spectrum Works</h3>
+            <h3>How Spectra Works</h3>
           </div>
         </div>
         <button class="modal-close" data-help-close>&times;</button>
