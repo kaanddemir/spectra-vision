@@ -357,34 +357,6 @@ svg {
 }
 .preview-empty[hidden] { display: none; }
 
-.preview-status {
-  position: absolute;
-  z-index: 5;
-  top: 12px; left: 12px;
-  display: none;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(11,12,16,0.75);
-  border: 1px solid rgba(16,185,129,0.4);
-  color: #d1fae5;
-  font-size: 11px;
-  font-weight: 600;
-  backdrop-filter: blur(8px);
-}
-.preview-status .status-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--safe);
-  box-shadow: 0 0 0 4px rgba(16,185,129,0.18);
-  animation: pulse-dot 1.6s ease-in-out infinite;
-}
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
 /* ─── Side Info Bar (Top-Right) ────────────────────────── */
 /* ─── Side Bar Dock (Transparent Portable Bar) ───────── */
 .side-bar-dock {

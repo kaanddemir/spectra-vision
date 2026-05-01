@@ -18,8 +18,6 @@
   const timeCurrent = document.querySelector("#time-current");
   const timeTotal = document.querySelector("#time-total");
 
-  const previewStatus = document.querySelector("#preview-status");
-
   const state = {
     previewUrl: "",
     lastResult: null,
@@ -38,7 +36,7 @@
     previewSessionId: null,
     livePreviewActive: false,
     liveTimelineRows: [],
-    liveZoneMetrics: [],
+    liveEvents: [],
   };
 
   const byId = (id) => document.getElementById(id);
@@ -73,6 +71,13 @@
     const n = num(v, null);
     return n === null ? MISSING : `${n.toFixed(1)}s`;
   };
+  const normalizeDisplayTtc = (stateOrBand, ttc) => {
+    const n = num(ttc, null);
+    if (n === null || n <= 0.05) return null;
+    const sc = stateClass(stateOrBand);
+    if (sc === "safe" && n < 3.0) return null;
+    return n;
+  };
   const fmtNumber = (v, digits = 1, suffix = "") => {
     const n = num(v, null);
     return n === null ? MISSING : `${n.toFixed(digits)}${suffix}`;
@@ -102,6 +107,7 @@
     if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
     return legacyKey ? row[legacyKey] : undefined;
   };
+  const timelineKey = (row) => `${row?.frameIndex ?? ""}:${num(rowValue(row, "timeSec", "Time (s)"), null) ?? ""}`;
 
   const stateClass = (stateOrBand) => {
     const v = String(stateOrBand || "").toLowerCase();
@@ -109,6 +115,15 @@
     if (v === "caution" || v === "medium") return "caution";
     if (v === "safe" || v === "low") return "safe";
     return "none";
+  };
+  const eventSeverityScore = (ev) => {
+    const sc = stateClass(ev?.riskState || ev?.riskBand || ev?.hazardBand);
+    const stateWeight = sc === "danger" ? 2 : sc === "caution" ? 1 : 0;
+    const ttc = num(ev?.ttcSec ?? ev?.estimatedTtcSec ?? ev?.estimated_ttc_sec, null);
+    const ttcWeight = ttc === null ? 0 : clamp((3 - ttc) / 3, 0, 1);
+    const near = num(ev?.nearScore ?? ev?.near_score, 0);
+    const closing = num(ev?.closingSpeed ?? ev?.closing_speed, 0);
+    return stateWeight + ttcWeight + near + closing;
   };
   const riskClass = (sb) => {
     const c = stateClass(sb);
@@ -172,7 +187,6 @@
       timeTotal.textContent = "00:00";
       seekBar.value = 0;
       seekBar.style.setProperty("--fill", "0%");
-      previewStatus.hidden = true;
       hidePreviewOverlay();
       updateMapIndicators();
       refreshEmptyStates(true);
@@ -346,10 +360,6 @@
     return response?.payload && typeof response.payload === "object" ? response.payload : (response || {});
   }
 
-  function cleanResponseEnvelope(response) {
-    return { payload: cleanResponsePayload(response) };
-  }
-
   function sameEvent(a, b) {
     if (!a || !b) return false;
     return a.frameIndex === b.frameIndex && num(a.timestampSec, null) === num(b.timestampSec, null);
@@ -451,8 +461,8 @@
     timeTotal.textContent = dur;
     timeCurrent.textContent = "00:00";
     
-    // Estimate total frames (assume 30fps for UI placeholder)
-    const estFrames = Math.round(previewVideo.duration * 30);
+    // Estimate frames assuming up to 60fps — backend clamps to actual frame count.
+    const estFrames = Math.ceil(previewVideo.duration * 60);
     const meta = byId("selected-meta");
     if (meta) {
       meta.innerHTML = `<div>Duration: ${dur}</div><div>Est. Frames: ${estFrames}</div>`;
@@ -502,7 +512,7 @@
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
     banner.classList.add(riskClass(stateLabel));
     byId("risk-band-main").textContent = stateLabel || MISSING;
-    byId("alert-ttc").textContent = ttcLabel(ttc);
+    byId("alert-ttc").textContent = ttcLabel(normalizeDisplayTtc(stateLabel, ttc));
     byId("risk-subtitle").textContent = subtitleFor(sc, lane);
     const tag = byId("risk-time-tag");
     if (tag) {
@@ -536,7 +546,7 @@
         return;
       }
       const score = num(z.score, 0);
-      const ttc = num(z.ttcSec ?? z.estimated_ttc_sec, null);
+      const ttc = normalizeDisplayTtc(z.riskState || z.riskBand || null, z.ttcSec ?? z.estimated_ttc_sec);
       const pct = clamp(Math.round(score * 100), 0, 100);
       fill.style.width = `${pct}%`;
       value.textContent = String(pct);
@@ -569,7 +579,15 @@
     const strip = byId("event-strip");
     strip.replaceChildren();
 
-    if (!events.length) {
+    // Show only meaningful events (CAUTION/DANGER). SAFE frames are noise
+    // for the user — they belong on the temporal chart, not the event strip.
+    const isMeaningful = (ev) => {
+      const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
+      return sc === "caution" || sc === "danger";
+    };
+    const hasMeaningful = events.some(isMeaningful);
+
+    if (!hasMeaningful) {
       const e = document.createElement("div");
       e.className = "event-empty";
       e.textContent = "No events yet";
@@ -578,6 +596,7 @@
     }
 
     events.forEach((ev, idx) => {
+      if (!isMeaningful(ev)) return;
       const ts = num(ev.timestampSec, null);
       if (ts === null) return;
       const left = clamp((ts / totalDur) * 100, 0, 100);
@@ -588,13 +607,14 @@
       dot.style.left = `${left}%`;
       dot.title = `#${idx + 1} · ${formatSeconds(ts)} · ${ev.riskState || ev.riskBand || ev.hazardBand || ""}`;
       dot.addEventListener("click", () => focusEvent(idx));
-      
 
-      
+
+
       track.appendChild(dot);
     });
 
     events.forEach((ev, idx) => {
+      if (!isMeaningful(ev)) return;
       const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
       const ts = num(ev.timestampSec, 0);
       const card = document.createElement("button");
@@ -606,6 +626,7 @@
       const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || fallbackImages.original || fallbackImages.blend);
       const m = ev.metrics || ev || {};
       const ttcVal = m.ttc !== undefined ? m.ttc : (m.ttcSec ?? m.estimatedTtcSec);
+      const displayTtcVal = normalizeDisplayTtc(ev.riskState || ev.riskBand || ev.hazardBand, ttcVal);
       const nearVal = num(m.nearScore, null);
       const speedVal = num(m.closingSpeed ?? m.velocityMagnitude, null);
 
@@ -625,7 +646,7 @@
             </div>
             <div class="metric-box m-risk">
               <span class="m-label">TTC</span>
-              <span class="m-value">${ttcLabel(ttcVal)}</span>
+              <span class="m-value">${ttcLabel(displayTtcVal)}</span>
             </div>
             <div class="metric-box">
               <span class="m-label">Near</span>
@@ -682,12 +703,30 @@
     if (!path) return;
 
     const rows = result?.timelineRows || [];
+    // Backend reports ttcSec=null for frames with no detected closing motion.
+    // Treat those as the SAFE baseline (chart max) so the line reads as a
+    // flat green stretch instead of vanishing — otherwise min-bucketing over
+    // only the noisy short-TTC samples paints the whole chart as DANGER.
+    const SAFE_BASELINE_TTC = 6.0;
     const points = rows
-      .map((r) => ({ t: num(rowValue(r, "timeSec", "Time (s)"), null), ttc: num(rowValue(r, "ttcSec", "TTC (s)"), null) }))
-      .filter((p) => p.t !== null && p.ttc !== null && p.ttc >= 0)
+      .map((r) => {
+        const rowState = rowValue(r, "riskState", "State");
+        const rawTtc = num(rowValue(r, "ttcSec", "TTC (s)"), null);
+        return {
+          t: num(rowValue(r, "timeSec", "Time (s)"), null),
+          ttcRaw: stateClass(rowState) === "safe" ? null : rawTtc,
+        };
+      })
+      .filter((p) => p.t !== null && (p.ttcRaw === null || p.ttcRaw >= 0))
+      .map((p) => ({
+        t: p.t,
+        ttc: p.ttcRaw === null || p.ttcRaw <= 0.05 ? SAFE_BASELINE_TTC : p.ttcRaw,
+        measured: p.ttcRaw !== null && p.ttcRaw > 0.05,
+      }))
       .sort((a, b) => a.t - b.t);
 
-    const totalDur = state.sourceMeta?.durationSec
+    const totalDur = currentTotalDuration()
+      || state.sourceMeta?.durationSec
       || (points.length ? Math.max(...points.map((p) => p.t)) : 1);
 
     if (!points.length) {
@@ -698,16 +737,24 @@
       return;
     }
 
-    // Calculate stats on raw points
-    const avgTtc = points.reduce((acc, p) => acc + p.ttc, 0) / points.length;
-    if (avgTtcEl) avgTtcEl.textContent = `${avgTtc.toFixed(1)}s`;
+    // Average only over frames where TTC was actually measured: it answers
+    // "how close did we get when something was approaching", not "how often".
+    const measured = points.filter((p) => p.measured);
+    const avgTtc = measured.length
+      ? measured.reduce((acc, p) => acc + p.ttc, 0) / measured.length
+      : null;
+    if (avgTtcEl) avgTtcEl.textContent = avgTtc === null ? "—" : `${avgTtc.toFixed(1)}s`;
 
-    // Update consolidated statistics grid
+    // Total events count reflects the filtered strip below (CAUTION + DANGER only).
     const totalEventsEl = byId("stat-total-events");
-    if (totalEventsEl) totalEventsEl.textContent = result?.events?.length || "0";
+    if (totalEventsEl) {
+      const meaningfulEvents = (result?.events || []).filter((ev) => {
+        const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
+        return sc === "caution" || sc === "danger";
+      });
+      totalEventsEl.textContent = String(meaningfulEvents.length);
+    }
 
-    // Time-bucket dense timelines using MIN TTC per bucket so worst-case (danger) moments
-    // are preserved when downsampling for visual consistency with live preview.
     const TARGET_POINTS = 60;
     let dense = points;
     if (points.length > TARGET_POINTS) {
@@ -718,16 +765,15 @@
         const endIdx = Math.max(startIdx + 1, Math.floor((i + 1) * step));
         const slice = points.slice(startIdx, endIdx);
         if (!slice.length) continue;
-        const avgT = (i === 0) ? slice[0].t : (slice.reduce((a, b) => a + b.t, 0) / slice.length);
-        const minTtc = slice.reduce((m, b) => Math.min(m, b.ttc), Infinity);
+        const avgT = i === 0 ? slice[0].t : slice.reduce((acc, p) => acc + p.t, 0) / slice.length;
+        const minTtc = slice.reduce((min, p) => Math.min(min, p.ttc), SAFE_BASELINE_TTC);
         dense.push({ t: avgT, ttc: minTtc });
       }
     }
 
-    // Smooth points for display (5-point moving average)
     const smoothed = dense.map((p, i) => {
       const window = dense.slice(Math.max(0, i - 2), Math.min(dense.length, i + 3));
-      const avg = window.reduce((a, b) => a + b.ttc, 0) / window.length;
+      const avg = window.reduce((acc, item) => acc + item.ttc, 0) / window.length;
       return { ...p, ttc: avg };
     });
 
@@ -827,7 +873,7 @@
     const sc = stateClass(stateLabel);
     applyRiskBannerState({
       stateLabel,
-      ttc: rowValue(row, "ttcSec", "TTC (s)"),
+      ttc: normalizeDisplayTtc(stateLabel, rowValue(row, "ttcSec", "TTC (s)")),
       lane: rowValue(row, "zone", "Zone"),
       sc,
       timeTag: `${labelPrefix}: <span>${formatSeconds(rowTime)}</span>`,
@@ -894,7 +940,7 @@
   // ─── full render ─────────────────────────────────────────
   function renderResult(payload) {
     const result = normalizePayload(payload);
-    state.lastResult = cleanResponseEnvelope(payload);
+    state.lastResult = { payload: cleanResponsePayload(payload) };
     state.currentResult = result;
     state.timelineRows = result.timelineRows || [];
     state.events = result.events || [];
@@ -904,14 +950,21 @@
     setMiniMedia("road", result.images.road);
     setMiniMedia("motion", result.images.motion);
 
-    showPreviewOverlay(result.images.blend, 5000);
+    hidePreviewOverlay();
 
     renderStatRow(result);
-    renderRiskBannerFromMetrics(result.metrics);
-
-    renderZoneBars(result);
     renderTimeline(result);
     renderTtcChart(result);
+
+    const lastRow = state.timelineRows[state.timelineRows.length - 1];
+    const lastTime = num(rowValue(lastRow, "timeSec", "Time (s)"), null);
+    if (lastTime !== null) {
+      seekPreviewVideo(lastTime);
+      applyTimelineStateAt(lastTime, { labelPrefix: "Final", updateImages: false });
+    } else {
+      renderRiskBannerFromMetrics(result.metrics);
+      renderZoneBars(result);
+    }
     updateMapIndicators();
   }
 
@@ -920,6 +973,7 @@
     state.currentResult = null;
     state.timelineRows = [];
     state.events = [];
+    state.liveEvents = [];
     setMiniMedia("depth", "");
     setMiniMedia("segmentation", "");
     setMiniMedia("road", "");
@@ -963,7 +1017,7 @@
     const ts = num(msg.timestampSec, 0);
     applyRiskBannerState({
       stateLabel,
-      ttc: msg.ttcSec,
+      ttc: normalizeDisplayTtc(stateLabel, msg.ttcSec),
       lane: msg.zone,
       sc,
       timeTag: `Live: <span>${formatSeconds(ts)}</span>`,
@@ -976,13 +1030,19 @@
     }
 
     if (Array.isArray(msg.zoneMetrics) && msg.zoneMetrics.length) {
-      state.liveZoneMetrics = msg.zoneMetrics;
       renderZoneBars({ zoneMetrics: msg.zoneMetrics });
     }
 
-    if (msg.timelineRow) {
-      state.liveTimelineRows.push(msg.timelineRow);
-      renderTtcChart({ timelineRows: state.liveTimelineRows, events: [] });
+    const eventsChanged = upsertLiveEventFromMessage(msg);
+    const rowsChanged = appendLiveTimelineRows(Array.isArray(msg.timelineRows) ? msg.timelineRows : msg.timelineRow);
+    if (rowsChanged) {
+      state.timelineRows = state.liveTimelineRows;
+    }
+    if (eventsChanged) {
+      renderTimeline({ events: state.liveEvents });
+    }
+    if (rowsChanged || eventsChanged) {
+      renderTtcChart({ timelineRows: state.liveTimelineRows, events: state.liveEvents });
     }
   }
 
@@ -1032,6 +1092,65 @@
     try { ws.close(); } catch {}
   }
 
+  function appendLiveTimelineRows(rows) {
+    const incoming = Array.isArray(rows) ? rows : (rows ? [rows] : []);
+    if (!incoming.length) return false;
+    const seen = new Set(state.liveTimelineRows.map(timelineKey));
+    let changed = false;
+    incoming.forEach((row) => {
+      const key = timelineKey(row);
+      if (seen.has(key)) return;
+      state.liveTimelineRows.push(row);
+      seen.add(key);
+      changed = true;
+    });
+    if (changed) {
+      state.liveTimelineRows.sort((a, b) => {
+        const ta = num(rowValue(a, "timeSec", "Time (s)"), 0);
+        const tb = num(rowValue(b, "timeSec", "Time (s)"), 0);
+        return ta - tb;
+      });
+    }
+    return changed;
+  }
+
+  function upsertLiveEventFromMessage(msg) {
+    const sc = stateClass(msg?.riskState);
+    if (sc !== "danger" && sc !== "caution") return false;
+    const ts = num(msg.timestampSec, null);
+    if (ts === null) return false;
+
+    const candidate = {
+      frameIndex: msg.frameIndex,
+      timestampSec: ts,
+      riskState: String(msg.riskState || "").toUpperCase(),
+      riskBand: sc,
+      zone: msg.zone,
+      ttcSec: msg.ttcSec,
+      nearScore: msg.nearScore,
+      closingSpeed: msg.closingSpeed,
+      objectType: msg.zone ? `${msg.zone} zone` : "zone",
+      images: msg.frame ? { blend: msg.frame } : {},
+    };
+
+    let replaceIndex = -1;
+    for (let i = 0; i < state.liveEvents.length; i++) {
+      if (Math.abs(num(state.liveEvents[i].timestampSec, 0) - ts) <= 1.0) {
+        replaceIndex = i;
+        break;
+      }
+    }
+    if (replaceIndex >= 0) {
+      if (eventSeverityScore(candidate) <= eventSeverityScore(state.liveEvents[replaceIndex])) return false;
+      state.liveEvents[replaceIndex] = candidate;
+    } else {
+      state.liveEvents.push(candidate);
+    }
+    state.liveEvents.sort((a, b) => num(a.timestampSec, 0) - num(b.timestampSec, 0));
+    state.events = state.liveEvents.slice();
+    return true;
+  }
+
   // ─── analysis flow ───────────────────────────────────────
   function buildFormData() {
     const fd = new FormData(form);
@@ -1072,7 +1191,6 @@
         else status.textContent = "Analysis in progress…";
       }
     }, 100);
-    previewStatus.hidden = true;
   }
   function finishProgress({ label = "Completed", status = "Analysis complete.", isError = false } = {}) {
     const el = byId("analysis-progress");
@@ -1083,7 +1201,6 @@
     el.classList.toggle("is-error", isError);
     byId("ap-label").textContent = label;
     byId("ap-status").textContent = status;
-    previewStatus.hidden = true;
     window.setTimeout(() => {
       if (!state.analyzing) hideProgress();
     }, isError ? 3200 : 1800);
@@ -1093,7 +1210,6 @@
     if (el) el.hidden = true;
     if (el) el.classList.remove("is-complete", "is-error");
     if (state.progressTimer) { clearInterval(state.progressTimer); state.progressTimer = null; }
-    previewStatus.hidden = true;
   }
   function setRunningUI(isRunning) {
     state.analyzing = isRunning;
@@ -1115,8 +1231,10 @@
     setRunningUI(true);
     showProgress();
     state.liveTimelineRows = [];
-    state.liveZoneMetrics = [];
+    state.liveEvents = [];
+    state.events = [];
     renderZoneBars({ zoneMetrics: [] });
+    renderTimeline({ events: [] });
     renderTtcChart({ timelineRows: [], events: [] });
     const sessionId = await startLivePreview();
     try {
@@ -1397,7 +1515,7 @@
 
     byId("open-settings")?.addEventListener("click", openDrawer);
     byId("open-help")?.addEventListener("click", openHelpModal);
-    byId("view-jsonl-btn")?.addEventListener("click", openJsonView);
+    byId("view-json-btn")?.addEventListener("click", openJsonView);
     byId("download-json-btn")?.addEventListener("click", downloadJson);
     byId("copy-json-btn")?.addEventListener("click", copyJson);
 

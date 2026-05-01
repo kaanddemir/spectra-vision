@@ -21,7 +21,7 @@ from zone_risk.pipeline.api import analyze_zone_video
 
 _PREVIEW_QUEUES: dict[str, asyncio.Queue] = {}
 _PREVIEW_QUEUE_MAX = 24
-
+_MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
 VIDEO_TYPES = {"mp4", "mov", "avi", "mkv", "m4v"}
 
@@ -221,7 +221,8 @@ async def analyze_endpoint(
     max_saved_events: int = Form(6),
     resize_max_side: int = Form(640),
     depth_every: int = Form(10),
-    enable_road_roi: bool = Form(False),
+    use_depth_model: bool = Form(True),
+    use_flow_model: bool = Form(True),
     start_sec: float = Form(0.0),
     end_sec: float = Form(0.0),
     session_id: str = Form(""),
@@ -230,9 +231,14 @@ async def analyze_endpoint(
         raise HTTPException(status_code=400, detail="Only video analysis is supported.")
     _validate_video_upload(file)
 
-    upload_bytes = await file.read()
+    upload_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
     if not upload_bytes:
         raise HTTPException(status_code=400, detail="Upload is empty.")
+    if len(upload_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit.",
+        )
 
     source_name = Path(file.filename or f"upload.{_extension(file.filename)}").name
 
@@ -267,11 +273,13 @@ async def analyze_endpoint(
             result = await asyncio.to_thread(
                 analyze_zone_video,
                 video_path=source_path,
-                max_processed_frames=max(1, int(max_processed_frames)),
-                max_saved_events=max(1, int(max_saved_events)),
-                resize_max_side=max(128, int(resize_max_side)),
+                max_processed_frames=min(2000, max(1, int(max_processed_frames))),
+                max_saved_events=min(50, max(1, int(max_saved_events))),
+                resize_max_side=min(1920, max(128, int(resize_max_side))),
                 depth_every=max(1, int(depth_every)),
-                enable_road_roi=bool(enable_road_roi),
+                enable_road_roi=True,
+                use_depth_model=bool(use_depth_model),
+                use_flow_model=bool(use_flow_model),
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
                 progress_callback=progress_callback if queue is not None else None,

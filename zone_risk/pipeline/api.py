@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,7 +16,14 @@ from ..vision.optical_flow import compute_velocity, flow_to_rgb
 from ..vision.preprocess import preprocess_frame
 from ..vision.road_roi import RoadROI, estimate_road_roi, fallback_road_roi
 from .annotator import annotate_frame
-from .risk_calculator import RiskEvent
+from .risk_calculator import (
+    MetricEmaSmoother,
+    RiskEvent,
+    StateStabilizer,
+    score_raw,
+    select_primary_event,
+    stabilized_event_state,
+)
 from .video_loader import VideoLoader
 
 
@@ -113,13 +121,14 @@ def _line_x_at_y(line: tuple[int, int, int, int], y: int) -> int:
 
 
 def _risk_score(event: RiskEvent) -> float:
-    base = {
-        "SAFE": 0.18,
-        "CAUTION": 0.56,
-        "DANGER": 0.88,
+    state_floor = {
+        "SAFE": 0.06,
+        "CAUTION": 0.42,
+        "DANGER": 0.68,
     }.get(event.state, 0.0)
     signal = min(1.0, (0.52 * event.near_score) + (0.48 * event.closing_speed))
-    return round(float(max(base, signal)), 3)
+    ttc_pressure = 0.0 if event.ttc_sec is None else max(0.0, 3.0 - float(event.ttc_sec)) / 3.0
+    return round(float(max(state_floor, (0.48 * signal) + (0.52 * ttc_pressure))), 3)
 
 
 def _zone_metric(event: RiskEvent) -> dict[str, Any]:
@@ -217,6 +226,8 @@ def analyze_zone_video(
     resize_max_side: int,
     depth_every: int = 10,
     enable_road_roi: bool = False,
+    use_depth_model: bool = True,
+    use_flow_model: bool = True,
     start_sec: float = 0.0,
     end_sec: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -224,27 +235,27 @@ def analyze_zone_video(
 ) -> dict[str, Any]:
     """Run zone-based risk analysis and return the UI-compatible result shape."""
 
-    loader = VideoLoader(video_path, max_frames=max_processed_frames, start_sec=start_sec, end_sec=end_sec)
+    loader = VideoLoader(video_path, max_frames=None, start_sec=start_sec, end_sec=end_sec)
+    # Clamp max_processed_frames to the video's actual frame count so short
+    # videos are always analyzed in full regardless of the caller's default.
+    if loader.frame_count > 0:
+        max_processed_frames = min(max_processed_frames, loader.frame_count)
+    loader.max_frames = max_processed_frames
 
-    previous_gray: np.ndarray | None = None
+    previous_frame = None
     last_depth: DepthResult | None = None
     saved_events: list[dict[str, Any]] = []
     timeline_rows: list[dict[str, Any]] = []
-    from .risk_calculator import StateStabilizer
+    preview_rows_buffer: list[dict[str, Any]] = []
+    metric_smoother = MetricEmaSmoother()
     stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
     processed_frames = 0
-
-    _STATE_RANK = {"SAFE": 0, "CAUTION": 1, "DANGER": 2}
-    _RANK_STATE = {v: k for k, v in _STATE_RANK.items()}
-    window_min_ttc: float | None = None
-    window_worst_rank: int = 0
-    window_worst_zone: str | None = None
 
     for video_frame in loader.frames():
         frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
         road_roi = estimate_road_roi(frame.bgr) if enable_road_roi else fallback_road_roi(frame.bgr.shape)
-        flow = compute_velocity(previous_gray, frame.gray)
-        previous_gray = frame.gray
+        flow = compute_velocity(previous_frame, frame, use_flow_model=use_flow_model)
+        previous_frame = frame
 
         # 1. Fast Analysis: Estimate quick risk from motion (optical flow)
         quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
@@ -255,23 +266,30 @@ def analyze_zone_video(
         is_high_risk = quick_risk > 0.15
         is_periodic = video_frame.frame_index % max(depth_every, 1) == 0
 
-        if last_depth is None or is_high_risk or is_periodic:
-            last_depth = estimate_frame_depth(frame)
+        # DL model is expensive — only run on schedule, not on every high-risk frame.
+        # Classical cues are cheap enough to re-run on high-risk frames.
+        needs_depth = last_depth is None or is_periodic or (not use_depth_model and is_high_risk)
+        if needs_depth:
+            last_depth = estimate_frame_depth(frame, use_depth_model=use_depth_model)
 
         # 3. Final Fusion: Combine flow and current (or reused) depth
-        primary_event, all_events = fuse_frame_risk(
+        _, raw_events = fuse_frame_risk(
             frame_index=video_frame.frame_index,
             timestamp_sec=video_frame.timestamp_sec,
             depth=last_depth,
             flow=flow,
             road_roi=road_roi if enable_road_roi else None,
         )
+        all_events = metric_smoother.smooth_events(raw_events)
+        primary_event = select_primary_event(all_events)
 
         # 4. Smooth State Transitions (Hysteresis)
-        stabilized_state = stabilizer.process(primary_event.state)
-        # Update primary_event with stabilized state
-        from dataclasses import replace
-        primary_event = replace(primary_event, state=stabilized_state)
+        stabilized_state = stabilized_event_state(stabilizer, primary_event)
+        primary_event = replace(
+            primary_event,
+            state=stabilized_state,
+            ttc_sec=None if stabilized_state == "SAFE" else primary_event.ttc_sec,
+        )
 
         annotated = annotate_frame(frame.bgr, primary_event, all_events)
         event_payload = _event_payload(
@@ -305,30 +323,22 @@ def analyze_zone_video(
             z_key = str(ev.zone).lower().split()[0] # "left", "center", "right"
             zone_scores[z_key] = _risk_score(ev)
 
-        timeline_rows.append(
-            {
-                "frameIndex": primary_event.frame_index,
-                "timeSec": round(primary_event.timestamp_sec, 2),
-                "riskState": primary_event.state,
-                "riskBand": BAND_BY_STATE.get(primary_event.state, "low"),
-                "zone": primary_event.zone,
-                "direction": primary_event.direction,
-                "ttcSec": primary_event.ttc_sec,
-                "nearScore": primary_event.near_score,
-                "closingSpeed": primary_event.closing_speed,
-                "zoneScores": zone_scores,
-            }
-        )
+        timeline_row = {
+            "frameIndex": primary_event.frame_index,
+            "timeSec": round(primary_event.timestamp_sec, 2),
+            "riskState": primary_event.state,
+            "riskBand": BAND_BY_STATE.get(primary_event.state, "low"),
+            "zone": primary_event.zone,
+            "direction": primary_event.direction,
+            "ttcSec": primary_event.ttc_sec,
+            "nearScore": primary_event.near_score,
+            "closingSpeed": primary_event.closing_speed,
+            "zoneScores": zone_scores,
+        }
+        timeline_rows.append(timeline_row)
+        if progress_callback is not None:
+            preview_rows_buffer.append(timeline_row)
         processed_frames += 1
-
-        # Track worst-case TTC and state across the interval since the last preview push
-        if primary_event.ttc_sec is not None:
-            if window_min_ttc is None or primary_event.ttc_sec < window_min_ttc:
-                window_min_ttc = float(primary_event.ttc_sec)
-        cur_rank = _STATE_RANK.get(primary_event.state, 0)
-        if cur_rank >= window_worst_rank:
-            window_worst_rank = cur_rank
-            window_worst_zone = primary_event.zone
 
         is_first_frame = (processed_frames == 1)
         if progress_callback is not None and (is_first_frame or processed_frames % max(1, int(progress_every)) == 0):
@@ -344,15 +354,7 @@ def analyze_zone_video(
                 }
                 for ev in all_events
             ]
-            worst_state = _RANK_STATE.get(window_worst_rank, primary_event.state)
-            worst_zone = window_worst_zone or primary_event.zone
-            window_ttc = window_min_ttc
-            timeline_row_payload = {
-                "timeSec": round(float(primary_event.timestamp_sec), 2),
-                "riskState": worst_state,
-                "ttcSec": None if window_ttc is None else float(window_ttc),
-                "zone": worst_zone,
-            }
+            timeline_rows_payload = list(preview_rows_buffer)
             try:
                 progress_callback(
                     {
@@ -360,20 +362,42 @@ def analyze_zone_video(
                         "frameIndex": int(primary_event.frame_index),
                         "timestampSec": float(primary_event.timestamp_sec),
                         "progress": progress_pct,
-                        "riskState": worst_state,
-                        "ttcSec": None if window_ttc is None else float(window_ttc),
-                        "zone": worst_zone,
+                        "riskState": primary_event.state,
+                        "ttcSec": None if primary_event.ttc_sec is None else float(primary_event.ttc_sec),
+                        "zone": primary_event.zone,
+                        "nearScore": float(primary_event.near_score),
+                        "closingSpeed": float(primary_event.closing_speed),
                         "frame": preview_uri,
                         "zoneMetrics": zone_metrics_payload,
-                        "timelineRow": timeline_row_payload,
+                        "timelineRow": timeline_row,
+                        "timelineRows": timeline_rows_payload,
                     }
                 )
             except Exception:
                 pass
-            # Reset interval aggregators for the next push window
-            window_min_ttc = None
-            window_worst_rank = 0
-            window_worst_zone = None
+            preview_rows_buffer.clear()
+
+    if progress_callback is not None and preview_rows_buffer and timeline_rows:
+        final_row = timeline_rows[-1]
+        try:
+            progress_callback(
+                {
+                    "type": "preview",
+                    "frameIndex": int(final_row["frameIndex"]),
+                    "timestampSec": float(final_row["timeSec"]),
+                    "progress": 100.0,
+                    "riskState": final_row["riskState"],
+                    "ttcSec": None if final_row["ttcSec"] is None else float(final_row["ttcSec"]),
+                    "zone": final_row["zone"],
+                    "nearScore": float(final_row["nearScore"]),
+                    "closingSpeed": float(final_row["closingSpeed"]),
+                    "timelineRow": final_row,
+                    "timelineRows": list(preview_rows_buffer),
+                }
+            )
+        except Exception:
+            pass
+        preview_rows_buffer.clear()
 
     peak_event = saved_events[0] if saved_events else None
     return {
@@ -392,10 +416,9 @@ def analyze_zone_video(
 
 
 def score_event_payload(payload: dict[str, Any]) -> float:
-    state = str(payload.get("risk_state") or "").upper()
-    state_weight = {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(state, 0.0)
-    ttc = payload.get("estimated_ttc_sec")
-    ttc_weight = 0.0 if ttc is None else max(0.0, 3.0 - float(ttc)) / 3.0
-    near = float(payload.get("near_score") or 0.0)
-    closing = float(payload.get("closing_speed") or 0.0)
-    return state_weight + ttc_weight + near + closing
+    return score_raw(
+        state=str(payload.get("risk_state") or "").upper(),
+        ttc_sec=payload.get("estimated_ttc_sec"),
+        near_score=float(payload.get("near_score") or 0.0),
+        closing_speed=float(payload.get("closing_speed") or 0.0),
+    )

@@ -65,10 +65,8 @@ zone_risk/
     api.py
     annotator.py
     fusion.py
-    main.py
     risk_calculator.py
     video_loader.py
-    video_writer.py
   vision/
     depth_cues.py
     depth_estimator.py
@@ -133,12 +131,6 @@ zone_risk/
 13. `zone_risk/pipeline/annotator.py`
     - Draws zone risk boxes and summary text onto frames
 
-14. `zone_risk/pipeline/video_writer.py`
-    - Used by the optional CLI path for annotated video and JSONL event output
-
-15. `zone_risk/pipeline/main.py`
-    - Optional CLI runner for local video files
-
 ## API
 
 Health check:
@@ -166,17 +158,6 @@ Supported video extensions:
 
 ```text
 mp4, mov, avi, mkv, m4v
-```
-
-## CLI
-
-Run the zone pipeline without the web UI:
-
-```bash
-python -m zone_risk.pipeline.main \
-  --input input.mp4 \
-  --output zone_output/annotated.mp4 \
-  --events zone_output/events.jsonl
 ```
 
 ## Development Checks

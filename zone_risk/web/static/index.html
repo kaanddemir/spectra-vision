@@ -5,8 +5,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Spectra</title>
-  <link rel="stylesheet" href="/static/style.css?v=137">
-  <script src="/static/app.js?v=132" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=138">
+  <script src="/static/app.js?v=138" defer></script>
 </head>
 
 <body>
@@ -138,7 +138,8 @@
     <input type="hidden" name="mode" value="video">
     <input type="hidden" name="max_processed_frames" value="180">
     <input type="hidden" name="depth_every" value="10">
-    <input type="hidden" name="enable_road_roi" value="0">
+    <input type="hidden" name="use_depth_model" value="1">
+    <input type="hidden" name="use_flow_model" value="1">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
   </form>
@@ -204,7 +205,6 @@
             <video id="visual-original-video" muted playsinline preload="metadata" hidden></video>
             <img id="visual-blend" class="preview-overlay" alt="Risk overlay" hidden>
 
-            <div class="preview-status" id="preview-status" hidden></div>
             <figcaption class="preview-empty" id="empty-video">No video uploaded</figcaption>
             <figcaption class="preview-empty" id="empty-depth" hidden>No depth data available</figcaption>
             <figcaption class="preview-empty" id="empty-road" hidden>No road tracking available</figcaption>
@@ -460,9 +460,9 @@
                 <h3>Analysis Statistics</h3>
               </header>
               <div class="stats-footer" style="margin-top: 18px;">
-                <button class="header-btn" style="width: 100%; justify-content: center; gap: 10px;" type="button" id="view-jsonl-btn">
+                <button class="header-btn" style="width: 100%; justify-content: center; gap: 10px;" type="button" id="view-json-btn">
                   <svg style="width: 14px; height: 14px;"><use href="#icon-file-text"></use></svg>
-                  <span>View Analysis JSONL</span>
+                  <span>View Analysis JSON</span>
                 </button>
               </div>
             </div>
@@ -552,12 +552,21 @@
           </label>
 
           <div class="drawer-row drawer-toggle-row">
-            <span>Dynamic Road ROI</span>
-            <label class="toggle-switch" aria-label="Dynamic Road ROI">
-              <input id="road-roi-toggle" data-param="enable_road_roi" type="checkbox">
+            <span>AI Depth Model</span>
+            <label class="toggle-switch" aria-label="AI Depth Model">
+              <input id="depth-model-toggle" data-param="use_depth_model" type="checkbox" checked>
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
           </div>
+
+          <div class="drawer-row drawer-toggle-row">
+            <span>AI Flow Model</span>
+            <label class="toggle-switch" aria-label="AI Flow Model">
+              <input id="flow-model-toggle" data-param="use_flow_model" type="checkbox" checked>
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+
         </div>
 
         <div class="drawer-section">
@@ -663,16 +672,16 @@
               <div class="step-files">
                 <code>zone_risk/pipeline/fusion.py</code>
                 <code>zone_risk/pipeline/risk_calculator.py</code>
-                <code>zone_risk/pipeline/event_manager.py</code>
+                <code>zone_risk/pipeline/api.py</code>
               </div>
             </div>
             <div class="help-step">
               <div class="step-num">06</div>
               <h5>Telemetry & Output</h5>
-              <p>Annotated visuals and high-fidelity JSONL telemetry logs are generated for real-time review and post-analysis data export.</p>
+              <p>Annotated visuals and telemetry are generated for real-time review and post-analysis export.</p>
               <div class="step-files">
                 <code>zone_risk/pipeline/annotator.py</code>
-                <code>zone_risk/pipeline/main.py</code>
+                <code>zone_risk/pipeline/api.py</code>
                 <code>zone_risk/web/static/app.js</code>
               </div>
             </div>
