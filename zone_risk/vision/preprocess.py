@@ -1,4 +1,4 @@
-"""Frame preprocessing for zone-based risk detection."""
+"""Frame preprocessing for lane-relative risk detection."""
 
 from __future__ import annotations
 

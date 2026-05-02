@@ -1,15 +1,32 @@
-"""Unit tests for fusion.py — zone_regions and compute_quick_risk."""
+"""Unit tests for fusion.py: quick motion and object event assembly."""
 
-import pytest
 import numpy as np
 
-from zone_risk.pipeline.fusion import zone_regions, compute_quick_risk, ZoneRegion
+from zone_risk.pipeline.fusion import SpatialFields, build_object_events, compute_quick_risk
+from zone_risk.pipeline.risk_calculator import DepthDeltaSmoother, ExpansionSmoother
+from zone_risk.pipeline.tracker import Track, TrackSample
+from zone_risk.vision.depth_estimator import DepthResult
 from zone_risk.vision.optical_flow import FlowResult
+from zone_risk.vision.road_geometry import LaneFrame
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+def make_lane():
+    return LaneFrame(
+        vanishing_point=(150.0, 80.0),
+        left_line=(120, 100, 60, 199),
+        right_line=(180, 100, 240, 199),
+        left_x_at_bottom=60.0,
+        right_x_at_bottom=240.0,
+        lane_width_at_bottom=180.0,
+        lane_center_x_at_bottom=150.0,
+        confidence=0.85,
+        detected=True,
+        width=300,
+        height=200,
+    )
 
-def make_flow_result(height=100, width=100, magnitude=0.5, divergence=0.3):
+
+def make_flow(height=200, width=300, magnitude=0.0, divergence=0.0):
     return FlowResult(
         flow=np.zeros((height, width, 2), dtype=np.float32),
         magnitude_norm=np.full((height, width), magnitude, dtype=np.float32),
@@ -17,85 +34,131 @@ def make_flow_result(height=100, width=100, magnitude=0.5, divergence=0.3):
     )
 
 
-# ── zone_regions ─────────────────────────────────────────────────────────────
-
-class TestZoneRegions:
-    def test_returns_three_zones(self):
-        regions = list(zone_regions(width=300, height=100))
-        assert len(regions) == 3
-
-    def test_zone_labels(self):
-        labels = {r.label for r in zone_regions(300, 100)}
-        assert labels == {"left zone", "center zone", "right zone"}
-
-    def test_zones_cover_full_width(self):
-        regions = list(zone_regions(width=300, height=100))
-        x_starts = sorted(r.bbox[0] for r in regions)
-        x_ends = sorted(r.bbox[2] for r in regions)
-        assert x_starts[0] == 0
-        assert x_ends[-1] == 300
-
-    def test_zones_do_not_overlap(self):
-        regions = sorted(zone_regions(300, 100), key=lambda r: r.bbox[0])
-        for i in range(len(regions) - 1):
-            assert regions[i].bbox[2] == regions[i + 1].bbox[0]
-
-    def test_center_zone_is_twice_side_zones(self):
-        regions = list(zone_regions(width=400, height=100))
-        widths = {r.label: r.bbox[2] - r.bbox[0] for r in regions}
-        assert widths["center zone"] == widths["left zone"] * 2
-        assert widths["center zone"] == widths["right zone"] * 2
-
-    def test_unique_ids(self):
-        ids = [r.id for r in zone_regions(300, 100)]
-        assert len(ids) == len(set(ids))
+def make_depth(height=200, width=300, near=0.4):
+    near_map = np.full((height, width), near, dtype=np.float32)
+    return DepthResult(
+        near_map=near_map,
+        depth_map=(near_map * 255).astype(np.uint8),
+    )
 
 
-# ── compute_quick_risk ────────────────────────────────────────────────────────
+def make_fields(depth=None, flow=None, *, depth_is_fresh=True):
+    return SpatialFields(
+        depth=depth or make_depth(),
+        flow=flow or make_flow(),
+        lane=make_lane(),
+        flow_dt_sec=1.0 / 30.0,
+        depth_is_fresh=depth_is_fresh,
+    )
+
+
+def make_track(track_id, bbox, t, prior_bbox=None, prior_t=None):
+    track = Track(
+        track_id=track_id,
+        class_name="car",
+        confidence=0.9,
+        bbox=bbox,
+        frame_index=int(t * 30),
+        timestamp_sec=float(t),
+    )
+    if prior_bbox is not None and prior_t is not None:
+        track.history.append(
+            TrackSample(
+                frame_index=int(prior_t * 30),
+                timestamp_sec=float(prior_t),
+                bbox=prior_bbox,
+            )
+        )
+    return track
+
 
 class TestComputeQuickRisk:
-    def test_returns_float(self):
-        flow = make_flow_result()
-        result = compute_quick_risk(flow, width=100, height=100)
-        assert isinstance(result, float)
+    def test_zero_motion_low_risk(self):
+        assert compute_quick_risk(make_flow(magnitude=0.0, divergence=0.0), width=300, height=200) < 0.1
 
-    def test_zero_motion_gives_low_risk(self):
-        flow = make_flow_result(magnitude=0.0, divergence=0.0)
-        risk = compute_quick_risk(flow, width=100, height=100)
-        assert risk < 0.1
+    def test_high_motion_high_risk(self):
+        assert compute_quick_risk(make_flow(magnitude=1.0, divergence=1.0), width=300, height=200) > 0.5
 
-    def test_high_motion_gives_high_risk(self):
-        flow = make_flow_result(magnitude=1.0, divergence=1.0)
-        risk = compute_quick_risk(flow, width=100, height=100)
-        assert risk > 0.5
 
-    def test_result_is_bounded(self):
-        flow = make_flow_result(magnitude=1.0, divergence=1.0)
-        risk = compute_quick_risk(flow, width=100, height=100)
-        assert 0.0 <= risk <= 1.0
-
-    def test_center_motion_scores_higher_than_edge_motion(self):
-        h, w = 100, 300
-
-        center_flow_arr = np.zeros((h, w, 2), dtype=np.float32)
-        center_mag = np.zeros((h, w), dtype=np.float32)
-        center_mag[:, w // 3: 2 * w // 3] = 1.0  # only center has motion
-        center_flow = FlowResult(
-            flow=center_flow_arr,
-            magnitude_norm=center_mag,
-            divergence_norm=np.zeros((h, w), dtype=np.float32),
+class TestBuildObjectEvents:
+    def test_no_tracks_returns_safe(self):
+        primary, events = build_object_events(
+            frame_index=0,
+            timestamp_sec=0.0,
+            tracks=[],
+            fields=make_fields(),
+            expansion_smoother=ExpansionSmoother(),
+            depth_smoother=DepthDeltaSmoother(),
         )
 
-        edge_flow_arr = np.zeros((h, w, 2), dtype=np.float32)
-        edge_mag = np.zeros((h, w), dtype=np.float32)
-        edge_mag[:, :w // 6] = 1.0   # only far-left edge
-        edge_mag[:, 5 * w // 6:] = 1.0
-        edge_flow = FlowResult(
-            flow=edge_flow_arr,
-            magnitude_norm=edge_mag,
-            divergence_norm=np.zeros((h, w), dtype=np.float32),
+        assert primary.state == "SAFE"
+        assert primary.bbox is None
+        assert events == [primary]
+
+    def test_expanding_track_in_corridor_dangerous(self):
+        track = make_track(
+            track_id=1,
+            bbox=(130, 130, 180, 190),
+            t=1.0,
+            prior_bbox=(140, 140, 165, 170),
+            prior_t=0.7,
+        )
+        primary, events = build_object_events(
+            frame_index=30,
+            timestamp_sec=1.0,
+            tracks=[track],
+            fields=make_fields(depth=make_depth(near=0.6), flow=make_flow(magnitude=0.4)),
+            expansion_smoother=ExpansionSmoother(),
+            depth_smoother=DepthDeltaSmoother(),
         )
 
-        center_risk = compute_quick_risk(center_flow, width=w, height=h)
-        edge_risk = compute_quick_risk(edge_flow, width=w, height=h)
-        assert center_risk > edge_risk
+        assert len(events) == 1
+        assert primary.object_id == 1
+        assert primary.state in {"CAUTION", "DANGER"}
+
+    def test_static_track_safe(self):
+        track = make_track(
+            track_id=1,
+            bbox=(130, 130, 180, 190),
+            t=1.0,
+            prior_bbox=(130, 130, 180, 190),
+            prior_t=0.7,
+        )
+        primary, _ = build_object_events(
+            frame_index=30,
+            timestamp_sec=1.0,
+            tracks=[track],
+            fields=make_fields(depth=make_depth(near=0.2)),
+            expansion_smoother=ExpansionSmoother(),
+            depth_smoother=DepthDeltaSmoother(),
+        )
+
+        assert primary.state == "SAFE"
+
+    def test_picks_worst_object_as_primary(self):
+        expanding = make_track(
+            track_id=1,
+            bbox=(130, 130, 180, 190),
+            t=1.0,
+            prior_bbox=(140, 140, 165, 170),
+            prior_t=0.7,
+        )
+        static = make_track(
+            track_id=2,
+            bbox=(20, 20, 40, 40),
+            t=1.0,
+            prior_bbox=(20, 20, 40, 40),
+            prior_t=0.7,
+        )
+
+        primary, events = build_object_events(
+            frame_index=30,
+            timestamp_sec=1.0,
+            tracks=[static, expanding],
+            fields=make_fields(depth=make_depth(near=0.5), flow=make_flow(magnitude=0.3)),
+            expansion_smoother=ExpansionSmoother(),
+            depth_smoother=DepthDeltaSmoother(),
+        )
+
+        assert len(events) == 2
+        assert primary.object_id == 1

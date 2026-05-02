@@ -3,13 +3,7 @@
 Run from the project root:
     .venv/bin/python scripts/download_flow_model.py
 
-The default download URL targets a public HuggingFace mirror. If the
-upstream URL has moved, set NEUFLOW_MODEL_URL to override:
-    NEUFLOW_MODEL_URL=https://example.com/neuflow_v2.onnx \
-        .venv/bin/python scripts/download_flow_model.py
-
-Alternatively, place any compatible NeuFlow v2 ONNX export at
-``models/neuflow_v2.onnx`` manually and the runtime will pick it up.
+If the default URL has moved, set NEUFLOW_MODEL_URL to override it.
 """
 
 from __future__ import annotations
@@ -21,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 
-_DEFAULT_URL = "https://huggingface.co/onnx-community/NeuFlow_v2/resolve/main/onnx/model.onnx"
+_DEFAULT_URL = "https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases/download/0.1.0/neuflow_mixed.onnx"
 MODEL_URL = os.environ.get("NEUFLOW_MODEL_URL", _DEFAULT_URL)
 MODEL_DIR = Path(__file__).resolve().parents[1] / "models"
 MODEL_PATH = MODEL_DIR / "neuflow_v2.onnx"
@@ -51,6 +45,7 @@ def main() -> int:
 
     try:
         import certifi
+
         context = ssl.create_default_context(cafile=certifi.where())
     except ImportError:
         context = ssl.create_default_context()
@@ -60,14 +55,12 @@ def main() -> int:
             total_size = int(response.headers.get("Content-Length") or 0)
             block_size = 1024 * 256
             with open(MODEL_PATH, "wb") as out:
-                downloaded = 0
                 block_num = 0
                 while True:
                     chunk = response.read(block_size)
                     if not chunk:
                         break
                     out.write(chunk)
-                    downloaded += len(chunk)
                     block_num += 1
                     _print_progress(block_num, block_size, total_size)
         print()
@@ -77,8 +70,7 @@ def main() -> int:
             MODEL_PATH.unlink()
         print(
             "\nIf the default URL is unavailable, set NEUFLOW_MODEL_URL to a working\n"
-            "ONNX export of NeuFlow v2 (see github.com/neufieldrobotics/NeuFlow_v2)\n"
-            "or drop the model file manually at models/neuflow_v2.onnx.",
+            "ONNX export of NeuFlow v2 or drop the model file manually at models/neuflow_v2.onnx.",
             file=sys.stderr,
         )
         return 1

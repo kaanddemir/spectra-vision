@@ -114,7 +114,7 @@ def _subtract_ego_motion(
         ego_x_field, ego_y_field = _ego_flow_field(homography, current_gray.shape)
         return flow_x - ego_x_field, flow_y - ego_y_field
 
-    # Translation-only fallback when the homography fit is unreliable
+    # Translation-only compensation when the homography fit is unreliable
     # (low texture, abrupt scene change, or too few tracked features).
     ego_x = float(np.median(flow_x[::16, ::16]))
     ego_y = float(np.median(flow_y[::16, ::16]))
@@ -124,48 +124,22 @@ def _subtract_ego_motion(
 def _flow_from_neural_model(
     previous_frame: PreprocessedFrame,
     current_frame: PreprocessedFrame,
-) -> np.ndarray | None:
+) -> np.ndarray:
     model = flow_model.get_model()
     if model is None:
-        return None
-    try:
-        return model.predict(previous_frame.denoised_rgb, current_frame.denoised_rgb)
-    except Exception:
-        return None
-
-
-def _flow_from_farneback(
-    previous_gray: np.ndarray,
-    current_gray: np.ndarray,
-) -> np.ndarray:
-    height, width = current_gray.shape
-    winsize = max(9, min(31, width // 35))
-    return cv2.calcOpticalFlowFarneback(
-        previous_gray,
-        current_gray,
-        None,
-        pyr_scale=0.5,
-        levels=3,
-        winsize=winsize,
-        iterations=3,
-        poly_n=5,
-        poly_sigma=1.2,
-        flags=0,
-    )
+        raise RuntimeError("NeuFlow ONNX model missing at models/neuflow_v2.onnx")
+    return model.predict(previous_frame.denoised_rgb, current_frame.denoised_rgb)
 
 
 def compute_velocity(
     previous_frame: PreprocessedFrame | None,
     current_frame: PreprocessedFrame,
-    *,
-    use_flow_model: bool = True,
 ) -> FlowResult:
     """Compute dense optical flow between two preprocessed frames.
 
-    Uses the NeuFlow v2 ONNX model when ``use_flow_model`` is True and the
-    model is available; otherwise falls back to classical Farneback. Both
-    paths share the same RANSAC ego-motion subtraction and absolute
-    normalization so downstream consumers see the same FlowResult shape.
+    Uses NeuFlow ONNX as the required dense-flow source, then applies
+    RANSAC ego-motion subtraction and exposes a stable FlowResult shape for
+    TTC and motion overlays.
     """
 
     if previous_frame is None:
@@ -173,11 +147,7 @@ def compute_velocity(
     if previous_frame.gray.shape != current_frame.gray.shape:
         raise ValueError("Optical flow requires frames with matching shapes.")
 
-    flow = None
-    if use_flow_model:
-        flow = _flow_from_neural_model(previous_frame, current_frame)
-    if flow is None:
-        flow = _flow_from_farneback(previous_frame.gray, current_frame.gray)
+    flow = _flow_from_neural_model(previous_frame, current_frame)
 
     flow_x = flow[..., 0]
     flow_y = flow[..., 1]

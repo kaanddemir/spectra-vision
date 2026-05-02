@@ -1,4 +1,4 @@
-"""Road/lane ROI estimation for zone-based risk scoring."""
+"""Road/lane ROI estimation for lane-relative risk scoring."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ class RoadROI:
     detected: bool
 
 
-def fallback_road_roi(shape: tuple[int, int] | tuple[int, int, int]) -> RoadROI:
-    """Return the fixed perspective ROI used as a stable fallback."""
+def default_road_roi(shape: tuple[int, int] | tuple[int, int, int]) -> RoadROI:
+    """Return the fixed perspective ROI used as a stable default."""
 
     height, width = shape[:2]
     polygon = np.array(
@@ -56,10 +56,10 @@ def fallback_road_roi(shape: tuple[int, int] | tuple[int, int, int]) -> RoadROI:
 
 
 def estimate_road_roi(frame_bgr: np.ndarray) -> RoadROI:
-    """Estimate a lane-bounded road ROI with a fixed fallback."""
+    """Estimate a lane-bounded road ROI with a fixed default."""
 
     height, width = frame_bgr.shape[:2]
-    fallback = fallback_road_roi(frame_bgr.shape)
+    default = default_road_roi(frame_bgr.shape)
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blurred, 60, 160)
@@ -86,7 +86,7 @@ def estimate_road_roi(frame_bgr: np.ndarray) -> RoadROI:
         maxLineGap=max(12, width // 40),
     )
     if lines is None:
-        return fallback
+        return default
 
     left_points: list[tuple[int, int]] = []
     right_points: list[tuple[int, int]] = []
@@ -114,17 +114,17 @@ def estimate_road_roi(frame_bgr: np.ndarray) -> RoadROI:
 
     detected_count = int(left_line is not None) + int(right_line is not None)
     if detected_count == 0:
-        return fallback
+        return default
 
-    left_line = left_line or fallback.left_line
-    right_line = right_line or fallback.right_line
+    left_line = left_line or default.left_line
+    right_line = right_line or default.right_line
     if left_line is None or right_line is None:
-        return fallback
+        return default
 
     lx_top, ly_top, lx_bottom, ly_bottom = left_line
     rx_top, ry_top, rx_bottom, ry_bottom = right_line
     if rx_top - lx_top < width * 0.06 or rx_bottom - lx_bottom < width * 0.18:
-        return fallback
+        return default
 
     polygon = np.array(
         [

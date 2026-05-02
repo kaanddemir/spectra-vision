@@ -39,10 +39,9 @@ def main() -> int:
     print(f"Fetching {MODEL_URL}")
     print(f"Saving to {MODEL_PATH}")
 
-    # macOS Python often ships without root certificates; try `certifi` first
-    # and fall back to the system default context.
     try:
         import certifi
+
         context = ssl.create_default_context(cafile=certifi.where())
     except ImportError:
         context = ssl.create_default_context()
@@ -52,14 +51,12 @@ def main() -> int:
             total_size = int(response.headers.get("Content-Length") or 0)
             block_size = 1024 * 256
             with open(MODEL_PATH, "wb") as out:
-                downloaded = 0
                 block_num = 0
                 while True:
                     chunk = response.read(block_size)
                     if not chunk:
                         break
                     out.write(chunk)
-                    downloaded += len(chunk)
                     block_num += 1
                     _print_progress(block_num, block_size, total_size)
         print()

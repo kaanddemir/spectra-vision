@@ -6,3 +6,5 @@ uvicorn[standard]>=0.34.0
 python-multipart>=0.0.9
 onnxruntime>=1.18.0
 pytest>=8.0.0
+ultralytics>=8.3.0
+torch>=2.2.0

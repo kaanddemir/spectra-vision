@@ -307,7 +307,6 @@ svg {
   padding-bottom: 0;
   min-height: 0;
 }
-
 .preview-frame {
   position: relative;
   margin: 16px auto 0;
@@ -891,10 +890,10 @@ svg {
   border-radius: 4px;
 }
 
-/* ─── Zone Risk panel ────────────────────────────────────── */
+/* ─── Lane Risk panel ────────────────────────────────────── */
 
 
-.zone-bars {
+.lane-bars {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -902,27 +901,27 @@ svg {
   gap: 12px;
   align-content: center;
 }
-.zone-row {
+.lane-row {
   display: grid;
   grid-template-columns: 50px 1fr 44px;
   align-items: center;
   gap: 10px;
 }
-.zone-label {
+.lane-label {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--muted);
   text-transform: uppercase;
 }
-.zone-track {
+.lane-track {
   position: relative;
   height: 8px;
   border-radius: 999px;
   background: rgba(255,255,255,0.05);
   overflow: hidden;
 }
-.zone-fill {
+.lane-fill {
   display: block;
   height: 100%;
   border-radius: 999px;
@@ -930,19 +929,19 @@ svg {
   transition: width 240ms ease, background 240ms ease;
   box-shadow: 0 0 8px currentColor;
 }
-.zone-row.is-safe    .zone-fill { background: var(--safe);    color: rgba(16,185,129,0.5); }
-.zone-row.is-caution .zone-fill { background: var(--caution); color: rgba(245,158,11,0.5); }
-.zone-row.is-danger  .zone-fill { background: var(--danger);  color: rgba(239,68,68,0.5); }
-.zone-value {
+.lane-row.is-safe    .lane-fill { background: var(--safe);    color: rgba(16,185,129,0.5); }
+.lane-row.is-caution .lane-fill { background: var(--caution); color: rgba(245,158,11,0.5); }
+.lane-row.is-danger  .lane-fill { background: var(--danger);  color: rgba(239,68,68,0.5); }
+.lane-value {
   font-size: 11.5px;
   font-weight: 800;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.zone-row.is-danger  .zone-value { color: var(--danger); }
-.zone-row.is-caution .zone-value { color: var(--caution); }
-.zone-row.is-safe    .zone-value { color: var(--safe); }
+.lane-row.is-danger  .lane-value { color: var(--danger); }
+.lane-row.is-caution .lane-value { color: var(--caution); }
+.lane-row.is-safe    .lane-value { color: var(--safe); }
 
 
 
@@ -1001,6 +1000,11 @@ svg {
 .timeline-event.ev-danger  { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
 .timeline-event.ev-caution { background: var(--caution); box-shadow: 0 0 4px var(--caution); }
 .timeline-event.ev-safe    { background: var(--safe);    box-shadow: 0 0 3px var(--safe); }
+.timeline-event.is-active {
+  transform: translate(-50%, -50%) scale(1.45);
+  border-color: rgba(255,255,255,0.9);
+  z-index: 25;
+}
 
 .timeline-cursor {
   position: absolute;
@@ -1185,14 +1189,14 @@ svg {
   border-radius: 4px;
   border: 1px solid var(--border-soft);
 }
-.risk-banner-lower .zone-bars {
+.risk-banner-lower .lane-bars {
   margin: 0;
   padding: 0;
 }
-.risk-banner-lower .zone-row {
+.risk-banner-lower .lane-row {
   margin-bottom: 12px;
 }
-.risk-banner-lower .zone-row:last-child {
+.risk-banner-lower .lane-row:last-child {
   margin-bottom: 0;
 }
 
@@ -1551,6 +1555,22 @@ svg {
 .chart-cursor {
   filter: drop-shadow(0 0 5px rgba(255,255,255,0.5));
 }
+.chart-event-marker {
+  outline: none;
+}
+.chart-event-marker text {
+  paint-order: stroke;
+  stroke: rgba(9,10,15,0.85);
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+}
+.chart-event-marker.is-active circle {
+  r: 6;
+  stroke-width: 1.8;
+}
+.chart-event-marker.is-active line {
+  stroke-opacity: 0.95;
+}
 .chart-x-axis span { white-space: nowrap; }
 
 
@@ -1757,55 +1777,6 @@ svg {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-.drawer-toggle-row {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 38px;
-}
-.toggle-switch {
-  position: relative;
-  flex: 0 0 auto;
-  width: 46px;
-  height: 26px;
-  cursor: pointer;
-}
-.toggle-switch input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  background: var(--panel-hi);
-  transition: background 200ms ease, border-color 200ms ease;
-}
-.toggle-thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--muted);
-  transition: transform 200ms ease, background 200ms ease;
-}
-.toggle-switch input:checked + .toggle-track {
-  border-color: rgba(239,68,68,0.65);
-  background: rgba(239,68,68,0.24);
-}
-.toggle-switch input:checked + .toggle-track .toggle-thumb {
-  transform: translateX(20px);
-  background: var(--red);
-}
-.toggle-switch input:focus-visible + .toggle-track {
-  box-shadow: 0 0 0 3px var(--red-soft);
 }
 .drawer-row select,
 .drawer-row input[type=password],
@@ -2563,7 +2534,7 @@ svg {
   color: var(--muted);
 }
 
-.zone-visual-mini {
+.lane-visual-mini {
   margin: 10px 0;
 }
 .zv-bar {

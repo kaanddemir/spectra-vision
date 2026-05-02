@@ -51,9 +51,10 @@
     }
     return true;
   };
-  const num = (value, fallback = null) => {
+  const num = (value, defaultValue = null) => {
+    if (value === null || value === undefined || value === "") return defaultValue;
     const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
+    return Number.isFinite(n) ? n : defaultValue;
   };
   const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
   const titleCase = (v) => isReal(v)
@@ -75,7 +76,7 @@
     const n = num(ttc, null);
     if (n === null || n <= 0.05) return null;
     const sc = stateClass(stateOrBand);
-    if (sc === "safe" && n < 3.0) return null;
+    if (sc === "safe") return null;
     return n;
   };
   const fmtNumber = (v, digits = 1, suffix = "") => {
@@ -125,6 +126,110 @@
     const closing = num(ev?.closingSpeed ?? ev?.closing_speed, 0);
     return stateWeight + ttcWeight + near + closing;
   };
+  const eventStateClass = (ev) => stateClass(ev?.riskState || ev?.riskBand || ev?.hazardBand || ev?.metrics?.riskState);
+  const eventTimestamp = (ev) => num(ev?.timestampSec ?? ev?.timestamp_sec ?? ev?.timeSec, null);
+  const eventDisplayTtc = (ev) => {
+    const m = ev?.metrics || {};
+    const ttc = ev?.ttcSec ?? ev?.estimatedTtcSec ?? ev?.estimated_ttc_sec ?? ev?.ttc
+      ?? m.ttcSec ?? m.estimatedTtcSec ?? m.estimated_ttc_sec ?? m.ttc;
+    return normalizeDisplayTtc(ev?.riskState || ev?.riskBand || ev?.hazardBand || m.riskState, ttc);
+  };
+  const eventLane = (ev) => titleCase(ev?.lane || ev?.primaryLane || ev?.primary_lane || ev?.metrics?.lane);
+  const eventRank = (sc) => (sc === "danger" ? 2 : sc === "caution" ? 1 : 0);
+  const eventItemsFromEvents = (events) => (Array.isArray(events) ? events : [])
+    .map((ev, sourceIndex) => ({
+      ev,
+      index: sourceIndex,
+      sc: eventStateClass(ev),
+      ts: eventTimestamp(ev),
+      ttc: eventDisplayTtc(ev),
+    }))
+    .filter((item) => item.ts !== null && (item.sc === "caution" || item.sc === "danger"));
+  const eventItemsFromRows = (rows, offsetIndex = 0, existingItems = []) => {
+    const rowItems = (Array.isArray(rows) ? rows : [])
+      .map((row) => {
+        const rowState = rowValue(row, "riskState", "State");
+        const sc = stateClass(rowState);
+        return {
+          row,
+          sc,
+          ts: num(rowValue(row, "timeSec", "Time (s)"), null),
+          ttc: normalizeDisplayTtc(rowState, rowValue(row, "ttcSec", "TTC (s)")),
+        };
+      })
+      .filter((item) => item.ts !== null && (item.sc === "caution" || item.sc === "danger"))
+      .sort((a, b) => a.ts - b.ts);
+
+    if (!rowItems.length) return [];
+
+    const gaps = [];
+    for (let i = 1; i < rowItems.length; i++) {
+      const gap = rowItems[i].ts - rowItems[i - 1].ts;
+      if (gap > 0.01) gaps.push(gap);
+    }
+    gaps.sort((a, b) => a - b);
+    const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0.25;
+    const mergeGap = clamp(medianGap * 4, 0.35, 0.9);
+    const groups = [];
+    rowItems.forEach((item) => {
+      const current = groups[groups.length - 1];
+      if (!current || item.ts - current.endTs > mergeGap) {
+        groups.push({ items: [item], startTs: item.ts, endTs: item.ts });
+      } else {
+        current.items.push(item);
+        current.endTs = item.ts;
+      }
+    });
+
+    const derived = [];
+    groups.forEach((group) => {
+      const best = group.items
+        .slice()
+        .sort((a, b) => eventRank(b.sc) - eventRank(a.sc) || (a.ttc ?? Infinity) - (b.ttc ?? Infinity))[0];
+      const duplicate = existingItems.some((item) => (
+        Math.abs(item.ts - best.ts) <= mergeGap
+        && eventRank(item.sc) >= eventRank(best.sc)
+      ));
+      if (duplicate) return;
+      const row = best.row;
+      const ev = {
+        frameIndex: rowValue(row, "frameIndex", "Frame"),
+        timestampSec: best.ts,
+        riskState: best.sc.toUpperCase(),
+        riskBand: best.sc,
+        lane: rowValue(row, "lane", "Lane"),
+        ttcSec: best.ttc,
+        nearScore: num(rowValue(row, "nearScore", "Near"), null),
+        closingSpeed: num(rowValue(row, "closingSpeed", "Closing"), null),
+        objectType: rowValue(row, "objectType", "Object") || "timeline incident",
+        summary: `${best.sc.toUpperCase()} from ${formatSeconds(group.startTs)} to ${formatSeconds(group.endTs)}`,
+      };
+      derived.push({
+        ev,
+        index: offsetIndex + derived.length,
+        sc: best.sc,
+        ts: best.ts,
+        ttc: best.ttc,
+      });
+    });
+    return derived;
+  };
+  const timelineEventItems = (source = state) => {
+    const events = Array.isArray(source) ? source : (source?.events || []);
+    const rows = Array.isArray(source) ? [] : (source?.timelineRows || []);
+    const realItems = eventItemsFromEvents(events);
+    const rowItems = eventItemsFromRows(rows, events.length, realItems);
+    return [...realItems, ...rowItems]
+      .sort((a, b) => a.ts - b.ts || eventSeverityScore(b.ev) - eventSeverityScore(a.ev))
+      .map((item, displayIndex) => ({ ...item, displayIndex }));
+  };
+  const eventTooltip = (item) => {
+    const parts = [`#${(item.displayIndex ?? item.index) + 1}`, formatSeconds(item.ts), item.sc.toUpperCase()];
+    if (item.ttc !== null) parts.push(`TTC ${item.ttc.toFixed(1)}s`);
+    const lane = eventLane(item.ev);
+    if (lane) parts.push(lane);
+    return parts.join(" · ");
+  };
   const riskClass = (sb) => {
     const c = stateClass(sb);
     if (c === "none") return "risk-none";
@@ -152,9 +257,9 @@
   const shortType = (type) => {
     if (!isReal(type)) return MISSING;
     const v = String(type).toLowerCase();
-    if (v.includes("left zone")) return "L. Zone";
-    if (v.includes("right zone")) return "R. Zone";
-    if (v.includes("center zone")) return "C. Zone";
+    if (v.includes("left lane")) return "L. Lane";
+    if (v.includes("right lane")) return "R. Lane";
+    if (v.includes("center lane")) return "C. Lane";
     return titleCase(type) || MISSING;
   };
   const subtitleFor = (sc, lane) => {
@@ -348,7 +453,6 @@
     return {
       original: eventImages.original || resultImages.original,
       depth: eventImages.depth || resultImages.depth,
-      segmentation: eventImages.segmentation || resultImages.segmentation,
       road: eventImages.road || resultImages.road,
       motion: eventImages.motion || resultImages.motion,
       blend: eventImages.blend || eventImages.overlay || eventImages.annotated,
@@ -387,7 +491,7 @@
       closingSpeed: num(firstValue(sources, ["closingSpeed", "closing_speed"]), null),
       objectType: titleCase(firstValue(sources, ["objectType", "object_type"])),
       approach: titleCase(firstValue(sources, ["approach"])),
-      lane: titleCase(firstValue(sources, ["zone", "lane", "primaryZone", "primary_zone"])),
+      lane: titleCase(firstValue(sources, ["lane", "primaryLane", "primary_lane"])),
       bbox: event.bbox || null,
       motionMagnitude: num(firstValue(sources, ["velocityMagnitude", "velocity_magnitude", "motionMagnitude", "motion_magnitude"]), null),
     };
@@ -412,7 +516,6 @@
       images: {
         original: rawImages.original,
         depth: rawImages.depth,
-        segmentation: rawImages.segmentation,
         road: rawImages.road,
         motion: rawImages.motion,
         blend: rawImages.blend,
@@ -425,7 +528,7 @@
       sampledFrames: num(metadata.sampledFrames ?? payload?.sampledFrames, null),
       summary: event.summary || payload?.summary || null,
       reasons: Array.isArray(event.reasons) ? event.reasons : [],
-      zoneMetrics: Array.isArray(event.zoneMetrics) ? event.zoneMetrics : [],
+      laneMetrics: Array.isArray(event.laneMetrics) ? event.laneMetrics : [],
 
       events,
       timelineRows: Array.isArray(payload?.timelineRows) ? payload.timelineRows : [],
@@ -461,31 +564,35 @@
     timeTotal.textContent = dur;
     timeCurrent.textContent = "00:00";
     
-    // Estimate frames assuming up to 60fps — backend clamps to actual frame count.
-    const estFrames = Math.ceil(previewVideo.duration * 60);
+    // Estimate frames assuming 30fps — backend clamps to actual frame count.
+    const estFrames = Math.ceil(previewVideo.duration * 30);
     const meta = byId("selected-meta");
     if (meta) {
       meta.innerHTML = `<div>Duration: ${dur}</div><div>Est. Frames: ${estFrames}</div>`;
       meta.hidden = false;
     }
+
+    // Enable Max Processed Frames shortcuts
+    const framesInput = byId("max-frames-input");
+    if (framesInput) {
+      framesInput.placeholder = String(estFrames);
+      framesInput.max = String(estFrames);
+      framesInput.disabled = false;
+    }
+    byId("frames-min").disabled = false;
+    byId("frames-max").disabled = false;
+
     // Update temporal window constraints
     const startInp = byId("start-time-input");
     const endInp = byId("end-time-input");
-    if (startInp) startInp.max = String(previewVideo.duration);
+    if (startInp) {
+      startInp.max = String(previewVideo.duration);
+      startInp.disabled = false;
+    }
     if (endInp) {
       endInp.max = String(previewVideo.duration);
-      endInp.value = String(previewVideo.duration);
-      const hidden = formField("end_sec");
-      if (hidden) hidden.value = String(previewVideo.duration);
-    }
-
-    // Auto-set the max frames input to the total estimated frames
-    const framesInput = document.querySelector('input[data-param="max_processed_frames"]');
-    if (framesInput) {
-      framesInput.value = estFrames;
-      framesInput.max = estFrames;
-      const hidden = formField("max_processed_frames");
-      if (hidden) hidden.value = String(estFrames);
+      endInp.placeholder = previewVideo.duration.toFixed(1);
+      endInp.disabled = false;
     }
 
     renderTimeline(null);
@@ -512,7 +619,7 @@
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
     banner.classList.add(riskClass(stateLabel));
     byId("risk-band-main").textContent = stateLabel || MISSING;
-    byId("alert-ttc").textContent = ttcLabel(normalizeDisplayTtc(stateLabel, ttc));
+    byId("alert-ttc").textContent = sc === "safe" ? MISSING : ttcLabel(normalizeDisplayTtc(stateLabel, ttc));
     byId("risk-subtitle").textContent = subtitleFor(sc, lane);
     const tag = byId("risk-time-tag");
     if (tag) {
@@ -526,27 +633,27 @@
   }
 
 
-  // ─── Zone Risk bars ──────────────────────────────────────
-  function renderZoneBars(result) {
-    const zones = result?.zoneMetrics || [];
+  // ─── Lane Risk bars ──────────────────────────────────────
+  function renderLaneBars(result) {
+    const lanes = result?.laneMetrics || [];
     const map = {};
-    zones.forEach((z) => {
-      const k = String(z.zone || "").toLowerCase();
-      if (k) map[k] = z;
+    lanes.forEach((laneMetric) => {
+      const k = String(laneMetric.lane || "").toLowerCase();
+      if (k) map[k] = laneMetric;
     });
-    document.querySelectorAll(".zone-row").forEach((row) => {
-      const key = row.dataset.zone;
-      const z = map[key];
-      const fill = row.querySelector(".zone-fill");
-      const value = row.querySelector(".zone-value");
+    document.querySelectorAll(".lane-row").forEach((row) => {
+      const key = row.dataset.lane;
+      const laneMetric = map[key];
+      const fill = row.querySelector(".lane-fill");
+      const value = row.querySelector(".lane-value");
       row.classList.remove("is-safe", "is-caution", "is-danger");
-      if (!z) {
+      if (!laneMetric) {
         fill.style.width = "0%";
         value.textContent = MISSING;
         return;
       }
-      const score = num(z.score, 0);
-      const ttc = normalizeDisplayTtc(z.riskState || z.riskBand || null, z.ttcSec ?? z.estimated_ttc_sec);
+      const score = num(laneMetric.score, 0);
+      const ttc = normalizeDisplayTtc(laneMetric.riskState || laneMetric.riskBand || null, laneMetric.ttcSec ?? laneMetric.estimated_ttc_sec);
       const pct = clamp(Math.round(score * 100), 0, 100);
       fill.style.width = `${pct}%`;
       value.textContent = String(pct);
@@ -559,11 +666,19 @@
 
   // ─── Timeline + event strip ──────────────────────────────
   function renderTimeline(result) {
-    const events = result?.events || [];
-    const fallbackImages = result?.images || {};
+    const eventItems = timelineEventItems(result);
+    const resultImages = result?.images || {};
     const dur = state.sourceMeta?.durationSec
       || (result?.frameCount && result?.fps ? result.frameCount / result.fps : null);
-    const totalDur = dur || (events.length ? Math.max(...events.map((e) => num(e.timestampSec, 0))) : null) || 1;
+    const rowTimes = (result?.timelineRows || [])
+      .map((row) => num(rowValue(row, "timeSec", "Time (s)"), null))
+      .filter((v) => v !== null);
+    const eventDur = eventItems.length ? Math.max(...eventItems.map((item) => item.ts)) : null;
+    const rowDur = rowTimes.length ? Math.max(...rowTimes) : null;
+    const totalDur = dur || rowDur || eventDur || 1;
+
+    const totalEventsEl = byId("stat-total-events");
+    if (totalEventsEl) totalEventsEl.textContent = String(eventItems.length);
 
     const axis = byId("timeline-axis");
     axis.replaceChildren();
@@ -579,15 +694,7 @@
     const strip = byId("event-strip");
     strip.replaceChildren();
 
-    // Show only meaningful events (CAUTION/DANGER). SAFE frames are noise
-    // for the user — they belong on the temporal chart, not the event strip.
-    const isMeaningful = (ev) => {
-      const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
-      return sc === "caution" || sc === "danger";
-    };
-    const hasMeaningful = events.some(isMeaningful);
-
-    if (!hasMeaningful) {
+    if (!eventItems.length) {
       const e = document.createElement("div");
       e.className = "event-empty";
       e.textContent = "No events yet";
@@ -595,40 +702,33 @@
       return;
     }
 
-    events.forEach((ev, idx) => {
-      if (!isMeaningful(ev)) return;
-      const ts = num(ev.timestampSec, null);
-      if (ts === null) return;
+    eventItems.forEach((item) => {
+      const { ev, index: idx, sc, ts } = item;
       const left = clamp((ts / totalDur) * 100, 0, 100);
       const dot = document.createElement("button");
       dot.type = "button";
-      const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
       dot.className = `timeline-event ev-${sc}`;
+      dot.dataset.index = String(idx);
       dot.style.left = `${left}%`;
-      dot.title = `#${idx + 1} · ${formatSeconds(ts)} · ${ev.riskState || ev.riskBand || ev.hazardBand || ""}`;
+      dot.title = eventTooltip(item);
+      dot.setAttribute("aria-label", dot.title);
       dot.addEventListener("click", () => focusEvent(idx));
-
-
-
       track.appendChild(dot);
     });
 
-    events.forEach((ev, idx) => {
-      if (!isMeaningful(ev)) return;
-      const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
-      const ts = num(ev.timestampSec, 0);
+    eventItems.forEach((item) => {
+      const { ev, index: idx, sc, ts } = item;
       const card = document.createElement("button");
       card.type = "button";
       card.className = `event-card ev-${sc}`;
       card.dataset.index = String(idx);
       card.addEventListener("click", () => focusEvent(idx));
 
-      const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || fallbackImages.original || fallbackImages.blend);
+      const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || resultImages.original || resultImages.blend);
       const m = ev.metrics || ev || {};
-      const ttcVal = m.ttc !== undefined ? m.ttc : (m.ttcSec ?? m.estimatedTtcSec);
-      const displayTtcVal = normalizeDisplayTtc(ev.riskState || ev.riskBand || ev.hazardBand, ttcVal);
-      const nearVal = num(m.nearScore, null);
-      const speedVal = num(m.closingSpeed ?? m.velocityMagnitude, null);
+      const displayTtcVal = item.ttc;
+      const nearVal = num(m.nearScore ?? m.near_score, null);
+      const speedVal = num(m.closingSpeed ?? m.closing_speed ?? m.velocityMagnitude ?? m.velocity_magnitude, null);
 
       card.innerHTML = `
         <div class="card-visual">
@@ -638,7 +738,7 @@
           <div class="card-metrics-grid">
             <div class="metric-box m-risk">
               <span class="m-label">Status</span>
-              <span class="m-value" style="color:rgba(var(--evrgb),1);">${(ev.riskState || ev.riskBand || ev.hazardBand || "UNKNOWN").toUpperCase()}</span>
+              <span class="m-value" style="color:rgba(var(--evrgb),1);">${sc.toUpperCase()}</span>
             </div>
             <div class="metric-box">
               <span class="m-label">Time</span>
@@ -667,23 +767,53 @@
     });
   }
 
+  function setActiveEventIndex(idx, { scroll = false } = {}) {
+    const activeValue = idx === null || idx === undefined ? null : String(idx);
+    let activeCard = null;
+    document.querySelectorAll(".event-card, .timeline-event, .chart-event-marker").forEach((el) => {
+      const isActive = activeValue !== null && el.getAttribute("data-index") === activeValue;
+      el.classList.toggle("is-active", isActive);
+      if (isActive && el.classList.contains("event-card")) activeCard = el;
+    });
+    if (scroll && activeCard) {
+      activeCard.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+    }
+  }
+
+  function nearestEventIndexAt(timeSec, toleranceSec = null) {
+    const t = num(timeSec, null);
+    if (t === null) return null;
+    const items = timelineEventItems();
+    if (!items.length) return null;
+    const tolerance = toleranceSec ?? clamp(currentTotalDuration() * 0.018, 0.25, 0.75);
+    let best = null;
+    let bestDiff = Infinity;
+    items.forEach((item) => {
+      const diff = Math.abs(item.ts - t);
+      if (diff < bestDiff) {
+        best = item;
+        bestDiff = diff;
+      }
+    });
+    return best && bestDiff <= tolerance ? best.index : null;
+  }
+
+  function timelineEventItemByIndex(idx) {
+    const target = idx === null || idx === undefined ? null : String(idx);
+    if (target === null) return null;
+    return timelineEventItems().find((item) => String(item.index) === target) || null;
+  }
+
   function focusEvent(idx) {
-    const events = state.events || [];
-    const ev = events[idx];
+    const item = timelineEventItemByIndex(idx);
+    const ev = item?.ev || (state.events || [])[idx];
     if (!ev) return;
-    const ts = num(ev.timestampSec, null);
+    const ts = eventTimestamp(ev);
     if (ts !== null) {
       seekPreviewVideo(ts);
       applyTimelineStateAt(ts, { labelPrefix: "Live" });
     }
-    
-    // Highlighting active card
-    const strip = byId("event-strip");
-    if (strip) {
-      strip.querySelectorAll(".event-card").forEach((c, i) => {
-        c.classList.toggle("is-active", i === idx);
-      });
-    }
+    setActiveEventIndex(idx, { scroll: true });
 
     const blendImage = imageSetForEvent(ev).blend;
     if (blendImage) {
@@ -697,96 +827,251 @@
 
   // ─── TTC chart from timelineRows ─────────────────────────
   function renderTtcChart(result) {
-    const path = byId("chart-line");
-    const area = byId("chart-area");
-    const avgTtcEl = byId("stat-avg-ttc");
-    if (!path) return;
+    const lineGroup = byId("chart-line");
+    const areaGroup = byId("chart-area");
+    const minTtcEl = byId("stat-min-ttc");
+    if (!lineGroup || !areaGroup) return;
 
     const rows = result?.timelineRows || [];
-    // Backend reports ttcSec=null for frames with no detected closing motion.
-    // Treat those as the SAFE baseline (chart max) so the line reads as a
-    // flat green stretch instead of vanishing — otherwise min-bucketing over
-    // only the noisy short-TTC samples paints the whole chart as DANGER.
-    const SAFE_BASELINE_TTC = 6.0;
+    const eventItems = timelineEventItems(result);
+    const severityRank = { safe: 0, caution: 1, danger: 2 };
     const points = rows
       .map((r) => {
         const rowState = rowValue(r, "riskState", "State");
-        const rawTtc = num(rowValue(r, "ttcSec", "TTC (s)"), null);
+        const sc = stateClass(rowState);
         return {
           t: num(rowValue(r, "timeSec", "Time (s)"), null),
-          ttcRaw: stateClass(rowState) === "safe" ? null : rawTtc,
+          sc: sc === "none" ? "safe" : sc,
+          ttc: normalizeDisplayTtc(rowState, rowValue(r, "ttcSec", "TTC (s)")),
         };
       })
-      .filter((p) => p.t !== null && (p.ttcRaw === null || p.ttcRaw >= 0))
-      .map((p) => ({
-        t: p.t,
-        ttc: p.ttcRaw === null || p.ttcRaw <= 0.05 ? SAFE_BASELINE_TTC : p.ttcRaw,
-        measured: p.ttcRaw !== null && p.ttcRaw > 0.05,
-      }))
+      .filter((p) => p.t !== null)
       .sort((a, b) => a.t - b.t);
 
-    const totalDur = currentTotalDuration()
+    const observedTimes = [
+      ...points.map((p) => p.t),
+      ...eventItems.map((item) => item.ts),
+    ];
+    const observedDur = observedTimes.length ? Math.max(...observedTimes) : 1;
+    const mediaDur = previewVideo?.duration
       || state.sourceMeta?.durationSec
-      || (points.length ? Math.max(...points.map((p) => p.t)) : 1);
+      || (state.currentResult?.frameCount && state.currentResult?.fps ? state.currentResult.frameCount / state.currentResult.fps : null);
+    const totalDur = Math.max(mediaDur || 0, observedDur || 0, 1);
 
-    if (!points.length) {
-      path.setAttribute("d", "");
-      area.setAttribute("d", "");
-      if (avgTtcEl) avgTtcEl.textContent = "—";
-      updateChartAxisX(totalDur || 1);
+    if (!points.length && !eventItems.length) {
+      lineGroup.replaceChildren();
+      areaGroup.replaceChildren();
+      if (minTtcEl) minTtcEl.textContent = "—";
+      const totalEventsEl = byId("stat-total-events");
+      if (totalEventsEl) totalEventsEl.textContent = "0";
+      updateChartAxisX(totalDur);
       return;
     }
 
-    // Average only over frames where TTC was actually measured: it answers
-    // "how close did we get when something was approaching", not "how often".
-    const measured = points.filter((p) => p.measured);
-    const avgTtc = measured.length
-      ? measured.reduce((acc, p) => acc + p.ttc, 0) / measured.length
-      : null;
-    if (avgTtcEl) avgTtcEl.textContent = avgTtc === null ? "—" : `${avgTtc.toFixed(1)}s`;
+    const eventTtc = eventItems
+      .map((item) => item.ttc)
+      .filter((v) => v !== null && v > 0.05);
+    const rowTtc = points
+      .map((p) => p.ttc)
+      .filter((v) => v !== null && v > 0.05);
+    const measuredTtc = eventTtc.length ? eventTtc : rowTtc;
+    const minTtc = measuredTtc.length ? Math.min(...measuredTtc) : null;
+    if (minTtcEl) minTtcEl.textContent = minTtc === null ? "—" : `${minTtc.toFixed(1)}s`;
 
-    // Total events count reflects the filtered strip below (CAUTION + DANGER only).
     const totalEventsEl = byId("stat-total-events");
-    if (totalEventsEl) {
-      const meaningfulEvents = (result?.events || []).filter((ev) => {
-        const sc = stateClass(ev.riskState || ev.riskBand || ev.hazardBand);
-        return sc === "caution" || sc === "danger";
-      });
-      totalEventsEl.textContent = String(meaningfulEvents.length);
-    }
+    if (totalEventsEl) totalEventsEl.textContent = String(eventItems.length);
 
-    const TARGET_POINTS = 60;
-    let dense = points;
-    if (points.length > TARGET_POINTS) {
-      const step = points.length / TARGET_POINTS;
-      dense = [];
-      for (let i = 0; i < TARGET_POINTS; i++) {
-        const startIdx = Math.floor(i * step);
-        const endIdx = Math.max(startIdx + 1, Math.floor((i + 1) * step));
-        const slice = points.slice(startIdx, endIdx);
-        if (!slice.length) continue;
-        const avgT = i === 0 ? slice[0].t : slice.reduce((acc, p) => acc + p.t, 0) / slice.length;
-        const minTtc = slice.reduce((min, p) => Math.min(min, p.ttc), SAFE_BASELINE_TTC);
-        dense.push({ t: avgT, ttc: minTtc });
+    const W = 400;
+    const rowCenter = { danger: 30, caution: 75, safe: 120 };
+    const bandH = 18;
+    const colorByState = {
+      danger: "rgba(239,68,68,0.72)",
+      caution: "rgba(245,158,11,0.66)",
+      safe: "rgba(16,185,129,0.50)",
+    };
+    const markerColorByState = {
+      danger: "#ef4444",
+      caution: "#f59e0b",
+      safe: "#10b981",
+    };
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const createSvg = (tag, attrs) => {
+      const el = document.createElementNS(svgNS, tag);
+      Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+      return el;
+    };
+    areaGroup.replaceChildren();
+    lineGroup.replaceChildren();
+
+    const xForTime = (t) => (t / Math.max(totalDur, 0.01)) * W;
+
+    const timeSteps = [];
+    for (let i = 1; i < points.length; i++) {
+      const step = points[i].t - points[i - 1].t;
+      if (step > 0.01) timeSteps.push(step);
+    }
+    timeSteps.sort((a, b) => a - b);
+    const medianStep = timeSteps.length ? timeSteps[Math.floor(timeSteps.length / 2)] : 0.25;
+    const eventHalfWindow = clamp(medianStep * 0.8, 0.18, 0.45);
+
+    let segments = [];
+    if (points.length) {
+      let start = 0;
+      for (let i = 1; i <= points.length; i++) {
+        if (i === points.length || points[i].sc !== points[start].sc) {
+          segments.push({
+            sc: points[start].sc,
+            startT: points[start].t,
+            endT: i < points.length ? points[i].t : totalDur,
+          });
+          start = i;
+        }
       }
+    } else {
+      segments = [{ sc: "safe", startT: 0, endT: totalDur }];
     }
 
-    const smoothed = dense.map((p, i) => {
-      const window = dense.slice(Math.max(0, i - 2), Math.min(dense.length, i + 3));
-      const avg = window.reduce((acc, item) => acc + item.ttc, 0) / window.length;
-      return { ...p, ttc: avg };
+    eventItems
+      .slice()
+      .sort((a, b) => severityRank[a.sc] - severityRank[b.sc])
+      .forEach((item) => {
+        const overrideStart = clamp(item.ts - eventHalfWindow, 0, totalDur);
+        const overrideEnd = clamp(item.ts + eventHalfWindow, overrideStart + 0.05, totalDur);
+        const nextSegments = [];
+        segments.forEach((segment) => {
+          if (segment.endT <= overrideStart || segment.startT >= overrideEnd) {
+            nextSegments.push(segment);
+            return;
+          }
+          if (segment.startT < overrideStart) {
+            nextSegments.push({ ...segment, endT: overrideStart });
+          }
+          nextSegments.push({
+            sc: item.sc,
+            startT: Math.max(segment.startT, overrideStart),
+            endT: Math.min(segment.endT, overrideEnd),
+          });
+          if (segment.endT > overrideEnd) {
+            nextSegments.push({ ...segment, startT: overrideEnd });
+          }
+        });
+        segments = nextSegments;
+      });
+
+    const mergedSegments = [];
+    segments
+      .filter((segment) => segment.endT > segment.startT)
+      .sort((a, b) => a.startT - b.startT)
+      .forEach((segment) => {
+        const prev = mergedSegments[mergedSegments.length - 1];
+        // Merge segments of same state if gap is less than 0.5s
+        if (prev && prev.sc === segment.sc && Math.abs(segment.startT - prev.endT) < 0.5) {
+          prev.endT = segment.endT;
+        } else {
+          mergedSegments.push({ ...segment });
+        }
+      });
+
+    mergedSegments.forEach((segment) => {
+      const duration = segment.endT - segment.startT;
+      const sc = segment.sc;
+
+      // Skip ultra-short non-critical segments (< 0.1s)
+      if (duration < 0.1 && sc !== "danger") return;
+
+      const x1 = clamp(xForTime(segment.startT), 0, W);
+      const x2 = clamp(xForTime(segment.endT), x1 + 0.8, W);
+
+
+      // Render standard blocks
+      areaGroup.appendChild(createSvg("rect", {
+        x: x1.toFixed(1),
+        y: (rowCenter[sc] - (bandH / 2)).toFixed(1),
+        width: Math.max(1.2, x2 - x1).toFixed(1),
+        height: bandH,
+        rx: 3,
+        fill: colorByState[sc] || colorByState.safe,
+        stroke: "none",
+      }));
     });
 
-    const W = 400, H = 150;
-    const maxTtc = 6;
-    const xy = smoothed.map((p) => [
-      (p.t / Math.max(totalDur, 0.01)) * W,
-      H - clamp((p.ttc / maxTtc) * H, 0, H),
-    ]);
-    const d = xy.map((p, i) => (i === 0 ? `M ${p[0].toFixed(1)} ${p[1].toFixed(1)}` : `L ${p[0].toFixed(1)} ${p[1].toFixed(1)}`)).join(" ");
-    path.setAttribute("d", d);
-    area.setAttribute("d", `${d} L ${xy[xy.length - 1][0].toFixed(1)} ${H} L ${xy[0][0].toFixed(1)} ${H} Z`);
+    const labelIndexes = new Set();
+    if (eventItems.length <= 3) {
+      eventItems.forEach((item) => labelIndexes.add(item.index));
+    } else {
+      ["danger", "caution"].forEach((sc) => {
+        const best = eventItems
+          .filter((item) => item.sc === sc)
+          .sort((a, b) => (a.ttc ?? Infinity) - (b.ttc ?? Infinity) || eventSeverityScore(b.ev) - eventSeverityScore(a.ev))[0];
+        if (best) labelIndexes.add(best.index);
+      });
+    }
+
+    eventItems.forEach((item) => {
+      const x = clamp(xForTime(item.ts), 0, W);
+      const y = rowCenter[item.sc] ?? rowCenter.caution;
+      const color = markerColorByState[item.sc] || markerColorByState.caution;
+      const group = createSvg("g", {
+        class: `chart-event-marker chart-event-${item.sc}`,
+        "data-index": item.index,
+        tabindex: 0,
+        role: "button",
+      });
+      group.style.cursor = "pointer";
+      group.addEventListener("click", () => focusEvent(item.index));
+      group.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        focusEvent(item.index);
+      });
+
+      const title = createSvg("title", {});
+      title.textContent = eventTooltip(item);
+      group.appendChild(title);
+
+      group.appendChild(createSvg("text", {
+        x: x.toFixed(1),
+        y: (y - 10).toFixed(1),
+        "text-anchor": "middle",
+        fill: "white",
+        "font-size": "10",
+        "font-weight": "700",
+      })).textContent = item.ttc !== null ? item.ttc.toFixed(1) : "";
+
+      group.appendChild(createSvg("rect", {
+        x: (x - 8).toFixed(1),
+        y: (y - 15).toFixed(1),
+        width: 16,
+        height: 30,
+        fill: "rgba(0,0,0,0)",
+        stroke: "none",
+        "pointer-events": "all",
+      }));
+      group.appendChild(createSvg("line", {
+        x1: x.toFixed(1),
+        y1: (y - 13).toFixed(1),
+        x2: x.toFixed(1),
+        y2: (y + 13).toFixed(1),
+        stroke: color,
+        "stroke-width": item.sc === "danger" ? 2.5 : 2,
+        "stroke-opacity": 0.55,
+        "stroke-linecap": "round",
+      }));
+      group.appendChild(createSvg("circle", {
+        cx: x.toFixed(1),
+        cy: y.toFixed(1),
+        r: item.sc === "danger" ? 4.6 : 4,
+        fill: color,
+        stroke: "rgba(255,255,255,0.92)",
+        "stroke-width": 1.1,
+      }));
+
+      lineGroup.appendChild(group);
+    });
+
     updateChartAxisX(totalDur);
+    setActiveEventIndex(nearestEventIndexAt(previewVideo?.currentTime ?? 0));
   }
 
 
@@ -814,10 +1099,12 @@
     if (!cursor) return;
     const totalDur = currentTotalDuration();
     const ratio = clamp(timeSec / Math.max(totalDur, 0.01), 0, 1);
-    const x = ratio * 400;
-    cursor.setAttribute("x1", String(x));
-    cursor.setAttribute("x2", String(x));
-    cursor.setAttribute("opacity", state.timelineRows.length ? "0.7" : "0");
+    if (cursor) {
+      const x = ratio * 400;
+      cursor.setAttribute("x1", String(x));
+      cursor.setAttribute("x2", String(x));
+      cursor.setAttribute("opacity", state.timelineRows.length || state.events.length ? "1" : "0");
+    }
   }
 
   function updateVideoTimeControls(timeSec) {
@@ -857,6 +1144,10 @@
     const t = num(timeSec, 0);
     updateChartCursor(t);
     updateVideoTimeControls(t);
+    const activeEventIndex = nearestEventIndexAt(t);
+    const activeEventItem = activeEventIndex === null ? null : timelineEventItemByIndex(activeEventIndex);
+    const activeEvent = activeEventItem?.ev || null;
+    setActiveEventIndex(activeEventIndex);
 
     const cursor = byId("timeline-cursor");
     if (cursor) {
@@ -866,23 +1157,29 @@
     }
 
     const row = findTimelineRowAt(t);
-    if (!row) return;
-    const rowTime = num(rowValue(row, "timeSec", "Time (s)"), t);
-    const rowState = rowValue(row, "riskState", "State");
+    if (!row && !activeEvent) return;
+
+    const rowTime = activeEvent ? eventTimestamp(activeEvent) : num(rowValue(row, "timeSec", "Time (s)"), t);
+    const rowState = activeEvent ? eventStateClass(activeEvent).toUpperCase() : rowValue(row, "riskState", "State");
     const stateLabel = rowState ? String(rowState).toUpperCase() : null;
-    const sc = stateClass(stateLabel);
+    const sc = activeEvent ? eventStateClass(activeEvent) : stateClass(stateLabel);
     applyRiskBannerState({
       stateLabel,
-      ttc: normalizeDisplayTtc(stateLabel, rowValue(row, "ttcSec", "TTC (s)")),
-      lane: rowValue(row, "zone", "Zone"),
+      ttc: activeEvent ? eventDisplayTtc(activeEvent) : normalizeDisplayTtc(stateLabel, rowValue(row, "ttcSec", "TTC (s)")),
+      lane: activeEvent ? eventLane(activeEvent) : rowValue(row, "lane", "Lane"),
       sc,
       timeTag: `${labelPrefix}: <span>${formatSeconds(rowTime)}</span>`,
     });
 
-    const scores = rowValue(row, "zoneScores", "ZoneScores");
-    if (scores) {
-      const zoneMetrics = Object.entries(scores).map(([zone, score]) => ({ zone, score }));
-      renderZoneBars({ zoneMetrics });
+    const eventLaneMetrics = activeEvent && Array.isArray(activeEvent.laneMetrics) ? activeEvent.laneMetrics : null;
+    if (eventLaneMetrics?.length) {
+      renderLaneBars({ laneMetrics: eventLaneMetrics });
+    } else {
+      const scores = rowValue(row, "laneScores", "LaneScores");
+      if (scores) {
+        const laneMetrics = Object.entries(scores).map(([lane, score]) => ({ lane, score }));
+        renderLaneBars({ laneMetrics });
+      }
     }
 
     if (updateImages && state.activeMainView !== "video") {
@@ -946,7 +1243,6 @@
     state.events = result.events || [];
 
     setMiniMedia("depth", result.images.depth);
-    setMiniMedia("segmentation", result.images.segmentation);
     setMiniMedia("road", result.images.road);
     setMiniMedia("motion", result.images.motion);
 
@@ -963,7 +1259,7 @@
       applyTimelineStateAt(lastTime, { labelPrefix: "Final", updateImages: false });
     } else {
       renderRiskBannerFromMetrics(result.metrics);
-      renderZoneBars(result);
+      renderLaneBars(result);
     }
     updateMapIndicators();
   }
@@ -975,19 +1271,25 @@
     state.events = [];
     state.liveEvents = [];
     setMiniMedia("depth", "");
-    setMiniMedia("segmentation", "");
     setMiniMedia("road", "");
     setMiniMedia("motion", "");
     hidePreviewOverlay();
     renderStatRow(null);
     renderRiskBannerFromMetrics({ state: null, band: null, ttc: null, lane: null });
 
-    renderZoneBars({ zoneMetrics: [] });
+    renderLaneBars({ laneMetrics: [] });
     renderTimeline({ events: [] });
     renderTtcChart({ timelineRows: [] });
 
     updateChartCursor(0);
     updateMapIndicators();
+    const fMin = byId("frames-min"), fMax = byId("frames-max");
+    if (fMin) fMin.disabled = true;
+    if (fMax) fMax.disabled = true;
+    const fInp = byId("max-frames-input"), sInp = byId("start-time-input"), eInp = byId("end-time-input");
+    if (fInp) fInp.disabled = true;
+    if (sInp) sInp.disabled = true;
+    if (eInp) eInp.disabled = true;
   }
 
   // ─── live preview (WebSocket) ────────────────────────────
@@ -1018,7 +1320,7 @@
     applyRiskBannerState({
       stateLabel,
       ttc: normalizeDisplayTtc(stateLabel, msg.ttcSec),
-      lane: msg.zone,
+      lane: msg.lane,
       sc,
       timeTag: `Live: <span>${formatSeconds(ts)}</span>`,
     });
@@ -1029,8 +1331,8 @@
       status.textContent = `Processing… ${pct.toFixed(0)}%`;
     }
 
-    if (Array.isArray(msg.zoneMetrics) && msg.zoneMetrics.length) {
-      renderZoneBars({ zoneMetrics: msg.zoneMetrics });
+    if (Array.isArray(msg.laneMetrics) && msg.laneMetrics.length) {
+      renderLaneBars({ laneMetrics: msg.laneMetrics });
     }
 
     const eventsChanged = upsertLiveEventFromMessage(msg);
@@ -1038,10 +1340,10 @@
     if (rowsChanged) {
       state.timelineRows = state.liveTimelineRows;
     }
-    if (eventsChanged) {
+    if (!state.analyzing && eventsChanged) {
       renderTimeline({ events: state.liveEvents });
     }
-    if (rowsChanged || eventsChanged) {
+    if (!state.analyzing && (rowsChanged || eventsChanged)) {
       renderTtcChart({ timelineRows: state.liveTimelineRows, events: state.liveEvents });
     }
   }
@@ -1125,11 +1427,11 @@
       timestampSec: ts,
       riskState: String(msg.riskState || "").toUpperCase(),
       riskBand: sc,
-      zone: msg.zone,
+      lane: msg.lane,
       ttcSec: msg.ttcSec,
       nearScore: msg.nearScore,
       closingSpeed: msg.closingSpeed,
-      objectType: msg.zone ? `${msg.zone} zone` : "zone",
+      objectType: msg.lane ? `${msg.lane} lane` : "lane event",
       images: msg.frame ? { blend: msg.frame } : {},
     };
 
@@ -1213,6 +1515,7 @@
   }
   function setRunningUI(isRunning) {
     state.analyzing = isRunning;
+    document.body.classList.toggle("is-analysis-running", isRunning);
     runButton.classList.toggle("is-running", isRunning);
     previewFrame.classList.toggle("is-analyzing", isRunning);
     const label = runButton.querySelector("span");
@@ -1233,7 +1536,7 @@
     state.liveTimelineRows = [];
     state.liveEvents = [];
     state.events = [];
-    renderZoneBars({ zoneMetrics: [] });
+    renderLaneBars({ laneMetrics: [] });
     renderTimeline({ events: [] });
     renderTtcChart({ timelineRows: [], events: [] });
     const sessionId = await startLivePreview();
@@ -1281,13 +1584,21 @@
     setPreviewMedia("");
     renderEmptyState();
 
-    // Reset frames input to default
+    // Reset frames input to empty
     const input = byId("max-frames-input");
     if (input) {
-      input.value = "180";
-      input.max = "360";
+      input.value = "";
+      input.max = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
     }
+    const fMin = byId("frames-min"), fMax = byId("frames-max");
+    if (fMin) fMin.disabled = true;
+    if (fMax) fMax.disabled = true;
+
+    // Reset temporal window inputs
+    const startInp = byId("start-time-input"), endInp = byId("end-time-input");
+    if (startInp) { startInp.value = ""; startInp.max = ""; startInp.disabled = true; }
+    if (endInp) { endInp.value = ""; endInp.max = ""; endInp.disabled = true; }
   }
 
   // ─── settings drawer ─────────────────────────────────────

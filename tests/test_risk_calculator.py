@@ -1,409 +1,416 @@
-"""Unit tests for risk_calculator.py — pure functions and StateStabilizer."""
+"""Unit tests for the object-centric fused TTC risk calculator."""
 
-import pytest
 import numpy as np
+import pytest
 
 from zone_risk.pipeline.risk_calculator import (
-    zone_from_bbox,
-    direction_from_flow,
-    compute_ttc,
-    classify_state,
-    calculate_region_risk,
-    is_clear_safe_event,
-    is_imminent_danger,
-    MetricEmaSmoother,
-    score_event,
-    select_primary_event,
-    StateStabilizer,
+    ExpansionSmoother,
     RiskEvent,
+    StateStabilizer,
+    TtcComponent,
+    calculate_track_risk,
+    classify_state,
+    direction_from_lateral,
+    expansion_rate_from_track,
+    fuse_ttc,
+    is_imminent_danger,
+    lane_crossing_risk,
+    lane_lateral_velocity,
+    score_event,
     stabilized_event_state,
+    ttc_from_expansion,
+    ttc_from_flow,
 )
+from zone_risk.pipeline.tracker import IoUTracker, Track, TrackSample
+from zone_risk.vision.object_detector import Detection
+from zone_risk.vision.road_geometry import LaneFrame, lane_position
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+def make_lane(detected=True):
+    return LaneFrame(
+        vanishing_point=(150.0, 80.0),
+        left_line=(120, 100, 60, 199),
+        right_line=(180, 100, 240, 199),
+        left_x_at_bottom=60.0,
+        right_x_at_bottom=240.0,
+        lane_width_at_bottom=180.0,
+        lane_center_x_at_bottom=150.0,
+        confidence=0.85 if detected else 0.25,
+        detected=detected,
+        width=300,
+        height=200,
+    )
 
-def make_event(state="SAFE", near_score=0.1, closing_speed=0.05, ttc_sec=10.0, object_id=None):
+
+def make_event(state="SAFE", ttc_sec=None, near_score=0.1, closing_speed=0.05, crossing=0.2):
     return RiskEvent(
         frame_index=0,
         timestamp_sec=0.0,
         state=state,
         ttc_sec=ttc_sec,
         direction="center",
-        zone="center",
-        object_type="test",
+        lane="center",
+        object_type="car",
         confidence=0.5,
         near_score=near_score,
-        velocity_magnitude=0.0,
+        velocity_magnitude=0.1,
         closing_speed=closing_speed,
-        bbox=(0, 0, 100, 100),
+        bbox=(10, 10, 50, 50),
         reason="test",
-        object_id=object_id,
+        object_id=1,
+        crossing_risk=crossing,
     )
 
 
-# ── zone_from_bbox ────────────────────────────────────────────────────────────
-
-class TestZoneFromBbox:
-    def test_left_zone(self):
-        assert zone_from_bbox((0, 0, 50, 100), width=300) == "left"
-
-    def test_right_zone(self):
-        assert zone_from_bbox((250, 0, 300, 100), width=300) == "right"
-
-    def test_center_zone(self):
-        assert zone_from_bbox((100, 0, 200, 100), width=300) == "center"
-
-    def test_exact_left_boundary(self):
-        # center_x = 100, width/3 = 100 → NOT less than → center
-        assert zone_from_bbox((50, 0, 150, 100), width=300) == "center"
-
-    def test_edge_bbox_at_left_edge(self):
-        assert zone_from_bbox((0, 0, 10, 100), width=300) == "left"
-
-
-# ── direction_from_flow ───────────────────────────────────────────────────────
-
-class TestDirectionFromFlow:
-    def test_center_when_near_zero(self):
-        assert direction_from_flow(0.01) == "center"
-
-    def test_left_for_negative_flow(self):
-        assert direction_from_flow(-0.1) == "left"
-
-    def test_right_for_positive_flow(self):
-        assert direction_from_flow(0.1) == "right"
-
-    def test_exact_threshold_is_right(self):
-        # condition is strict < 0.015, so 0.015 is NOT center
-        assert direction_from_flow(0.015) == "right"
-
-    def test_just_below_threshold_is_center(self):
-        assert direction_from_flow(0.0149) == "center"
+def make_track(track_id, bbox, t, history=None):
+    track = Track(
+        track_id=track_id,
+        class_name="car",
+        confidence=0.9,
+        bbox=bbox,
+        frame_index=int(t * 30),
+        timestamp_sec=float(t),
+    )
+    for sample_t, sample_bbox in history or []:
+        track.history.append(
+            TrackSample(
+                frame_index=int(sample_t * 30),
+                timestamp_sec=float(sample_t),
+                bbox=sample_bbox,
+            )
+        )
+    return track
 
 
-# ── compute_ttc ───────────────────────────────────────────────────────────────
+class TestLaneGeometry:
+    def test_lane_position_uses_bbox_bottom_y(self):
+        lane = make_lane()
+        lower = lane_position((200, 160, 220, 199), lane)
+        upper = lane_position((200, 60, 220, 100), lane)
 
-class TestComputeTtc:
-    def test_none_when_not_closing(self):
-        assert compute_ttc(near_score=0.9, closing_speed=0.0) is None
-
-    def test_none_at_threshold(self):
-        assert compute_ttc(near_score=0.5, closing_speed=1e-3) is None
-
-    def test_value_when_closing(self):
-        ttc = compute_ttc(near_score=0.5, closing_speed=0.5)
-        # distance_proxy = 0.5, closing_speed = 0.5 → TTC = 1.0
-        assert ttc == pytest.approx(1.0)
-
-    def test_very_near_object(self):
-        # Relative monocular depth can saturate, but the reported pseudo-TTC
-        # should not collapse to a literal zero.
-        ttc = compute_ttc(near_score=1.0, closing_speed=0.5)
-        assert ttc == pytest.approx(0.36)
-
-    def test_no_visible_object_returns_none(self):
-        # near_score=0.0 means no object in view — TTC is meaningless even
-        # if flow suggests motion, so it must be suppressed.
-        assert compute_ttc(near_score=0.0, closing_speed=0.1) is None
-
-    def test_clamps_far_objects_to_none(self):
-        # near=0.20 (just at floor), closing=0.08 → distance_proxy=0.80,
-        # TTC=10s — beyond the reported max, so suppressed instead of shown.
-        assert compute_ttc(near_score=0.20, closing_speed=0.08) is None
-
-    def test_low_closing_speed_returns_none(self):
-        # Below the closing-speed floor: flow is too noisy to trust.
-        assert compute_ttc(near_score=0.5, closing_speed=0.05) is None
+        assert lower == pytest.approx(0.667, abs=0.02)
+        assert upper == pytest.approx(2.0, abs=0.02)
 
 
-# ── classify_state ────────────────────────────────────────────────────────────
+class TestDirectionFromLateral:
+    def test_center_when_small(self):
+        assert direction_from_lateral(0.05) == "center"
+
+    def test_left_for_negative(self):
+        assert direction_from_lateral(-0.2) == "left"
+
+    def test_right_for_positive(self):
+        assert direction_from_lateral(0.2) == "right"
+
+
+class TestTtcComponents:
+    def test_expansion_ttc_value_when_growing(self):
+        component = ttc_from_expansion(0.5, history_age=4)
+        assert component.value == pytest.approx(2.0)
+        assert component.confidence == pytest.approx(1.0)
+
+    def test_expansion_ttc_none_when_stable(self):
+        assert ttc_from_expansion(0.01, history_age=4).value is None
+
+    def test_flow_ttc_uses_measured_frame_dt(self):
+        h, w = 200, 300
+        vp = (150.0, 80.0)
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        radial_x = xs - vp[0]
+        radial_y = ys - vp[1]
+        dist = np.maximum(np.sqrt(radial_x * radial_x + radial_y * radial_y), 1.0)
+        flow = np.stack((radial_x / dist, radial_y / dist), axis=-1).astype(np.float32) * 4.0
+
+        component = ttc_from_flow((130, 120, 170, 160), flow, vp, flow_dt_sec=0.1)
+
+        assert component.value == pytest.approx(1.5, abs=0.05)
+        assert component.confidence > 0.5
+
+    def test_weighted_median_ignores_low_confidence_outlier(self):
+        fused, _ = fuse_ttc(
+            [
+                TtcComponent("expansion", 0.5, 0.2),
+                TtcComponent("flow", 8.0, 0.1),
+                TtcComponent("depth", 1.2, 0.8),
+            ]
+        )
+
+        assert fused == pytest.approx(1.2)
+
+
+class TestExpansionRateFromTrack:
+    def test_zero_when_no_history(self):
+        track = make_track(1, (10, 10, 50, 50), t=1.0)
+        assert expansion_rate_from_track(track) == 0.0
+
+    def test_positive_when_growing(self):
+        track = make_track(
+            1,
+            (0, 0, 100, 100),
+            t=1.0,
+            history=[(0.5, (10, 10, 90, 90))],
+        )
+        assert expansion_rate_from_track(track) > 0.1
+
+    def test_negative_when_shrinking(self):
+        track = make_track(
+            1,
+            (10, 10, 90, 90),
+            t=1.0,
+            history=[(0.5, (0, 0, 100, 100))],
+        )
+        assert expansion_rate_from_track(track) < 0.0
+
+
+class TestCrossing:
+    def test_lateral_velocity_is_lane_relative(self):
+        lane = make_lane()
+        track = make_track(
+            1,
+            (140, 120, 180, 190),
+            t=1.0,
+            history=[(0.5, (100, 120, 140, 190))],
+        )
+
+        assert lane_lateral_velocity(track, lane) > 0.0
+
+    def test_side_lane_motion_toward_center_increases_crossing_risk(self):
+        lane = make_lane()
+        static = make_track(1, (225, 130, 245, 190), t=1.0)
+        moving_in = make_track(
+            1,
+            (225, 130, 245, 190),
+            t=1.0,
+            history=[(0.5, (260, 130, 280, 190))],
+        )
+
+        assert lane_crossing_risk(moving_in, lane, 2.0) > lane_crossing_risk(static, lane, 2.0)
+
 
 class TestClassifyState:
-    def test_danger_when_near_and_closing_fast(self):
-        assert classify_state(near_score=0.4, closing_speed=0.5, ttc_sec=0.5) == "DANGER"
+    def test_safe_when_low_confidence(self):
+        state = classify_state(
+            fused_ttc=0.5,
+            crossing=0.9,
+            near_score=0.5,
+            expansion_rate=0.5,
+            lane_pos=0.0,
+            confidence=0.1,
+        )
+        assert state == "SAFE"
 
-    def test_caution_via_ttc(self):
-        # near >= 0.25, ttc < 3.0 → CAUTION
-        assert classify_state(near_score=0.3, closing_speed=0.3, ttc_sec=2.0) == "CAUTION"
+    def test_danger_low_ttc_in_corridor(self):
+        state = classify_state(
+            fused_ttc=0.5,
+            crossing=0.7,
+            near_score=0.5,
+            expansion_rate=0.5,
+            lane_pos=0.0,
+            confidence=0.8,
+        )
+        assert state == "DANGER"
 
-    def test_caution_via_high_near_and_speed(self):
-        # near >= 0.72, closing >= 0.10, no ttc
-        assert classify_state(near_score=0.75, closing_speed=0.15, ttc_sec=None) == "CAUTION"
+    def test_caution_mid_ttc(self):
+        state = classify_state(
+            fused_ttc=2.0,
+            crossing=0.4,
+            near_score=0.3,
+            expansion_rate=0.2,
+            lane_pos=0.2,
+            confidence=0.8,
+        )
+        assert state == "CAUTION"
 
-    def test_safe_low_values(self):
-        assert classify_state(near_score=0.1, closing_speed=0.05, ttc_sec=10.0) == "SAFE"
-
-    def test_safe_when_no_ttc_and_low_near(self):
-        assert classify_state(near_score=0.2, closing_speed=0.5, ttc_sec=None) == "SAFE"
-
-    def test_low_ttc_drives_danger_regardless_of_near_gate(self):
-        # If compute_ttc has produced a sub-1s TTC, the evidence gating has
-        # already passed — classification must trust it and not silently
-        # downgrade to SAFE because near_score is below an internal threshold.
-        assert classify_state(near_score=0.22, closing_speed=0.9, ttc_sec=0.1) == "DANGER"
-
-    def test_caution_via_ttc_without_high_near(self):
-        # Sub-3s TTC must drive at least CAUTION even when near_score is low,
-        # so the displayed state never contradicts the displayed TTC.
-        assert classify_state(near_score=0.22, closing_speed=0.5, ttc_sec=1.8) == "CAUTION"
+    def test_safe_when_outside_corridor(self):
+        state = classify_state(
+            fused_ttc=0.5,
+            crossing=0.05,
+            near_score=0.5,
+            expansion_rate=0.5,
+            lane_pos=2.0,
+            confidence=0.8,
+        )
+        assert state != "DANGER"
 
 
-# ── calculate_region_risk ────────────────────────────────────────────────────
-
-class TestCalculateRegionRisk:
-    def test_lateral_motion_magnitude_does_not_count_as_closing(self):
-        height, width = 80, 120
-        near_map = np.full((height, width), 0.85, dtype=np.float32)
-        magnitude_norm = np.ones((height, width), dtype=np.float32)
-        divergence_norm = np.zeros((height, width), dtype=np.float32)
+class TestCalculateTrackRisk:
+    def test_strong_expansion_in_corridor_danger(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.6, dtype=np.float32)
+        magnitude = np.full((height, width), 0.4, dtype=np.float32)
         flow = np.zeros((height, width, 2), dtype=np.float32)
-        flow[..., 0] = 18.0
-
-        event = calculate_region_risk(
-            frame_index=0,
-            timestamp_sec=0.0,
-            bbox=(0, 0, width, height),
-            object_type="lateral motion",
-            near_map=near_map,
-            magnitude_norm=magnitude_norm,
-            divergence_norm=divergence_norm,
-            flow=flow,
+        track = make_track(
+            1,
+            (130, 120, 180, 190),
+            t=1.0,
+            history=[(0.7, (140, 130, 170, 170))],
         )
 
-        assert event.velocity_magnitude == pytest.approx(1.0)
-        assert event.closing_speed == pytest.approx(0.0)
+        event = calculate_track_risk(
+            track=track,
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=expansion_rate_from_track(track),
+            depth_history={},
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=True,
+        )
+
+        assert event.state == "DANGER"
+        assert event.ttc_sec is not None
+        assert event.bbox == track.bbox
+
+    def test_no_expansion_safe(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.3, dtype=np.float32)
+        magnitude = np.zeros((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(
+            1,
+            (130, 100, 170, 140),
+            t=1.0,
+            history=[(0.5, (130, 100, 170, 140))],
+        )
+
+        event = calculate_track_risk(
+            track=track,
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=0.0,
+            depth_history={},
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=True,
+        )
+
+        assert event.state == "SAFE"
+        assert event.ttc_sec is None
+
+    def test_stale_depth_does_not_update_depth_history(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.4, dtype=np.float32)
+        magnitude = np.zeros((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(1, (130, 120, 180, 190), t=1.0)
+        history = {1: (0.0, 0.2)}
+
+        event = calculate_track_risk(
+            track=track,
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=0.0,
+            depth_history=history,
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=False,
+        )
+
+        assert history == {1: (0.0, 0.2)}
+        assert next(c for c in event.ttc_components if c.name == "depth").value is None
+
+    def test_side_lane_static_object_safe(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.2, dtype=np.float32)
+        magnitude = np.zeros((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(1, (270, 130, 298, 190), t=1.0)
+
+        event = calculate_track_risk(
+            track=track,
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=0.0,
+            depth_history={},
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=True,
+        )
+
         assert event.state == "SAFE"
 
-    def test_radial_expansion_with_divergence_counts_as_closing(self):
-        height, width = 80, 120
-        near_map = np.full((height, width), 0.85, dtype=np.float32)
-        magnitude_norm = np.ones((height, width), dtype=np.float32)
-        divergence_norm = np.full((height, width), 0.9, dtype=np.float32)
-        y_coords, x_coords = np.mgrid[0:height, 0:width].astype(np.float32)
-        focus_x = (width - 1) / 2.0
-        focus_y = height * 0.55
-        flow = np.zeros((height, width, 2), dtype=np.float32)
-        flow[..., 0] = (x_coords - focus_x) * 0.55
-        flow[..., 1] = (y_coords - focus_y) * 0.55
 
-        event = calculate_region_risk(
-            frame_index=0,
-            timestamp_sec=0.0,
-            bbox=(0, 0, width, height),
-            object_type="approaching object",
-            near_map=near_map,
-            magnitude_norm=magnitude_norm,
-            divergence_norm=divergence_norm,
-            flow=flow,
-        )
+class TestExpansionSmoother:
+    def test_first_value_is_passthrough(self):
+        smoother = ExpansionSmoother()
+        assert smoother.update(1, 0.5) == pytest.approx(0.5)
 
-        assert event.closing_speed > 0.35
-        assert event.ttc_sec is not None and event.ttc_sec < 1.0
-        assert event.state == "DANGER"
+    def test_smoothing_bounds_jitter(self):
+        smoother = ExpansionSmoother()
+        smoother.update(1, 0.0)
+        assert smoother.update(1, 1.0) < 1.0
 
-    def test_local_high_motion_near_object_can_override_zone_average(self):
-        height, width = 80, 120
-        near_map = np.full((height, width), 0.18, dtype=np.float32)
-        magnitude_norm = np.full((height, width), 0.05, dtype=np.float32)
-        divergence_norm = np.zeros((height, width), dtype=np.float32)
-        flow = np.zeros((height, width, 2), dtype=np.float32)
-
-        near_map[30:60, 45:75] = 0.55
-        magnitude_norm[30:60, 45:75] = 1.0
-        flow[30:60, 45:75, 1] = 14.0
-
-        event = calculate_region_risk(
-            frame_index=0,
-            timestamp_sec=0.0,
-            bbox=(0, 0, width, height),
-            object_type="localized impact",
-            near_map=near_map,
-            magnitude_norm=magnitude_norm,
-            divergence_norm=divergence_norm,
-            flow=flow,
-        )
-
-        assert event.near_score > 0.45
-        assert event.closing_speed > 0.35
-        assert event.state == "DANGER"
-
-    def test_edge_lane_expansion_is_not_immediate_collision(self):
-        height, width = 80, 160
-        near_map = np.full((height, width), 0.9, dtype=np.float32)
-        magnitude_norm = np.ones((height, width), dtype=np.float32)
-        divergence_norm = np.full((height, width), 0.9, dtype=np.float32)
-        y_coords, x_coords = np.mgrid[0:height, 0:width].astype(np.float32)
-        focus_x = (width - 1) / 2.0
-        focus_y = height * 0.55
-        flow = np.zeros((height, width, 2), dtype=np.float32)
-        flow[..., 0] = (x_coords - focus_x) * 0.55
-        flow[..., 1] = (y_coords - focus_y) * 0.55
-
-        event = calculate_region_risk(
-            frame_index=0,
-            timestamp_sec=0.0,
-            bbox=(0, 0, int(width * 0.25), height),
-            object_type="side-lane expansion",
-            near_map=near_map,
-            magnitude_norm=magnitude_norm,
-            divergence_norm=divergence_norm,
-            flow=flow,
-        )
-
-        assert event.state != "DANGER"
-        assert event.ttc_sec is None or event.ttc_sec >= 1.0
+    def test_forget_drops_inactive_tracks(self):
+        smoother = ExpansionSmoother()
+        smoother.update(1, 0.5)
+        smoother.update(2, 0.5)
+        smoother.forget({1})
+        assert 2 not in smoother._state
 
 
-# ── is_imminent_danger ────────────────────────────────────────────────────────
-
-class TestIsImminentDanger:
-    def test_true_for_low_ttc_danger(self):
-        event = make_event(state="DANGER", near_score=0.6, closing_speed=0.12, ttc_sec=0.8)
-        assert is_imminent_danger(event) is True
-
-    def test_true_for_low_ttc_even_when_near_is_marginal(self):
-        event = make_event(state="DANGER", near_score=0.22, closing_speed=0.9, ttc_sec=0.8)
-        assert is_imminent_danger(event) is True
-
-    def test_false_for_non_urgent_danger(self):
-        event = make_event(state="DANGER", near_score=0.6, closing_speed=0.2, ttc_sec=2.0)
-        assert is_imminent_danger(event) is False
-
-
-class TestStabilizedEventState:
+class TestStabilizer:
     def test_imminent_danger_bypasses_upgrade_delay(self):
         stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        event = make_event(state="DANGER", near_score=0.6, closing_speed=0.12, ttc_sec=0.8)
-
+        event = make_event(state="DANGER", ttc_sec=0.5)
+        assert is_imminent_danger(event)
         assert stabilized_event_state(stabilizer, event) == "DANGER"
 
-    def test_clear_safe_resets_held_danger(self):
+    def test_held_state_does_not_outrank_current_caution(self):
         stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
         stabilizer.current_state = "DANGER"
         stabilizer.pending_state = "DANGER"
-        event = make_event(state="SAFE", near_score=0.2, closing_speed=0.05, ttc_sec=10.7)
-
-        assert is_clear_safe_event(event) is True
-        assert stabilized_event_state(stabilizer, event) == "SAFE"
-        assert stabilizer.current_state == "SAFE"
-
-    def test_held_state_does_not_outrank_current_metrics(self):
-        stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        stabilizer.current_state = "DANGER"
-        stabilizer.pending_state = "DANGER"
-        event = make_event(state="CAUTION", near_score=0.5, closing_speed=0.2, ttc_sec=2.2)
-
+        event = make_event(state="CAUTION", ttc_sec=2.0)
         assert stabilized_event_state(stabilizer, event) == "CAUTION"
 
-    def test_low_ttc_caution_bypasses_safe_upgrade_delay(self):
+    def test_upgrade_requires_n_frames(self):
         stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        event = make_event(state="CAUTION", near_score=0.25, closing_speed=0.4, ttc_sec=2.0)
-
-        assert stabilized_event_state(stabilizer, event) == "CAUTION"
-
-
-class TestMetricEmaSmoother:
-    def test_dropout_does_not_immediately_clear_ttc(self):
-        smoother = MetricEmaSmoother()
-
-        first = smoother.smooth_event(
-            make_event(state="DANGER", near_score=0.85, closing_speed=0.3, ttc_sec=0.6, object_id=102)
-        )
-        second = smoother.smooth_event(
-            make_event(state="SAFE", near_score=0.85, closing_speed=0.0, ttc_sec=None, object_id=102)
-        )
-
-        assert first.ttc_sec == pytest.approx(0.6)
-        assert second.closing_speed == pytest.approx(0.21)
-        assert second.ttc_sec == pytest.approx(0.86)
-        assert second.state == "DANGER"
-
-    def test_smoothing_is_scoped_per_zone_object(self):
-        smoother = MetricEmaSmoother()
-
-        smoother.smooth_event(
-            make_event(state="DANGER", near_score=0.85, closing_speed=0.3, ttc_sec=0.6, object_id=101)
-        )
-        separate_zone = smoother.smooth_event(
-            make_event(state="SAFE", near_score=0.85, closing_speed=0.0, ttc_sec=None, object_id=103)
-        )
-
-        assert separate_zone.closing_speed == pytest.approx(0.0)
-        assert separate_zone.ttc_sec is None
-        assert separate_zone.state == "SAFE"
+        for _ in range(2):
+            assert stabilizer.process("CAUTION") == "SAFE"
+        assert stabilizer.process("CAUTION") == "CAUTION"
 
 
-# ── score_event ───────────────────────────────────────────────────────────────
-
-class TestScoreEvent:
-    def test_danger_scores_higher_than_safe(self):
-        danger = make_event(state="DANGER", near_score=0.5, closing_speed=0.5, ttc_sec=0.5)
-        safe = make_event(state="SAFE", near_score=0.1, closing_speed=0.05, ttc_sec=10.0)
+class TestScoring:
+    def test_danger_outranks_safe(self):
+        danger = make_event(state="DANGER", ttc_sec=0.5, near_score=0.5, closing_speed=0.5)
+        safe = make_event(state="SAFE")
         assert score_event(danger) > score_event(safe)
 
-    def test_none_ttc_gives_zero_ttc_weight(self):
-        e = make_event(state="CAUTION", near_score=0.3, closing_speed=0.2, ttc_sec=None)
-        score = score_event(e)
-        # state_weight=1.0, ttc_weight=0.0, near=0.3, closing=0.2
-        assert score == pytest.approx(1.5)
+class TestIoUTracker:
+    def test_assigns_new_ids_to_unmatched_detections(self):
+        tracker = IoUTracker()
+        dets = [
+            Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9),
+            Detection(bbox=(100, 100, 150, 150), class_name="car", confidence=0.9),
+        ]
+        tracks = tracker.update(dets, frame_index=0, timestamp_sec=0.0)
+        assert len({t.track_id for t in tracks}) == 2
 
-    def test_low_ttc_increases_score(self):
-        e_low = make_event(state="CAUTION", near_score=0.3, closing_speed=0.2, ttc_sec=0.5)
-        e_high = make_event(state="CAUTION", near_score=0.3, closing_speed=0.2, ttc_sec=2.9)
-        assert score_event(e_low) > score_event(e_high)
+    def test_links_overlapping_detections_across_frames(self):
+        tracker = IoUTracker(iou_threshold=0.2)
+        first = [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9)]
+        tracks_t0 = tracker.update(first, frame_index=0, timestamp_sec=0.0)
+        second = [Detection(bbox=(5, 5, 55, 55), class_name="car", confidence=0.9)]
+        tracks_t1 = tracker.update(second, frame_index=1, timestamp_sec=0.1)
 
+        assert tracks_t0[0].track_id == tracks_t1[0].track_id
+        assert len(tracks_t1[0].history) == 1
 
-# ── select_primary_event ──────────────────────────────────────────────────────
+    def test_does_not_link_across_classes(self):
+        tracker = IoUTracker(iou_threshold=0.2)
+        tracker.update(
+            [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9)],
+            frame_index=0,
+            timestamp_sec=0.0,
+        )
+        tracks = tracker.update(
+            [Detection(bbox=(0, 0, 50, 50), class_name="person", confidence=0.9)],
+            frame_index=1,
+            timestamp_sec=0.1,
+        )
 
-class TestSelectPrimaryEvent:
-    def test_raises_on_empty_list(self):
-        with pytest.raises(ValueError):
-            select_primary_event([])
-
-    def test_returns_highest_scored(self):
-        danger = make_event(state="DANGER", near_score=0.5, closing_speed=0.5, ttc_sec=0.5)
-        safe = make_event(state="SAFE", near_score=0.1, closing_speed=0.05, ttc_sec=10.0)
-        assert select_primary_event([safe, danger]) is danger
-
-    def test_single_event_returns_itself(self):
-        e = make_event()
-        assert select_primary_event([e]) is e
-
-
-# ── StateStabilizer ───────────────────────────────────────────────────────────
-
-class TestStateStabilizer:
-    def test_starts_safe(self):
-        s = StateStabilizer()
-        assert s.current_state == "SAFE"
-
-    def test_upgrade_requires_n_consecutive_frames(self):
-        s = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        assert s.process("DANGER") == "SAFE"   # frame 1: not yet
-        assert s.process("DANGER") == "SAFE"   # frame 2: not yet
-        assert s.process("DANGER") == "DANGER" # frame 3: transition
-
-    def test_downgrade_requires_n_consecutive_frames(self):
-        s = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        for _ in range(3):
-            s.process("DANGER")
-        for _ in range(4):
-            assert s.process("SAFE") == "DANGER"
-        assert s.process("SAFE") == "SAFE"
-
-    def test_reset_counter_on_state_change_mid_pending(self):
-        s = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        s.process("DANGER")  # counter=1, pending=DANGER
-        s.process("CAUTION") # pending changed → counter reset to 1
-        s.process("DANGER")  # pending changed again → counter reset to 1
-        # none reached 3 consecutive frames
-        assert s.current_state == "SAFE"
-
-    def test_same_state_resets_counter(self):
-        s = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
-        s.process("DANGER")  # 1
-        s.process("DANGER")  # 2
-        s.process("SAFE")    # counter reset
-        s.process("DANGER")  # 1
-        s.process("DANGER")  # 2
-        assert s.current_state == "SAFE"  # never reached 3 consecutive
+        assert tracks[0].class_name == "person"
+        assert len(tracks[0].history) == 0

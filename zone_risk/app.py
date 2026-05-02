@@ -1,4 +1,4 @@
-"""FastAPI UI and API for zone-based video risk analysis."""
+"""FastAPI UI and API for lane-relative spatial video risk analysis."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from zone_risk.pipeline.api import analyze_zone_video
+from zone_risk.pipeline.api import analyze_spatial_video
 
 
 _PREVIEW_QUEUES: dict[str, asyncio.Queue] = {}
@@ -74,26 +74,30 @@ def _serialize_event(
         "timestampSec": event.get("timestamp_sec"),
         "riskScore": event.get("risk_score", event.get("hazard_score")),
         "riskBand": event.get("risk_band", event.get("hazard_band")),
-        "zone": event.get("primary_zone"),
+        "lane": event.get("primary_lane"),
         "ttcSec": event.get("estimated_ttc_sec"),
         "uncertaintyPct": event.get("uncertainty_pct"),
         "summary": event.get("heuristic_summary"),
         "reasons": event.get("reasons", []),
-        "zoneMetrics": event.get("zone_metrics", []),
+        "laneMetrics": event.get("lane_metrics", []),
         "riskState": event.get("risk_state"),
         "objectType": event.get("object_type"),
         "approach": event.get("approach"),
         "bbox": event.get("bbox"),
+        "objectId": event.get("object_id"),
         "nearScore": event.get("near_score"),
         "closingSpeed": event.get("closing_speed"),
         "velocityMagnitude": event.get("velocity_magnitude"),
+        "expansionRate": event.get("expansion_rate"),
+        "crossingRisk": event.get("crossing_risk"),
+        "lanePosition": event.get("lane_position"),
+        "ttcComponents": event.get("ttc_components", []),
     }
 
     if include_images:
         fields = image_fields or (
             ("original", "original_rgb"),
             ("depth", "depth_rgb"),
-            ("segmentation", "segmentation_rgb"),
             ("road", "road_rgb"),
             ("motion", "motion_rgb"),
             ("blend", "overlay_rgb"),
@@ -218,11 +222,9 @@ async def analyze_endpoint(
     file: UploadFile = File(...),
     mode: str = Form("video"),
     max_processed_frames: int = Form(180),
-    max_saved_events: int = Form(6),
+    max_saved_events: int = Form(20),
     resize_max_side: int = Form(640),
     depth_every: int = Form(10),
-    use_depth_model: bool = Form(True),
-    use_flow_model: bool = Form(True),
     start_sec: float = Form(0.0),
     end_sec: float = Form(0.0),
     session_id: str = Form(""),
@@ -271,15 +273,13 @@ async def analyze_endpoint(
             source_path.write_bytes(upload_bytes)
 
             result = await asyncio.to_thread(
-                analyze_zone_video,
+                analyze_spatial_video,
                 video_path=source_path,
                 max_processed_frames=min(2000, max(1, int(max_processed_frames))),
                 max_saved_events=min(50, max(1, int(max_saved_events))),
                 resize_max_side=min(1920, max(128, int(resize_max_side))),
                 depth_every=max(1, int(depth_every)),
                 enable_road_roi=True,
-                use_depth_model=bool(use_depth_model),
-                use_flow_model=bool(use_flow_model),
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
                 progress_callback=progress_callback if queue is not None else None,

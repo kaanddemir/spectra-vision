@@ -5,8 +5,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Spectra</title>
-  <link rel="stylesheet" href="/static/style.css?v=138">
-  <script src="/static/app.js?v=138" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=147">
+  <script src="/static/app.js?v=148" defer></script>
 </head>
 
 <body>
@@ -92,7 +92,7 @@
     <symbol id="icon-lane" viewBox="0 0 24 24">
       <path d="M7 20 10 4M17 20 14 4M12 20v-3M12 13v-2M12 7V4" />
     </symbol>
-    <symbol id="icon-zones" viewBox="0 0 24 24">
+    <symbol id="icon-depth" viewBox="0 0 24 24">
       <rect x="3" y="5" width="6" height="14" rx="1" />
       <rect x="9.5" y="5" width="5" height="14" rx="1" />
       <rect x="15" y="5" width="6" height="14" rx="1" />
@@ -137,9 +137,8 @@
     <input id="source-file" name="file" type="file" accept=".mp4,.mov,.avi,.mkv,.m4v">
     <input type="hidden" name="mode" value="video">
     <input type="hidden" name="max_processed_frames" value="180">
+    <input type="hidden" name="max_saved_events" value="20">
     <input type="hidden" name="depth_every" value="10">
-    <input type="hidden" name="use_depth_model" value="1">
-    <input type="hidden" name="use_flow_model" value="1">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
   </form>
@@ -230,14 +229,14 @@
                     <use href="#icon-car"></use>
                   </svg>
                 </button>
-                <button class="side-bar-btn" data-view="depth" title="Depth Map View">
-                  <svg>
-                    <use href="#icon-zones"></use>
-                  </svg>
-                </button>
                 <button class="side-bar-btn" data-view="road" title="Road Tracking View">
                   <svg>
                     <use href="#icon-lane"></use>
+                  </svg>
+                </button>
+                <button class="side-bar-btn" data-view="depth" title="Depth Map View">
+                  <svg>
+                    <use href="#icon-depth"></use>
                   </svg>
                 </button>
                 <button class="side-bar-btn" data-view="motion" title="Motion Flow View">
@@ -388,26 +387,26 @@
               <ul class="risk-legend">
                 <li class="leg-danger"><i></i><span>DANGER</span><small>0.0 - 1.0s</small></li>
                 <li class="leg-caution"><i></i><span>CAUTION</span><small>1.0 - 3.0s</small></li>
-                <li class="leg-safe"><i></i><span>SAFE</span><small>&gt; 3.0s</small></li>
+                <li class="leg-safe"><i></i><span>SAFE</span><small>—</small></li>
               </ul>
             </div>
 
             <div class="risk-banner-lower">
-              <ul class="zone-bars" id="zone-bars">
-                <li class="zone-row" data-zone="left">
-                  <span class="zone-label">Left</span>
-                  <div class="zone-track"><span class="zone-fill" style="width:0%"></span></div>
-                  <span class="zone-value">—</span>
+              <ul class="lane-bars" id="lane-bars">
+                <li class="lane-row" data-lane="left">
+                  <span class="lane-label">Left</span>
+                  <div class="lane-track"><span class="lane-fill" style="width:0%"></span></div>
+                  <span class="lane-value">—</span>
                 </li>
-                <li class="zone-row" data-zone="center">
-                  <span class="zone-label">Center</span>
-                  <div class="zone-track"><span class="zone-fill" style="width:0%"></span></div>
-                  <span class="zone-value">—</span>
+                <li class="lane-row" data-lane="center">
+                  <span class="lane-label">Center</span>
+                  <div class="lane-track"><span class="lane-fill" style="width:0%"></span></div>
+                  <span class="lane-value">—</span>
                 </li>
-                <li class="zone-row" data-zone="right">
-                  <span class="zone-label">Right</span>
-                  <div class="zone-track"><span class="zone-fill" style="width:0%"></span></div>
-                  <span class="zone-value">—</span>
+                <li class="lane-row" data-lane="right">
+                  <span class="lane-label">Right</span>
+                  <div class="lane-track"><span class="lane-fill" style="width:0%"></span></div>
+                  <span class="lane-value">—</span>
                 </li>
               </ul>
             </div>
@@ -415,41 +414,28 @@
             <div class="risk-banner-chart">
               <header class="chart-mini-header">
                 <h3>Temporal Analysis</h3>
-                <div class="event-count-simple">Avg TTC: <span id="stat-avg-ttc">—</span></div>
+                <div class="event-count-simple">Event Min TTC: <span id="stat-min-ttc">—</span></div>
               </header>
               <div class="chart-container">
                 <div class="chart-y-axis">
-                  <span>6.0s</span>
-                  <span>4.0s</span>
-                  <span>2.0s</span>
-                  <span>0.0s</span>
+                  <span></span>
+                  <span></span>
+                  <span></span>
                 </div>
                 <div class="chart-stage">
                   <div class="chart-grid-bg"></div>
                   <svg id="chart-svg" viewBox="0 0 400 150" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="ttc-area-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stop-color="#ef4444" stop-opacity="0.25" />
-                        <stop offset="100%" stop-color="#ef4444" stop-opacity="0" />
-                      </linearGradient>
-                    </defs>
-                    <line x1="0" y1="25" x2="400" y2="25" stroke="rgba(16,185,129,0.35)" stroke-width="1"
-                      stroke-dasharray="4 3" />
-                    <line x1="0" y1="100" x2="400" y2="100" stroke="rgba(245,158,11,0.35)" stroke-width="1"
-                      stroke-dasharray="4 3" />
-                    <line x1="0" y1="125" x2="400" y2="125" stroke="rgba(239,68,68,0.35)" stroke-width="1"
-                      stroke-dasharray="4 3" />
-                    <path id="chart-area" d="" fill="url(#ttc-area-grad)" stroke="none" />
-                    <path id="chart-line" d="" fill="none" stroke="#ef4444" stroke-width="2" stroke-linejoin="round" />
+                    <line x1="0" y1="30" x2="400" y2="30" stroke="rgba(239,68,68,0.25)" stroke-width="1" />
+                    <line x1="0" y1="75" x2="400" y2="75" stroke="rgba(245,158,11,0.25)" stroke-width="1" />
+                    <line x1="0" y1="120" x2="400" y2="120" stroke="rgba(16,185,129,0.25)" stroke-width="1" />
+                    <g id="chart-area"></g>
+                    <g id="chart-line"></g>
                     <line id="chart-cursor" class="chart-cursor" x1="-4" y1="0" x2="-4" y2="150" stroke="white"
                       stroke-width="1.5" opacity="0" />
                   </svg>
                 </div>
                 <div class="chart-x-axis" id="chart-axis-x"></div>
                 <div class="chart-annotations">
-                  <span class="ann-safe">SAFE</span>
-                  <span class="ann-caution">CAUTION</span>
-                  <span class="ann-danger">DANGER</span>
                 </div>
               </div>
             </div>
@@ -525,17 +511,17 @@
               </svg>
               <div class="tooltip-content">
                 <div class="tip-row"><strong>Frames:</strong> Max frames to process from start.</div>
-                <div class="tip-row"><strong>Depth:</strong> Frequency of depth generation.</div>
+                <div class="tip-row"><strong>Depth:</strong> Frequency of depth-cue refresh.</div>
               </div>
             </span>
           </div>
           <label class="drawer-row">
             <span>Max Processed Frames</span>
             <div class="input-with-shortcuts">
-              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1" value="180">
+              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1" placeholder="Auto" disabled>
               <div class="input-shortcuts">
-                <button type="button" class="shortcut-btn" id="frames-min">MIN</button>
-                <button type="button" class="shortcut-btn" id="frames-max">MAX</button>
+                <button type="button" class="shortcut-btn" id="frames-min" disabled>MIN</button>
+                <button type="button" class="shortcut-btn" id="frames-max" disabled>MAX</button>
               </div>
             </div>
           </label>
@@ -550,22 +536,6 @@
               <button type="button" class="segmented-btn active" data-value="10">10x</button>
             </div>
           </label>
-
-          <div class="drawer-row drawer-toggle-row">
-            <span>AI Depth Model</span>
-            <label class="toggle-switch" aria-label="AI Depth Model">
-              <input id="depth-model-toggle" data-param="use_depth_model" type="checkbox" checked>
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </label>
-          </div>
-
-          <div class="drawer-row drawer-toggle-row">
-            <span>AI Flow Model</span>
-            <label class="toggle-switch" aria-label="AI Flow Model">
-              <input id="flow-model-toggle" data-param="use_flow_model" type="checkbox" checked>
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </label>
-          </div>
 
         </div>
 
@@ -583,11 +553,11 @@
           </div>
           <label class="drawer-row">
             <span>Start Time (s)</span>
-            <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" value="0">
+            <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" placeholder="0.0" disabled>
           </label>
           <label class="drawer-row">
             <span>End Time (s)</span>
-            <input id="end-time-input" data-param="end_sec" type="number" min="0" step="0.5" value="0">
+            <input id="end-time-input" data-param="end_sec" type="number" min="0" step="0.5" placeholder="Max" disabled>
           </label>
         </div>
 
@@ -609,7 +579,7 @@
     </div>
   </div>
 
-  <!-- Help Modal for Zone Risk -->
+  <!-- Help Modal for Spatial Awareness -->
   <div class="help-modal" id="help-modal" hidden>
     <div class="modal-backdrop" data-help-close></div>
     <div class="help-content">
@@ -656,19 +626,16 @@
             <div class="help-step">
               <div class="step-num">04</div>
               <h5>Dense Flow & Proximity</h5>
-              <p>Farneback optical flow and neural depth cues are fused to calculate closing speeds and pixel-level proximity to the vehicle.</p>
+              <p>Required ONNX Depth Anything and NeuFlow feed the lane-relative TTC fusion used by object tracks.</p>
               <div class="step-files">
                 <code>zone_risk/vision/optical_flow.py</code>
                 <code>zone_risk/vision/depth_estimator.py</code>
-                <code>zone_risk/vision/depth_cues.py</code>
-                <code>zone_risk/vision/edge_detector.py</code>
-                <code>zone_risk/vision/texture_analyzer.py</code>
               </div>
             </div>
             <div class="help-step">
               <div class="step-num">05</div>
-              <h5>Multi-Zone Risk Fusion</h5>
-              <p>Risks are evaluated across Left, Center, and Right zones. Time-to-Collision (TTC) is calculated using worst-case (bucket-min) aggregation.</p>
+              <h5>Lane-Relative Risk Fusion</h5>
+              <p>Tracked objects are evaluated in road-relative coordinates. TTC is fused from bbox expansion, radial motion, and depth-delta evidence.</p>
               <div class="step-files">
                 <code>zone_risk/pipeline/fusion.py</code>
                 <code>zone_risk/pipeline/risk_calculator.py</code>
@@ -695,16 +662,16 @@
             </div>
             <div class="logic-grid">
               <div class="logic-card">
-                <h5>Multi-Zone Logic</h5>
-                <p>The viewport is monitored across three distinct zones to ensure perspective-accurate risk detection:</p>
-                <div class="zone-visual-mini">
+                <h5>Lane-Relative Logic</h5>
+                <p>The road geometry defines the active lane corridor so risk follows the lane instead of fixed screen thirds:</p>
+                <div class="lane-visual-mini">
                   <div class="zv-bar">
-                    <div class="zv-seg">Left<span>ZONE 1</span></div>
-                    <div class="zv-seg highlight">Center<span>ZONE 2</span></div>
-                    <div class="zv-seg">Right<span>ZONE 3</span></div>
+                    <div class="zv-seg">Left<span>LANE</span></div>
+                    <div class="zv-seg highlight">Center<span>EGO</span></div>
+                    <div class="zv-seg">Right<span>LANE</span></div>
                   </div>
                 </div>
-                <p class="logic-note">Each zone produces an independent risk score based on its most proximal threat detected within the lane boundaries.</p>
+                <p class="logic-note">Each tracked object receives a lane position and crossing score based on the detected road boundaries.</p>
               </div>
               <div class="logic-card">
                 <h5>Safety-First Priority</h5>
@@ -726,22 +693,22 @@
               </div>
               <div class="logic-card">
                 <h5>Alert Thresholds</h5>
-                <p>State logic triggers based on fused TTC and proximity limits within the active lane ROI:</p>
+                <p>State logic triggers from fused TTC, crossing risk, and nearness inside the active lane corridor:</p>
                 <div class="threshold-stack">
                   <div class="t-row is-danger">
                     <div class="t-dot"></div>
                     <span class="t-label">DANGER</span>
-                    <span class="t-val">TTC &lt; 1.5s OR Near &ge; 0.6</span>
+                    <span class="t-val">TTC &lt; 1.0s AND lane/crossing risk</span>
                   </div>
                   <div class="t-row is-caution">
                     <div class="t-dot"></div>
                     <span class="t-label">CAUTION</span>
-                    <span class="t-val">TTC &lt; 3.5s OR Near &ge; 0.4</span>
+                    <span class="t-val">TTC &lt; 3.0s OR merging risk</span>
                   </div>
                   <div class="t-row is-safe">
                     <div class="t-dot"></div>
                     <span class="t-label">SAFE</span>
-                    <span class="t-val">TTC &ge; 5.0s AND Near &lt; 0.2</span>
+                    <span class="t-val">No closing lane-relative threat</span>
                   </div>
                 </div>
               </div>

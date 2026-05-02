@@ -1,1 +1,1 @@
-"""Computer-vision primitives for zone risk analysis."""
+"""Computer-vision primitives for lane-relative risk analysis."""

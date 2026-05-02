@@ -1,1 +1,1 @@
-"""Zone-based road risk analysis application."""
+"""Lane-relative road risk analysis application."""

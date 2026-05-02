@@ -16,11 +16,10 @@ import cv2
 import numpy as np
 
 
-# Resolved relative to project root (../../models/depth_anything_v2_small.onnx)
 _DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "depth_anything_v2_small.onnx"
 _MODEL_PATH = Path(os.environ.get("SPECTRA_DEPTH_MODEL", str(_DEFAULT_MODEL_PATH)))
 
-_INPUT_SIZE = 518  # Depth Anything V2 native input
+_INPUT_SIZE = 518
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -35,10 +34,7 @@ class DepthAnythingONNX:
     def __init__(self, model_path: Path) -> None:
         import onnxruntime as ort
 
-        # CoreML EP leaks contexts between inferences (each call gets slower).
-        # Use CPU EP only — predictable performance, no leak.
         providers = ["CPUExecutionProvider"]
-
         sess_options = ort.SessionOptions()
         sess_options.intra_op_num_threads = os.cpu_count() or 4
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -47,13 +43,12 @@ class DepthAnythingONNX:
         self.input_name = self.session.get_inputs()[0].name
 
     def predict(self, rgb: np.ndarray) -> np.ndarray:
-        """Return a near-map (float32, [0, 1], larger = closer) at the input resolution."""
+        """Return a near-map (float32, [0, 1], larger = closer)."""
 
         height, width = rgb.shape[:2]
         resized = cv2.resize(rgb, (_INPUT_SIZE, _INPUT_SIZE), interpolation=cv2.INTER_LINEAR)
         normalized = resized.astype(np.float32) / 255.0
         normalized = (normalized - _MEAN) / _STD
-        # NCHW
         input_tensor = np.transpose(normalized, (2, 0, 1))[None, ...].astype(np.float32)
 
         outputs = self.session.run(None, {self.input_name: input_tensor})
@@ -63,7 +58,6 @@ class DepthAnythingONNX:
         elif depth.ndim == 3:
             depth = depth[0]
 
-        # Depth Anything output: larger = closer (already a "near" signal).
         depth = cv2.resize(depth.astype(np.float32), (width, height), interpolation=cv2.INTER_LINEAR)
         d_min = float(depth.min())
         d_max = float(depth.max())

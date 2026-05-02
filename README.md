@@ -1,17 +1,19 @@
 # Spectra
 
-Spectra is a zone-based video risk analysis tool. It processes uploaded driving-view videos, splits each frame into left, center, and right zones, estimates visual nearness and optical flow, then reports risk state, TTC, and timeline events.
+Spectra is a lane-relative video risk analysis tool. It processes uploaded driving-view videos, detects road geometry and YOLO traffic participants, fuses visual nearness with optical flow and track expansion, then reports risk state, TTC, and timeline events.
 
-The current pipeline is zone-only and does not use object detection or external narrative services.
+The current pipeline is object-centric and does not use external narrative services.
 
 ## Features
 
 - Video upload and browser-based analysis UI
-- Left / center / right zone risk scoring
-- Classical monocular depth cues from texture, edges, vertical position, and atmospheric contrast
-- Dense optical flow for motion and closing-speed estimation
-- TTC-based `SAFE`, `CAUTION`, and `DANGER` states
-- Timeline rows, zone metrics, event snapshots, depth view, motion view, and overlay view
+- YOLO-based road participant tracking
+- Road/lane-relative risk scoring
+- Required Depth Anything V2 ONNX depth estimation
+- Required NeuFlow ONNX dense optical flow with ego-motion compensation
+- Fused TTC from bbox expansion, radial flow, and depth delta
+- `SAFE`, `CAUTION`, and `DANGER` states
+- Timeline rows, lane metrics, event snapshots, depth view, motion view, and overlay view
 
 ## Requirements
 
@@ -66,15 +68,16 @@ zone_risk/
     annotator.py
     fusion.py
     risk_calculator.py
+    tracker.py
     video_loader.py
   vision/
-    depth_cues.py
     depth_estimator.py
-    edge_detector.py
     image_preprocess.py
+    object_detector.py
     optical_flow.py
     preprocess.py
-    texture_analyzer.py
+    road_geometry.py
+    road_roi.py
 ```
 
 ## Pipeline
@@ -104,32 +107,23 @@ zone_risk/
    - Produces enhanced grayscale and denoised RGB images
 
 6. `zone_risk/vision/optical_flow.py`
-   - Computes dense Farneback optical flow
+   - Uses required NeuFlow ONNX dense optical flow with ego-motion compensation
    - Produces motion magnitude, normalized motion, divergence, and RGB flow visualization
 
 7. `zone_risk/vision/depth_estimator.py`
    - Coordinates per-frame nearness estimation
-   - Uses edge, texture, and depth cue modules
+   - Uses required Depth Anything V2 ONNX for per-frame nearness maps
 
-8. `zone_risk/vision/depth_cues.py`
-   - Fuses classical monocular cues into a normalized depth map
+8. `zone_risk/pipeline/fusion.py`
+    - Bundles depth, flow, lane geometry, and track history into spatial fields
+    - Builds per-object risk events and selects the primary event
 
-9. `zone_risk/vision/edge_detector.py`
-   - Computes Sobel, Canny, and LoG edge cues
-
-10. `zone_risk/vision/texture_analyzer.py`
-    - Computes Gabor texture responses and local texture energy
-
-11. `zone_risk/pipeline/fusion.py`
-    - Splits the frame into left, center, and right zones
-    - Sends each zone to risk scoring
-
-12. `zone_risk/pipeline/risk_calculator.py`
-    - Calculates zone, direction, near score, closing speed, pseudo-TTC, confidence, and risk state
+9. `zone_risk/pipeline/risk_calculator.py`
+    - Calculates lane position, crossing risk, fused TTC, confidence, and risk state
     - Selects the primary risk event
 
-13. `zone_risk/pipeline/annotator.py`
-    - Draws zone risk boxes and summary text onto frames
+10. `zone_risk/pipeline/annotator.py`
+    - Draws lane corridor, object boxes, TTC components, and summary text onto frames
 
 ## API
 

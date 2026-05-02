@@ -1,4 +1,4 @@
-"""Video frame loading helpers for the zone-based risk pipeline."""
+"""Video frame loading helpers for the lane-relative risk pipeline."""
 
 from __future__ import annotations
 
@@ -60,4 +60,3 @@ class VideoLoader:
 
     def close(self) -> None:
         self.capture.release()
-

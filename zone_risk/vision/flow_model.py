@@ -16,12 +16,8 @@ import cv2
 import numpy as np
 
 
-# Resolved relative to project root (../../models/neuflow_v2.onnx)
 _DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "neuflow_v2.onnx"
 _MODEL_PATH = Path(os.environ.get("SPECTRA_FLOW_MODEL", str(_DEFAULT_MODEL_PATH)))
-
-# NeuFlow v2 native input (height, width). Used when the ONNX export has
-# dynamic spatial dims; fixed-shape exports override these from the model.
 _DEFAULT_INPUT_HW = (432, 768)
 
 _model_lock = threading.Lock()
@@ -35,9 +31,7 @@ class NeuFlowONNX:
     def __init__(self, model_path: Path) -> None:
         import onnxruntime as ort
 
-        # CPU EP only — predictable performance, mirrors depth_model.py.
         providers = ["CPUExecutionProvider"]
-
         sess_options = ort.SessionOptions()
         sess_options.intra_op_num_threads = os.cpu_count() or 4
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -45,17 +39,11 @@ class NeuFlowONNX:
         self.session = ort.InferenceSession(str(model_path), sess_options, providers=providers)
         inputs = self.session.get_inputs()
         if len(inputs) < 2:
-            raise RuntimeError(
-                f"NeuFlow ONNX expects two image inputs; got {len(inputs)}."
-            )
+            raise RuntimeError(f"NeuFlow ONNX expects two image inputs; got {len(inputs)}.")
         self.input_names = [inp.name for inp in inputs[:2]]
 
         first_shape = inputs[0].shape
-        if (
-            len(first_shape) >= 4
-            and isinstance(first_shape[2], int)
-            and isinstance(first_shape[3], int)
-        ):
+        if len(first_shape) >= 4 and isinstance(first_shape[2], int) and isinstance(first_shape[3], int):
             self.input_h = int(first_shape[2])
             self.input_w = int(first_shape[3])
         else:
@@ -64,7 +52,6 @@ class NeuFlowONNX:
     def _preprocess(self, rgb: np.ndarray) -> np.ndarray:
         resized = cv2.resize(rgb, (self.input_w, self.input_h), interpolation=cv2.INTER_LINEAR)
         normalized = resized.astype(np.float32) / 255.0
-        # NCHW
         return np.transpose(normalized, (2, 0, 1))[None, ...].astype(np.float32)
 
     def predict(self, prev_rgb: np.ndarray, curr_rgb: np.ndarray) -> np.ndarray:
@@ -74,17 +61,12 @@ class NeuFlowONNX:
         prev_in = self._preprocess(prev_rgb)
         curr_in = self._preprocess(curr_rgb)
 
-        feeds = {self.input_names[0]: prev_in, self.input_names[1]: curr_in}
-        outputs = self.session.run(None, feeds)
+        outputs = self.session.run(None, {self.input_names[0]: prev_in, self.input_names[1]: curr_in})
         flow = outputs[0]
         if flow.ndim == 4:
             flow = flow[0]
-        # NeuFlow v2 emits CHW with (dx, dy) on channel 0/1. Move to HWC.
         flow = np.transpose(flow, (1, 2, 0)).astype(np.float32)
 
-        # The flow vectors are expressed in input-resolution pixels. Resize
-        # the field back to the source resolution and scale the vectors so
-        # downstream code can treat them as source-pixel displacements.
         scale_x = width / float(self.input_w)
         scale_y = height / float(self.input_h)
         flow_resized = cv2.resize(flow, (width, height), interpolation=cv2.INTER_LINEAR)
