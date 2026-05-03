@@ -1,13 +1,13 @@
-"""Optical-flow velocity estimation."""
+"""Optical-flow velocity estimation (classical DIS, M1-friendly)."""
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
-from . import models
 from .preprocessing import PreprocessedFrame
 
 
@@ -26,6 +26,31 @@ _EGO_QUALITY_LEVEL = 0.01
 _EGO_MIN_DISTANCE = 8
 _EGO_MIN_INLIERS = 18
 _EGO_RANSAC_THRESHOLD_PX = 3.0
+_EGO_FIELD_DOWNSAMPLE = 8
+
+_FLOW_MAX_SIDE = 320
+
+_dis_lock = threading.Lock()
+_dis_singleton: cv2.DISOpticalFlow | None = None
+
+
+def _get_dis() -> cv2.DISOpticalFlow:
+    """Return a cached DIS optical-flow instance.
+
+    DIS is a classical, edge-aware dense optical flow algorithm that runs
+    well on Apple Silicon CPU. The MEDIUM preset is a good speed/quality
+    trade-off for driving footage.
+    """
+
+    global _dis_singleton
+    if _dis_singleton is not None:
+        return _dis_singleton
+    with _dis_lock:
+        if _dis_singleton is None:
+            dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+            dis.setUseSpatialPropagation(True)
+            _dis_singleton = dis
+        return _dis_singleton
 
 
 def empty_flow(shape: tuple[int, int]) -> FlowResult:
@@ -43,12 +68,7 @@ def _estimate_ego_homography(
     previous_gray: np.ndarray,
     current_gray: np.ndarray,
 ) -> np.ndarray | None:
-    """Fit a perspective ego-motion model from sparse tracks with RANSAC.
-
-    Returns the 3×3 homography that maps the previous frame onto the current
-    frame, or ``None`` if the fit is unreliable. RANSAC rejects foreground
-    object motion so a moving vehicle does not corrupt the ego model.
-    """
+    """Fit a perspective ego-motion model from sparse tracks with RANSAC."""
 
     corners = cv2.goodFeaturesToTrack(
         previous_gray,
@@ -96,11 +116,30 @@ def _estimate_ego_homography(
 
 
 def _ego_flow_field(homography: np.ndarray, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Build the ego-motion flow field on a coarse grid, then upscale.
+
+    `perspectiveTransform` over every pixel is wasteful — the ego flow is
+    smooth, so we sample it on a 1/N grid and bilinear-resize back. This is
+    visually identical to the dense version but ~50× cheaper.
+    """
+
     height, width = shape
-    ys, xs = np.mgrid[0:height, 0:width].astype(np.float32)
-    points = np.stack((xs.ravel(), ys.ravel()), axis=1).reshape(-1, 1, 2)
-    warped = cv2.perspectiveTransform(points, homography).reshape(height, width, 2)
-    return (warped[..., 0] - xs).astype(np.float32), (warped[..., 1] - ys).astype(np.float32)
+    step = _EGO_FIELD_DOWNSAMPLE
+    small_h = max(2, (height + step - 1) // step)
+    small_w = max(2, (width + step - 1) // step)
+
+    ys = np.linspace(0.0, height - 1.0, small_h, dtype=np.float32)
+    xs = np.linspace(0.0, width - 1.0, small_w, dtype=np.float32)
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    points = np.stack((grid_x.ravel(), grid_y.ravel()), axis=1).reshape(-1, 1, 2)
+    warped = cv2.perspectiveTransform(points, homography).reshape(small_h, small_w, 2)
+
+    ego_x_small = (warped[..., 0] - grid_x).astype(np.float32)
+    ego_y_small = (warped[..., 1] - grid_y).astype(np.float32)
+
+    ego_x = cv2.resize(ego_x_small, (width, height), interpolation=cv2.INTER_LINEAR)
+    ego_y = cv2.resize(ego_y_small, (width, height), interpolation=cv2.INTER_LINEAR)
+    return ego_x, ego_y
 
 
 def _subtract_ego_motion(
@@ -114,21 +153,33 @@ def _subtract_ego_motion(
         ego_x_field, ego_y_field = _ego_flow_field(homography, current_gray.shape)
         return flow_x - ego_x_field, flow_y - ego_y_field
 
-    # Translation-only compensation when the homography fit is unreliable
-    # (low texture, abrupt scene change, or too few tracked features).
     ego_x = float(np.median(flow_x[::16, ::16]))
     ego_y = float(np.median(flow_y[::16, ::16]))
     return flow_x - ego_x, flow_y - ego_y
 
 
-def _flow_from_neural_model(
-    previous_frame: PreprocessedFrame,
-    current_frame: PreprocessedFrame,
-) -> np.ndarray:
-    model = models.get_flow_model()
-    if model is None:
-        raise RuntimeError("NeuFlow ONNX model missing at models/neuflow_v2.onnx")
-    return model.predict(previous_frame.denoised_rgb, current_frame.denoised_rgb)
+def _flow_from_dis(previous_gray: np.ndarray, current_gray: np.ndarray) -> np.ndarray:
+    """Compute DIS flow on a downscaled pair, then upscale.
+
+    The TTC pipeline only needs bbox-level radial percentile and a coarse
+    divergence map, so a 320-px-long-side computation is plenty.
+    """
+
+    height, width = current_gray.shape
+    longest = max(height, width)
+    if longest > _FLOW_MAX_SIDE:
+        scale = _FLOW_MAX_SIDE / float(longest)
+        small_w = max(2, int(round(width * scale)))
+        small_h = max(2, int(round(height * scale)))
+        prev_small = cv2.resize(previous_gray, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        curr_small = cv2.resize(current_gray, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        flow_small = _get_dis().calc(prev_small, curr_small, None)
+        flow = cv2.resize(flow_small, (width, height), interpolation=cv2.INTER_LINEAR)
+        flow[..., 0] *= width / float(small_w)
+        flow[..., 1] *= height / float(small_h)
+        return flow.astype(np.float32)
+
+    return _get_dis().calc(previous_gray, current_gray, None).astype(np.float32)
 
 
 def compute_velocity(
@@ -137,9 +188,9 @@ def compute_velocity(
 ) -> FlowResult:
     """Compute dense optical flow between two preprocessed frames.
 
-    Uses NeuFlow ONNX as the required dense-flow source, then applies
-    RANSAC ego-motion subtraction and exposes a stable FlowResult shape for
-    TTC and motion overlays.
+    Uses DIS (classical, OpenCV) on grayscale, with RANSAC ego-motion
+    subtraction layered on top. The output shape matches the previous
+    NeuFlow-based implementation so the rest of the pipeline is unchanged.
     """
 
     if previous_frame is None:
@@ -147,7 +198,7 @@ def compute_velocity(
     if previous_frame.gray.shape != current_frame.gray.shape:
         raise ValueError("Optical flow requires frames with matching shapes.")
 
-    flow = _flow_from_neural_model(previous_frame, current_frame)
+    flow = _flow_from_dis(previous_frame.gray, current_frame.gray)
 
     flow_x = flow[..., 0]
     flow_y = flow[..., 1]
@@ -161,8 +212,6 @@ def compute_velocity(
     grad_y = cv2.Sobel(flow_y, cv2.CV_32F, 0, 1, ksize=3)
     divergence_positive = np.clip(grad_x + grad_y, 0.0, None)
 
-    # Absolute normalization: values stay comparable across frames so a quiet
-    # scene does not get min-max stretched into spurious "fast motion".
     magnitude_norm = np.clip(magnitude / _MAX_VELOCITY_PX, 0.0, 1.0).astype(np.float32)
     divergence_norm = np.clip(divergence_positive / _MAX_DIVERGENCE, 0.0, 1.0).astype(np.float32)
 
@@ -174,14 +223,12 @@ def compute_velocity(
 
 
 def flow_to_rgb(flow: np.ndarray) -> np.ndarray:
-    """Convert raw flow vectors into an HSV-based RGB visualization.
-    Hue represents direction, Saturation is max, Value is magnitude.
-    """
+    """Convert raw flow vectors into an HSV-based RGB visualization."""
+
     height, width = flow.shape[:2]
     hsv = np.zeros((height, width, 3), dtype=np.uint8)
     hsv[..., 1] = 255
     mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-    # hue 0-180 in opencv
     hsv[..., 0] = (ang * 180 / np.pi / 2).astype(np.uint8)
     hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)

@@ -16,7 +16,6 @@ COLORS = {
 }
 
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
-_SEP_COLOR = (55, 68, 90)
 
 
 def _readable_lane(lane: str | None) -> str:
@@ -32,19 +31,25 @@ def _readable_lane(lane: str | None) -> str:
     return value.title()
 
 
-def _hud_row(img, segments, colors, font_scale, thickness, y_text, x0=24, sep=True, sep_thickness=2):
-    gap = 20
-    (_, th), baseline = cv2.getTextSize("Ag", _FONT, font_scale, thickness)
-    sep_y1 = y_text - th - 3
-    sep_y2 = y_text + baseline + 3
-    x = x0
-    for i, (text, col) in enumerate(zip(segments, colors)):
-        if i > 0 and sep:
-            sep_x = x - gap // 2
-            cv2.line(img, (sep_x, sep_y1), (sep_x, sep_y2), _SEP_COLOR, sep_thickness, cv2.LINE_AA)
-        cv2.putText(img, text, (x, y_text), _FONT, font_scale, col, thickness, cv2.LINE_AA)
-        (tw, _), _ = cv2.getTextSize(text, _FONT, font_scale, thickness)
-        x += tw + gap
+def _draw_metric_bar(
+    img: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    label: str,
+    pct: int,
+    color: tuple[int, int, int],
+) -> None:
+    pct = max(0, min(100, int(pct)))
+    cv2.putText(img, label, (x, y), _FONT, 0.34, (170, 180, 195), 1, cv2.LINE_AA)
+    pct_text = f"{pct}%"
+    (pw, _), _ = cv2.getTextSize(pct_text, _FONT, 0.34, 1)
+    cv2.putText(img, pct_text, (x + width - pw, y), _FONT, 0.34, (220, 225, 235), 1, cv2.LINE_AA)
+    track_y = y + 4
+    cv2.rectangle(img, (x, track_y), (x + width, track_y + 3), (38, 46, 60), thickness=-1)
+    fill_w = int(round(width * pct / 100.0))
+    if fill_w > 0:
+        cv2.rectangle(img, (x, track_y), (x + fill_w, track_y + 3), color, thickness=-1)
 
 
 def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
@@ -103,17 +108,6 @@ def _lane_corridor(width: int, height: int, lane: LaneFrame | None) -> np.ndarra
     )
 
 
-def _component_summary(event: RiskEvent) -> str:
-    if not event.ttc_components:
-        return "TTCx --"
-    parts = []
-    for component in event.ttc_components:
-        label = component.name[:1].upper()
-        value = "--" if component.value is None else f"{component.value:.1f}"
-        parts.append(f"{label}:{value}")
-    return "TTCx " + " ".join(parts)
-
-
 def annotate_frame(
     frame_bgr: np.ndarray,
     primary_event: RiskEvent,
@@ -139,40 +133,86 @@ def annotate_frame(
         _draw_bbox(output, event)
 
     ttc_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
-    near_pct = int(round((primary_event.near_score or 0) * 100))
-    expansion_pct = int(round(min(1.0, max(0.0, primary_event.expansion_rate)) * 100))
+    proximity_pct = int(round((primary_event.near_score or 0) * 100))
+    approach_pct = int(round(min(1.0, max(0.0, primary_event.closing_speed or 0.0)) * 100))
     crossing_pct = int(round((primary_event.crossing_risk or 0) * 100))
+    confidence_pct = int(round((primary_event.confidence or 0) * 100))
     lane_lbl = _readable_lane(primary_event.lane)
     obj_lbl = (primary_event.object_type or "scene").upper()
 
-    header_segs = [primary_event.state, f"TTC {ttc_str}", obj_lbl]
-    header_cols = [color, color, color]
+    # Compact card pinned to top-left with a fixed footprint so it never
+    # overflows narrow previews. Layout:
+    #   row 1 — STATE pill + TTC
+    #   row 2 — object · lane
+    #   rows 3-6 — Prox / Appr / Cross / Conf bars
+    card_x, card_y = 12, 10
+    card_w = min(220, max(160, width - 24))
+    pad = 10
+    inner_x = card_x + pad
+    inner_w = card_w - 2 * pad
+
+    # background
+    card_y2 = card_y + 116
+    panel = output.copy()
+    cv2.rectangle(panel, (card_x, card_y), (card_x + card_w, card_y2), (8, 12, 20), thickness=-1)
+    cv2.addWeighted(panel, 0.78, output, 0.22, 0, output)
+    cv2.rectangle(output, (card_x, card_y), (card_x + card_w, card_y2), (40, 50, 65), 1, cv2.LINE_AA)
+
+    # row 1 — state pill + TTC
+    pill_h = 18
+    state_text = primary_event.state
+    (stw, sth), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
+    pill_w = stw + 14
+    pill_y = card_y + 8
+    cv2.rectangle(output, (inner_x, pill_y), (inner_x + pill_w, pill_y + pill_h), color, thickness=-1)
+    cv2.putText(
+        output,
+        state_text,
+        (inner_x + 7, pill_y + pill_h - 5),
+        _FONT,
+        0.45,
+        (15, 18, 24),
+        1,
+        cv2.LINE_AA,
+    )
+    ttc_label = f"TTC {ttc_str}"
+    cv2.putText(
+        output,
+        ttc_label,
+        (inner_x + pill_w + 10, pill_y + pill_h - 4),
+        _FONT,
+        0.5,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
+
+    # row 2 — object · lane
+    sub_parts = [obj_lbl]
     if lane_lbl and primary_event.bbox is not None:
-        header_segs.append(lane_lbl)
-        header_cols.append(color)
+        sub_parts.append(lane_lbl)
+    sub_text = "  ·  ".join(sub_parts)
+    cv2.putText(
+        output,
+        sub_text,
+        (inner_x, card_y + 44),
+        _FONT,
+        0.4,
+        (200, 210, 225),
+        1,
+        cv2.LINE_AA,
+    )
 
-    detail_segs = [
-        f"Expansion {expansion_pct}%",
-        f"Crossing {crossing_pct}%",
-        f"Nearness {near_pct}%",
-        _component_summary(primary_event),
+    # rows 3-6 — metric bars
+    metrics = [
+        ("Prox", proximity_pct),
+        ("Appr", approach_pct),
+        ("Cross", crossing_pct),
+        ("Conf", confidence_pct),
     ]
-    detail_cols = [(190, 205, 220)] * len(detail_segs)
-
-    box_y1, box_y2 = 10, 54
-    max_w = 0
-    for row_segs, scale in [(header_segs, 0.52), (detail_segs, 0.38)]:
-        tw_total = 0
-        for s in row_segs:
-            (tw, _), _ = cv2.getTextSize(s, _FONT, scale, 1)
-            tw_total += tw + 20
-        max_w = max(max_w, tw_total)
-
-    box_w = max_w + 12
-    cv2.rectangle(output, (12, box_y1), (12 + box_w, box_y2), (8, 12, 20), thickness=-1)
-    cv2.rectangle(output, (12, box_y1), (12 + box_w, box_y2), (40, 50, 65), thickness=1)
-
-    _hud_row(output, header_segs, header_cols, 0.52, 1, 32, x0=12 + 10, sep=False)
-    _hud_row(output, detail_segs, detail_cols, 0.38, 1, 47, x0=12 + 10, sep=False)
+    bar_y = card_y + 60
+    for label, pct in metrics:
+        _draw_metric_bar(output, inner_x, bar_y, inner_w, label, pct, color)
+        bar_y += 14
 
     return output

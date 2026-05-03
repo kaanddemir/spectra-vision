@@ -54,17 +54,6 @@
   border-radius: 4px;
   border: 1px solid var(--border-soft);
 }
-.risk-banner-lower .lane-bars {
-  margin: 0;
-  padding: 0;
-}
-.risk-banner-lower .lane-row {
-  margin-bottom: 12px;
-}
-.risk-banner-lower .lane-row:last-child {
-  margin-bottom: 0;
-}
-
 .risk-banner-main {
   display: grid;
   grid-template-columns: 64px 1fr;
@@ -437,6 +426,5 @@
   stroke-opacity: 0.95;
 }
 .chart-x-axis span { white-space: nowrap; }
-
 
 

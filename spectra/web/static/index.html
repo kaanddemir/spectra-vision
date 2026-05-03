@@ -92,11 +92,6 @@
     <symbol id="icon-lane" viewBox="0 0 24 24">
       <path d="M7 20 10 4M17 20 14 4M12 20v-3M12 13v-2M12 7V4" />
     </symbol>
-    <symbol id="icon-depth" viewBox="0 0 24 24">
-      <rect x="3" y="5" width="6" height="14" rx="1" />
-      <rect x="9.5" y="5" width="5" height="14" rx="1" />
-      <rect x="15" y="5" width="6" height="14" rx="1" />
-    </symbol>
     <symbol id="icon-pulse" viewBox="0 0 24 24">
       <path d="M3 12h4l2-7 4 14 2-7h6" />
     </symbol>
@@ -205,9 +200,7 @@
             <img id="visual-blend" class="preview-overlay" alt="Risk overlay" hidden>
 
             <figcaption class="preview-empty" id="empty-video">No video uploaded</figcaption>
-            <figcaption class="preview-empty" id="empty-depth" hidden>No depth data available</figcaption>
             <figcaption class="preview-empty" id="empty-road" hidden>No road tracking available</figcaption>
-            <figcaption class="preview-empty" id="empty-motion" hidden>No motion data available</figcaption>
 
             <!-- Center play button -->
             <button class="center-play-btn" id="center-play-btn" type="button" aria-label="Play">
@@ -234,16 +227,6 @@
                     <use href="#icon-lane"></use>
                   </svg>
                 </button>
-                <button class="side-bar-btn" data-view="depth" title="Depth Map View">
-                  <svg>
-                    <use href="#icon-depth"></use>
-                  </svg>
-                </button>
-                <button class="side-bar-btn" data-view="motion" title="Motion Flow View">
-                  <svg>
-                    <use href="#icon-pulse"></use>
-                  </svg>
-                </button>
               </div>
               <div class="side-bar-panels">
                 <div class="side-bar-panel" id="side-panel-info" hidden>
@@ -257,9 +240,7 @@
             </div>
 
             <!-- Extra Main Overlays -->
-            <img id="visual-depth-main" class="preview-overlay main-mode-overlay" alt="Depth map main" hidden>
             <img id="visual-road-main" class="preview-overlay main-mode-overlay" alt="Road tracking main" hidden>
-            <img id="visual-motion-main" class="preview-overlay main-mode-overlay" alt="Motion flow main" hidden>
 
             <!-- Player bar overlay -->
             <div class="preview-bar">
@@ -281,32 +262,6 @@
                   <use href="#icon-expand"></use>
                 </svg>
               </button>
-            </div>
-
-            <div class="map-indicator map-indicator-depth" id="depth-indicator" hidden>
-              <div class="map-indicator-head">
-                <span>Depth Map</span>
-                <strong id="depth-indicator-value">—</strong>
-              </div>
-              <div class="depth-scale" aria-hidden="true"></div>
-              <div class="map-indicator-scale">
-                <span>Far</span>
-                <span>Near</span>
-              </div>
-            </div>
-
-            <div class="map-indicator map-indicator-motion" id="motion-indicator" hidden>
-              <div class="map-indicator-head">
-                <span>Motion Map</span>
-                <strong id="motion-indicator-value">—</strong>
-              </div>
-              <div class="motion-scale" aria-hidden="true">
-                <span id="motion-indicator-fill"></span>
-              </div>
-              <div class="map-indicator-scale">
-                <span>Stable</span>
-                <span>High Motion</span>
-              </div>
             </div>
 
             <div class="map-indicator map-indicator-road" id="road-indicator" hidden>
@@ -387,28 +342,64 @@
               <ul class="risk-legend">
                 <li class="leg-danger"><i></i><span>DANGER</span><small>0.0 - 1.0s</small></li>
                 <li class="leg-caution"><i></i><span>CAUTION</span><small>1.0 - 3.0s</small></li>
-                <li class="leg-safe"><i></i><span>SAFE</span><small>—</small></li>
+                <li class="leg-safe"><i></i><span>SAFE</span><small>&gt; 3.0s</small></li>
               </ul>
             </div>
 
             <div class="risk-banner-lower">
-              <ul class="lane-bars" id="lane-bars">
-                <li class="lane-row" data-lane="left">
-                  <span class="lane-label">Left</span>
-                  <div class="lane-track"><span class="lane-fill" style="width:0%"></span></div>
-                  <span class="lane-value">—</span>
-                </li>
-                <li class="lane-row" data-lane="center">
-                  <span class="lane-label">Center</span>
-                  <div class="lane-track"><span class="lane-fill" style="width:0%"></span></div>
-                  <span class="lane-value">—</span>
-                </li>
-                <li class="lane-row" data-lane="right">
-                  <span class="lane-label">Right</span>
-                  <div class="lane-track"><span class="lane-fill" style="width:0%"></span></div>
-                  <span class="lane-value">—</span>
-                </li>
-              </ul>
+              <div class="threat-signals" id="threat-signals">
+                <div class="threat-panel-head">
+                  <h3>Tracked Objects</h3>
+                  <span id="threat-count" title="Number of objects currently being tracked">0</span>
+                </div>
+                <div class="threat-object-layout">
+                  <div class="detection-list" id="detection-list">
+                    <div class="detection-empty">No tracked objects</div>
+                  </div>
+                  <div class="object-risk-detail">
+                    <div class="threat-summary">
+                      <div title="Tracker reference for this object across frames">
+                        <span>ID</span>
+                        <strong id="threat-id">—</strong>
+                      </div>
+                      <div title="Detected object class (car, person, bicycle, etc.)">
+                        <span>Type</span>
+                        <strong id="threat-object">—</strong>
+                      </div>
+                      <div title="Time to Collision — estimated seconds until impact">
+                        <span>TTC</span>
+                        <strong id="threat-ttc">—</strong>
+                      </div>
+                      <div title="Lane Position — where the object sits relative to the ego lane">
+                        <span>Lane</span>
+                        <strong id="threat-lane">—</strong>
+                      </div>
+                    </div>
+                    <div class="signal-bars">
+                      <div class="signal-row" data-signal="near" title="Proximity — how close the object appears in the scene">
+                        <span class="signal-label">Proximity</span>
+                        <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
+                        <span class="signal-value" id="signal-near-value">—</span>
+                      </div>
+                      <div class="signal-row" data-signal="closing" title="Approach — how quickly the object is closing on the ego vehicle">
+                        <span class="signal-label">Approach</span>
+                        <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
+                        <span class="signal-value" id="signal-closing-value">—</span>
+                      </div>
+                      <div class="signal-row" data-signal="crossing" title="Crossing — likelihood the object will cross into the ego lane">
+                        <span class="signal-label">Crossing</span>
+                        <div class="signal-track"><span class="signal-fill" id="signal-crossing" style="width:0%"></span></div>
+                        <span class="signal-value" id="signal-crossing-value">—</span>
+                      </div>
+                      <div class="signal-row" data-signal="confidence" title="Confidence — detector confidence in this object">
+                        <span class="signal-label">Confidence</span>
+                        <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
+                        <span class="signal-value" id="signal-confidence-value">—</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="risk-banner-chart">
@@ -433,7 +424,10 @@
                   </svg>
                 </div>
                 <div class="chart-x-axis" id="chart-axis-x"></div>
-                <div class="chart-annotations">
+                <div class="chart-annotations" aria-label="TTC threshold legend">
+                  <span class="ann-safe">SAFE &gt; 3s</span>
+                  <span class="ann-caution">CAUTION 1–3s</span>
+                  <span class="ann-danger">DANGER &lt; 1s</span>
                 </div>
               </div>
             </div>
@@ -596,8 +590,8 @@
           <div class="help-steps">
             <div class="help-step">
               <div class="step-num">01</div>
-              <h5>Real-time Input & WebSocket</h5>
-              <p>Videos are streamed to the pipeline via FastAPI. A dedicated WebSocket channel provides live analysis previews and telemetry synchronization.</p>
+              <h5>Upload & Live Preview</h5>
+              <p>FastAPI receives the uploaded video, stores it temporarily, and streams preview telemetry through a WebSocket while the analysis runs.</p>
               <div class="step-files">
                 <code>spectra/app.py</code>
                 <code>spectra/analysis/video.py</code>
@@ -606,23 +600,23 @@
             <div class="help-step">
               <div class="step-num">02</div>
               <h5>Vision Pre-processing</h5>
-              <p>Frames undergo CLAHE enhancement and LAB color normalization to stabilize depth estimation across varying lighting conditions.</p>
+              <p>Each frame is resized, denoised, contrast-enhanced, and converted into model-ready RGB and grayscale representations.</p>
               <div class="step-files">
                 <code>spectra/vision/preprocessing.py</code>
               </div>
             </div>
             <div class="help-step">
               <div class="step-num">03</div>
-              <h5>Road & Lane Tracking</h5>
-              <p>Dynamic detection of road boundaries and lane markers defines the Region of Interest (ROI) and filters non-threat background motion.</p>
+              <h5>Road Geometry</h5>
+              <p>Road boundaries, lane corridor, and vanishing point are estimated so object positions can be measured relative to the ego lane.</p>
               <div class="step-files">
                 <code>spectra/vision/road.py</code>
               </div>
             </div>
             <div class="help-step">
               <div class="step-num">04</div>
-              <h5>Dense Flow & Proximity</h5>
-              <p>Required ONNX Depth Anything and NeuFlow feed the lane-relative TTC fusion used by object tracks.</p>
+              <h5>Depth & Motion</h5>
+              <p>Depth Anything creates a nearness map, while NeuFlow estimates dense optical flow after ego-motion compensation.</p>
               <div class="step-files">
                 <code>spectra/vision/motion.py</code>
                 <code>spectra/vision/depth.py</code>
@@ -630,86 +624,25 @@
             </div>
             <div class="help-step">
               <div class="step-num">05</div>
-              <h5>Lane-Relative Risk Fusion</h5>
-              <p>Tracked objects are evaluated in road-relative coordinates. TTC is fused from bbox expansion, radial motion, and depth-delta evidence.</p>
+              <h5>Object Risk Fusion</h5>
+              <p>YOLO detections are tracked over time, then TTC is fused from bbox expansion, radial flow, and depth-delta evidence.</p>
               <div class="step-files">
+                <code>spectra/vision/detection.py</code>
+                <code>spectra/analysis/tracking.py</code>
                 <code>spectra/analysis/risk.py</code>
-                <code>spectra/analysis/video.py</code>
               </div>
             </div>
             <div class="help-step">
               <div class="step-num">06</div>
-              <h5>Telemetry & Output</h5>
-              <p>Annotated visuals and telemetry are generated for real-time review and post-analysis export.</p>
+              <h5>Timeline & Output</h5>
+              <p>The highest-risk event, lane metrics, TTC components, timeline rows, and visual overlays are sent back to the interface.</p>
               <div class="step-files">
                 <code>spectra/analysis/overlay.py</code>
                 <code>spectra/analysis/video.py</code>
-                <code>spectra/web/static/js/main.js</code>
               </div>
             </div>
           </div>
         </section>
-
-        <div class="help-grid">
-          <section class="help-section">
-            <div class="help-section-header">
-              <h4>Logic Details</h4>
-            </div>
-            <div class="logic-grid">
-              <div class="logic-card">
-                <h5>Lane-Relative Logic</h5>
-                <p>The road geometry defines the active lane corridor so risk follows the lane instead of fixed screen thirds:</p>
-                <div class="lane-visual-mini">
-                  <div class="zv-bar">
-                    <div class="zv-seg">Left<span>LANE</span></div>
-                    <div class="zv-seg highlight">Center<span>EGO</span></div>
-                    <div class="zv-seg">Right<span>LANE</span></div>
-                  </div>
-                </div>
-                <p class="logic-note">Each tracked object receives a lane position and crossing score based on the detected road boundaries.</p>
-              </div>
-              <div class="logic-card">
-                <h5>Safety-First Priority</h5>
-                <p>Spectra uses <b>Worst-Case Aggregation</b> to ensure safety-critical moments are never masked by averaging.</p>
-                <div class="logic-flow-mini">
-                  <div class="lf-window">
-                    <div class="lf-frames">
-                      <span class="f-dot"></span><span class="f-dot"></span><span class="f-dot danger"></span><span class="f-dot"></span><span class="f-dot"></span>
-                    </div>
-                    <div class="lf-label">Processing Window</div>
-                  </div>
-                  <div class="lf-arrow"></div>
-                  <div class="lf-result">
-                    <div class="res-tag">MIN TTC</div>
-                    <div class="res-tag">MAX NEAR</div>
-                  </div>
-                </div>
-                <p class="logic-note">Instead of calculating the average risk of a 0.2s window, we extract the absolute peak hazard to guarantee visibility of short-duration threats.</p>
-              </div>
-              <div class="logic-card">
-                <h5>Alert Thresholds</h5>
-                <p>State logic triggers from fused TTC, crossing risk, and nearness inside the active lane corridor:</p>
-                <div class="threshold-stack">
-                  <div class="t-row is-danger">
-                    <div class="t-dot"></div>
-                    <span class="t-label">DANGER</span>
-                    <span class="t-val">TTC &lt; 1.0s AND lane/crossing risk</span>
-                  </div>
-                  <div class="t-row is-caution">
-                    <div class="t-dot"></div>
-                    <span class="t-label">CAUTION</span>
-                    <span class="t-val">TTC &lt; 3.0s OR merging risk</span>
-                  </div>
-                  <div class="t-row is-safe">
-                    <div class="t-dot"></div>
-                    <span class="t-label">SAFE</span>
-                    <span class="t-val">No closing lane-relative threat</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
       </div>
 
 

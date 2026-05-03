@@ -370,7 +370,7 @@
 .bar-btn:active { transform: scale(0.96); }
 .bar-btn svg { width: 13px; height: 13px; }
 
-/* ─── Depth / motion indicators ──────────────────────────── */
+/* ─── Road tracking indicator ────────────────────────────── */
 .map-indicator {
   position: absolute;
   top: 12px;
@@ -422,29 +422,6 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.depth-scale,
-.motion-scale {
-  height: 5px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(255,255,255,0.06);
-}
-.depth-scale {
-  background: linear-gradient(90deg, #130b2f 0%, #4c1d95 18%, #db2777 42%, #f97316 70%, #facc15 100%);
-}
-.motion-scale {
-  position: relative;
-}
-.motion-scale span {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #10b981 0%, #3b82f6 52%, #ef4444 100%);
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.45);
-  transition: width 180ms ease-out;
 }
 
 /* ─── Mini grid ──────────────────────────────────────────── */
@@ -614,58 +591,191 @@
   border-radius: 4px;
 }
 
-/* ─── Lane Risk panel ────────────────────────────────────── */
-
-
-.lane-bars {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ─── Active Threat Signals ──────────────────────────────── */
+.threat-signals {
   display: grid;
   gap: 12px;
-  align-content: center;
 }
-.lane-row {
+.threat-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.threat-panel-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+.threat-panel-head span {
+  min-width: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255,255,255,0.035);
+  font-size: 10px;
+  font-weight: 850;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.threat-object-layout {
   display: grid;
-  grid-template-columns: 50px 1fr 44px;
+  grid-template-columns: minmax(168px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+.detection-list {
+  min-height: 170px;
+  max-height: 228px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.025);
+  overflow: auto;
+}
+.detection-row {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-soft);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.detection-row:hover,
+.detection-row.is-selected {
+  border-color: var(--border);
+  background: rgba(255,255,255,0.055);
+}
+.detection-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--safe);
+  box-shadow: 0 0 10px currentColor;
+}
+.detection-row.is-caution .detection-dot { background: var(--caution); color: rgba(245,158,11,0.6); }
+.detection-row.is-danger .detection-dot,
+.detection-row.is-critical .detection-dot { background: var(--danger); color: rgba(239,68,68,0.65); }
+.detection-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+}
+.detection-ttc {
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+.detection-empty {
+  display: grid;
+  min-height: 126px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.object-risk-detail {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.threat-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.threat-summary div {
+  min-width: 0;
+  padding: 10px 11px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+}
+.threat-summary span {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.threat-summary strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.1;
+  color: var(--text);
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+.signal-bars {
+  display: grid;
+  gap: 10px;
+}
+.signal-row {
+  display: grid;
+  grid-template-columns: 92px 1fr 44px;
   align-items: center;
   gap: 10px;
 }
-.lane-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+.signal-label {
+  font-size: 10.5px;
+  font-weight: 750;
   color: var(--muted);
-  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.lane-track {
+.signal-track {
   position: relative;
-  height: 8px;
+  height: 7px;
   border-radius: 999px;
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.06);
   overflow: hidden;
 }
-.lane-fill {
+.signal-fill {
   display: block;
   height: 100%;
+  width: 0%;
   border-radius: 999px;
   background: var(--muted);
   transition: width 240ms ease, background 240ms ease;
   box-shadow: 0 0 8px currentColor;
 }
-.lane-row.is-safe    .lane-fill { background: var(--safe);    color: rgba(16,185,129,0.5); }
-.lane-row.is-caution .lane-fill { background: var(--caution); color: rgba(245,158,11,0.5); }
-.lane-row.is-danger  .lane-fill { background: var(--danger);  color: rgba(239,68,68,0.5); }
-.lane-value {
+.signal-row[data-signal="near"] .signal-fill { background: #38bdf8; color: rgba(56,189,248,0.55); }
+.signal-row[data-signal="closing"] .signal-fill { background: var(--danger); color: rgba(239,68,68,0.5); }
+.signal-row[data-signal="crossing"] .signal-fill { background: var(--caution); color: rgba(245,158,11,0.5); }
+.signal-row[data-signal="confidence"] .signal-fill { background: var(--safe); color: rgba(16,185,129,0.5); }
+.signal-value {
   font-size: 11.5px;
   font-weight: 800;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.lane-row.is-danger  .lane-value { color: var(--danger); }
-.lane-row.is-caution .lane-value { color: var(--caution); }
-.lane-row.is-safe    .lane-value { color: var(--safe); }
 
 
 
@@ -673,5 +783,3 @@
 .motion-panel .mini-head {
   z-index: 10;
 }
-
-

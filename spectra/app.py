@@ -80,6 +80,8 @@ def _serialize_event(
         "summary": event.get("heuristic_summary"),
         "reasons": event.get("reasons", []),
         "laneMetrics": event.get("lane_metrics", []),
+        "objects": event.get("objects", []),
+        "detections": event.get("objects", []),
         "riskState": event.get("risk_state"),
         "objectType": event.get("object_type"),
         "approach": event.get("approach"),

@@ -16,22 +16,6 @@ class PreprocessedFrame:
     denoised_rgb: np.ndarray
 
 
-def preprocess_image(image_rgb: np.ndarray, image_gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Enhance luminance, denoise, and convert to LAB space."""
-
-    denoised_gray = cv2.fastNlMeansDenoising(image_gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
-
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced_gray = clahe.apply(denoised_gray)
-
-    lab_image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2LAB)
-    _, a_channel, b_channel = cv2.split(lab_image)
-    enhanced_lab = cv2.merge((enhanced_gray, a_channel, b_channel))
-    denoised_rgb = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
-
-    return enhanced_gray, denoised_rgb
-
-
 def resize_preserving_aspect(frame_bgr: np.ndarray, max_side: int) -> np.ndarray:
     height, width = frame_bgr.shape[:2]
     longest_edge = max(height, width)
@@ -44,16 +28,20 @@ def resize_preserving_aspect(frame_bgr: np.ndarray, max_side: int) -> np.ndarray
 
 
 def preprocess_frame(frame_bgr: np.ndarray, max_side: int = 640) -> PreprocessedFrame:
-    """Resize and enhance a BGR frame."""
+    """Resize a BGR frame and produce the views the pipeline needs.
+
+    Heavy denoising / CLAHE has been removed: Depth Anything V2 and the optical
+    flow stage are robust to raw frames, and `fastNlMeansDenoising` was the
+    single biggest CPU sink on M1.
+    """
 
     resized_bgr = resize_preserving_aspect(frame_bgr, max_side=max_side)
     rgb = cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2RGB)
     gray = cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2GRAY)
-    enhanced_gray, denoised_rgb = preprocess_image(rgb, gray)
 
     return PreprocessedFrame(
         bgr=resized_bgr,
         gray=gray,
-        enhanced_gray=enhanced_gray,
-        denoised_rgb=denoised_rgb,
+        enhanced_gray=gray,
+        denoised_rgb=rgb,
     )

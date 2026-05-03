@@ -1,21 +1,21 @@
 """Required ONNX model and lane-only API contract tests."""
 
 import numpy as np
-import pytest
 
 from spectra.app import _serialize_result
-from spectra.vision import models
 from spectra.vision.motion import compute_velocity
 from spectra.vision.preprocessing import preprocess_frame
 
 
-def test_compute_velocity_errors_when_neuflow_missing(monkeypatch):
-    monkeypatch.setattr(models, "get_flow_model", lambda: None)
+def test_compute_velocity_runs_without_neural_flow_model():
+    """Optical flow is classical (DIS) — no ONNX model is required anymore."""
+
     previous = preprocess_frame(np.zeros((32, 48, 3), dtype=np.uint8), max_side=48)
     current = preprocess_frame(np.ones((32, 48, 3), dtype=np.uint8) * 16, max_side=48)
 
-    with pytest.raises(RuntimeError, match="NeuFlow ONNX model missing"):
-        compute_velocity(previous, current)
+    result = compute_velocity(previous, current)
+    assert result.flow.shape == (previous.gray.shape[0], previous.gray.shape[1], 2)
+    assert result.magnitude_norm.shape == previous.gray.shape
 
 
 def test_serialized_result_uses_lane_contract_only():
@@ -31,6 +31,7 @@ def test_serialized_result_uses_lane_contract_only():
         "heuristic_summary": "CAUTION in the center lane",
         "reasons": ["test"],
         "lane_metrics": [{"lane": "center", "score": 0.5}],
+        "objects": [{"objectId": 7, "objectType": "car", "ttcSec": 2.2, "riskState": "CAUTION"}],
         "object_type": "car",
         "approach": "approaching",
         "bbox": [1, 2, 3, 4],
@@ -60,6 +61,8 @@ def test_serialized_result_uses_lane_contract_only():
 
     assert peak["lane"] == "center"
     assert peak["laneMetrics"] == [{"lane": "center", "score": 0.5}]
+    assert peak["objects"] == [{"objectId": 7, "objectType": "car", "ttcSec": 2.2, "riskState": "CAUTION"}]
+    assert peak["detections"] == peak["objects"]
     legacy_lane_key = "zo" + "ne"
     legacy_metrics_key = legacy_lane_key + "Metrics"
     legacy_scores_key = legacy_lane_key + "Scores"

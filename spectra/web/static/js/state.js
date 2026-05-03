@@ -16,4 +16,5 @@ export const createInitialState = () => ({
   livePreviewActive: false,
   liveTimelineRows: [],
   liveEvents: [],
+  selectedObjectId: null,
 });
