@@ -1,29 +1,179 @@
-"""Road-relative geometry helpers: vanishing point, lane position, EMA smoothing.
-
-The risk pipeline uses these helpers so every spatial decision (corridor
-membership, lateral velocity, crossing prediction) is expressed in lane-relative
-units rather than raw pixel coordinates. That keeps the same thresholds usable
-across cameras with different focal lengths and across road geometry that
-changes shape (curves, hills).
-"""
+"""Road/lane ROI estimation for lane-relative risk scoring."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
-from .road_roi import RoadROI
+
+Line = tuple[int, int, int, int]
 
 
-# When the vanishing point fit is unreliable we use a fixed image-
-# anchored point (slightly above center). Picked empirically — works for
-# forward-mounted dashcam footage even before any lane detection succeeds.
+@dataclass(frozen=True)
+class RoadROI:
+    mask: np.ndarray
+    polygon: np.ndarray
+    left_line: Line | None
+    right_line: Line | None
+    confidence: float
+    detected: bool
+
+
+def default_road_roi(shape: tuple[int, int] | tuple[int, int, int]) -> RoadROI:
+    """Return the fixed perspective ROI used as a stable default."""
+
+    height, width = shape[:2]
+    polygon = np.array(
+        [
+            [int(width * 0.42), int(height * 0.60)],
+            [int(width * 0.58), int(height * 0.60)],
+            [int(width * 0.95), height - 1],
+            [int(width * 0.05), height - 1],
+        ],
+        dtype=np.int32,
+    )
+    mask = _polygon_mask((height, width), polygon)
+    return RoadROI(
+        mask=mask,
+        polygon=polygon,
+        left_line=(
+            int(width * 0.42),
+            int(height * 0.60),
+            int(width * 0.10),
+            height - 1,
+        ),
+        right_line=(
+            int(width * 0.58),
+            int(height * 0.60),
+            int(width * 0.90),
+            height - 1,
+        ),
+        confidence=0.25,
+        detected=False,
+    )
+
+
+def estimate_road_roi(frame_bgr: np.ndarray) -> RoadROI:
+    """Estimate a lane-bounded road ROI with a fixed default."""
+
+    height, width = frame_bgr.shape[:2]
+    default = default_road_roi(frame_bgr.shape)
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 60, 160)
+
+    search_mask = np.zeros((height, width), dtype=np.uint8)
+    search_poly = np.array(
+        [
+            [int(width * 0.03), height - 1],
+            [int(width * 0.39), int(height * 0.50)],
+            [int(width * 0.61), int(height * 0.50)],
+            [int(width * 0.97), height - 1],
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(search_mask, [search_poly], 255)
+    edges = cv2.bitwise_and(edges, search_mask)
+
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=max(18, width // 35),
+        minLineLength=max(24, width // 12),
+        maxLineGap=max(12, width // 40),
+    )
+    if lines is None:
+        return default
+
+    left_points: list[tuple[int, int]] = []
+    right_points: list[tuple[int, int]] = []
+    for item in lines[:, 0]:
+        x1, y1, x2, y2 = (int(v) for v in item)
+        dx = x2 - x1
+        dy = y2 - y1
+        if abs(dx) < 2:
+            continue
+        slope = dy / float(dx)
+        if abs(slope) < 0.35 or abs(slope) > 4.0:
+            continue
+        if max(y1, y2) < int(height * 0.56):
+            continue
+        center_x = (x1 + x2) / 2.0
+        if slope < 0 and center_x < width * 0.58:
+            left_points.extend([(x1, y1), (x2, y2)])
+        elif slope > 0 and center_x > width * 0.42:
+            right_points.extend([(x1, y1), (x2, y2)])
+
+    y_top = int(height * 0.58)
+    y_bottom = height - 1
+    left_line = _fit_line(left_points, y_top, y_bottom, width)
+    right_line = _fit_line(right_points, y_top, y_bottom, width)
+
+    detected_count = int(left_line is not None) + int(right_line is not None)
+    if detected_count == 0:
+        return default
+
+    left_line = left_line or default.left_line
+    right_line = right_line or default.right_line
+    if left_line is None or right_line is None:
+        return default
+
+    lx_top, ly_top, lx_bottom, ly_bottom = left_line
+    rx_top, ry_top, rx_bottom, ry_bottom = right_line
+    if rx_top - lx_top < width * 0.06 or rx_bottom - lx_bottom < width * 0.18:
+        return default
+
+    polygon = np.array(
+        [
+            [lx_top, ly_top],
+            [rx_top, ry_top],
+            [rx_bottom, ry_bottom],
+            [lx_bottom, ly_bottom],
+        ],
+        dtype=np.int32,
+    )
+    mask = _polygon_mask((height, width), polygon)
+    confidence = 0.55 if detected_count == 1 else 0.85
+    return RoadROI(
+        mask=mask,
+        polygon=polygon,
+        left_line=left_line,
+        right_line=right_line,
+        confidence=confidence,
+        detected=True,
+    )
+
+
+def _fit_line(
+    points: list[tuple[int, int]],
+    y_top: int,
+    y_bottom: int,
+    width: int,
+) -> Line | None:
+    if len(points) < 4:
+        return None
+
+    xs = np.array([p[0] for p in points], dtype=np.float32)
+    ys = np.array([p[1] for p in points], dtype=np.float32)
+    if float(np.max(ys) - np.min(ys)) < 8.0:
+        return None
+
+    slope, intercept = np.polyfit(ys, xs, 1)
+    x_top = int(np.clip((slope * y_top) + intercept, 0, width - 1))
+    x_bottom = int(np.clip((slope * y_bottom) + intercept, 0, width - 1))
+    return (x_top, y_top, x_bottom, y_bottom)
+
+
+def _polygon_mask(shape: tuple[int, int], polygon: np.ndarray) -> np.ndarray:
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.fillPoly(mask, [polygon.astype(np.int32)], 1)
+    return mask.astype(bool)
+
+
 _DEFAULT_VP_Y_FRACTION = 0.55
-
-# EMA on the VP: rise faster than we fall so quick scene transitions
-# (turns, lane changes) catch up, but per-frame jitter from Hough fits is
-# absorbed.
 _VP_EMA_RISE = 0.40
 _VP_EMA_FALL = 0.15
 
@@ -33,8 +183,8 @@ class LaneFrame:
     """All road-derived values needed by per-object risk for one frame."""
 
     vanishing_point: tuple[float, float]
-    left_line: tuple[int, int, int, int] | None
-    right_line: tuple[int, int, int, int] | None
+    left_line: Line | None
+    right_line: Line | None
     left_x_at_bottom: float
     right_x_at_bottom: float
     lane_width_at_bottom: float
@@ -45,7 +195,7 @@ class LaneFrame:
     height: int
 
 
-def line_x_at_y(line: tuple[int, int, int, int], y: float) -> float:
+def line_x_at_y(line: Line, y: float) -> float:
     x1, y1, x2, y2 = line
     if y2 == y1:
         return float((x1 + x2) / 2.0)
@@ -62,8 +212,6 @@ def compute_vanishing_point(road_roi: RoadROI, width: int, height: int) -> tuple
     lx1, ly1, lx2, ly2 = road_roi.left_line
     rx1, ry1, rx2, ry2 = road_roi.right_line
 
-    # Solve [a1*x + b1*y = c1; a2*x + b2*y = c2] form for the two lines.
-    # Each line "(x1,y1)-(x2,y2)" has normal coefficients (dy, -dx, dy*x1 - dx*y1).
     a1 = float(ly2 - ly1)
     b1 = float(lx1 - lx2)
     c1 = a1 * lx1 + b1 * ly1
@@ -78,8 +226,6 @@ def compute_vanishing_point(road_roi: RoadROI, width: int, height: int) -> tuple
     vx = (b2 * c1 - b1 * c2) / det
     vy = (a1 * c2 - a2 * c1) / det
 
-    # Clip outside-frame VPs to a sane range so a runaway fit cannot push the
-    # focus of expansion off-screen and break the corridor cone.
     vx = float(np.clip(vx, -0.5 * width, 1.5 * width))
     vy = float(np.clip(vy, 0.0, height * 0.9))
     return (vx, vy)
@@ -104,8 +250,6 @@ def build_lane_frame(
         right_x = width * 0.95
 
     if right_x - left_x < width * 0.10:
-        # Pathological detection: collapse to a centered default so lane
-        # offset math does not divide by ~0.
         left_x = width * 0.30
         right_x = width * 0.70
 
@@ -156,13 +300,7 @@ def lane_center_width_at_y(lane: LaneFrame, y: float) -> tuple[float, float]:
 
 
 def lane_position(bbox: tuple[int, int, int, int], lane: LaneFrame) -> float:
-    """Signed offset of the bbox bottom center from the ego lane center.
-
-    Returned in half-lane units: 0.0 = ego lane center, ±1.0 = at the lane
-    boundary, ±2.0 = one full lane away. We use the bbox **bottom** because
-    it is the contact point with the road plane — the top of a tall vehicle
-    can sit anywhere on screen even when the wheels are clearly in our lane.
-    """
+    """Signed offset of the bbox bottom center from the ego lane center."""
 
     x1, _, x2, y2 = bbox
     bottom_cx = (x1 + x2) / 2.0
@@ -175,15 +313,10 @@ def lane_corridor_relevance(
     bbox: tuple[int, int, int, int],
     lane: LaneFrame,
 ) -> float:
-    """How much of the bbox bottom edge sits inside the ego lane.
-
-    Combines two cues: |lane_pos| (Gaussian falloff at lane boundary) and the
-    bbox vertical position (further-away objects matter slightly less because
-    the path can still be steered). Returned in [0, 1].
-    """
+    """How much of the bbox bottom edge sits inside the ego lane."""
 
     pos = lane_position(bbox, lane)
-    proximity = float(np.exp(-(pos * pos) / 0.50))  # ~0.6 at boundary, ~0.13 at adjacent lane
+    proximity = float(np.exp(-(pos * pos) / 0.50))
 
     _, y1, _, y2 = bbox
     bottom_y = float(y2)
@@ -210,8 +343,6 @@ class VanishingPointSmoother:
             self._state = raw_vp
             return raw_vp
 
-        # Lower-confidence frames pull the EMA less so a single misfit does
-        # not yank the focus of expansion across the frame.
         gain = float(np.clip(confidence, 0.0, 1.0))
         prev_x, prev_y = self._state
         raw_x, raw_y = raw_vp

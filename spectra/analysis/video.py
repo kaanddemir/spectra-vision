@@ -3,36 +3,39 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import cv2
 import numpy as np
 
-from .fusion import SpatialFields, build_object_events, compute_quick_risk
-from ..vision import depth_model, flow_model
-from ..vision.depth_estimator import DepthResult, estimate_frame_depth
-from ..vision.object_detector import get_detector
-from ..vision.optical_flow import compute_velocity, flow_to_rgb
-from ..vision.preprocess import preprocess_frame
-from ..vision.road_geometry import (
-    VanishingPointSmoother,
-    build_lane_frame,
-    compute_vanishing_point,
-)
-from ..vision.road_roi import RoadROI, default_road_roi, estimate_road_roi
-from .annotator import annotate_frame
-from .risk_calculator import (
+from .risk import (
     DepthDeltaSmoother,
     ExpansionSmoother,
     RiskEvent,
+    SpatialFields,
     StateStabilizer,
+    build_object_events,
+    compute_quick_risk,
     score_raw,
     stabilized_event_state,
 )
-from .tracker import IoUTracker
-from .video_loader import VideoLoader
+from ..vision.depth import DepthResult, estimate_frame_depth
+from ..vision.detection import get_detector
+from ..vision.models import is_depth_available, is_flow_available
+from ..vision.motion import compute_velocity, flow_to_rgb
+from ..vision.preprocessing import preprocess_frame
+from ..vision.road import (
+    VanishingPointSmoother,
+    RoadROI,
+    build_lane_frame,
+    compute_vanishing_point,
+    default_road_roi,
+    estimate_road_roi,
+)
+from .tracking import IoUTracker
+from .overlay import annotate_frame
 
 
 BAND_BY_STATE = {
@@ -42,10 +45,68 @@ BAND_BY_STATE = {
 }
 
 
+@dataclass(frozen=True)
+class VideoFrame:
+    frame_index: int
+    timestamp_sec: float
+    bgr: np.ndarray
+
+
+class VideoLoader:
+    """Small wrapper around OpenCV video capture."""
+
+    def __init__(
+        self,
+        source: str | Path,
+        max_frames: int | None = None,
+        start_sec: float = 0.0,
+        end_sec: float | None = None,
+    ) -> None:
+        self.source = str(source)
+        self.max_frames = max_frames
+        self.start_sec = start_sec
+        self.end_sec = end_sec
+        self.capture = cv2.VideoCapture(self.source)
+        if not self.capture.isOpened():
+            raise RuntimeError(f"Failed to open video source: {self.source}")
+
+        self.fps = float(self.capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        self.frame_count = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        self.width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        self.height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+
+        self.start_frame = 0
+        if self.start_sec > 0 and self.fps > 0:
+            self.start_frame = int(self.start_sec * self.fps)
+            self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
+
+    def frames(self) -> Iterator[VideoFrame]:
+        frame_index = self.start_frame
+        try:
+            while self.max_frames is None or (frame_index - self.start_frame) < self.max_frames:
+                if self.end_sec and self.end_sec > 0:
+                    current_sec = frame_index / self.fps if self.fps > 0 else frame_index
+                    if current_sec > self.end_sec:
+                        break
+
+                ok, frame = self.capture.read()
+                if not ok:
+                    break
+
+                timestamp_sec = frame_index / self.fps if self.fps > 0.0 else float(frame_index)
+                yield VideoFrame(frame_index=frame_index, timestamp_sec=timestamp_sec, bgr=frame)
+                frame_index += 1
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        self.capture.release()
+
+
 def _ensure_required_models() -> None:
-    if not depth_model.is_available():
+    if not is_depth_available():
         raise RuntimeError("Depth Anything ONNX model missing at models/depth_anything_v2_small.onnx")
-    if not flow_model.is_available():
+    if not is_flow_available():
         raise RuntimeError("NeuFlow ONNX model missing at models/neuflow_v2.onnx")
 
 

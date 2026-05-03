@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque
 
-from ..vision.object_detector import Detection
+from ..vision.detection import Detection
 
 
 @dataclass

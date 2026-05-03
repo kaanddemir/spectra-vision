@@ -20,9 +20,11 @@ from typing import Optional
 
 import numpy as np
 
-from .tracker import Track
-from ..vision.object_detector import CLASS_RISK_WEIGHT
-from ..vision.road_geometry import LaneFrame, lane_corridor_relevance, lane_position
+from .tracking import Track
+from ..vision.depth import DepthResult
+from ..vision.detection import CLASS_RISK_WEIGHT
+from ..vision.motion import FlowResult
+from ..vision.road import LaneFrame, lane_corridor_relevance, lane_position
 
 
 @dataclass
@@ -53,6 +55,15 @@ class RiskEvent:
     crossing_risk: float = 0.0
     lane_position: float = 0.0
     ttc_components: tuple[TtcComponent, ...] = ()
+
+
+@dataclass(frozen=True)
+class SpatialFields:
+    depth: DepthResult
+    flow: FlowResult
+    lane: LaneFrame
+    flow_dt_sec: float
+    depth_is_fresh: bool
 
 
 # Hard floors and ceilings on the reported TTC. The fusion can swing wildly
@@ -644,3 +655,63 @@ def make_safe_event(
         reason="no objects detected",
         object_id=None,
     )
+
+
+def compute_quick_risk(flow: FlowResult, width: int, height: int) -> float:
+    """Frame-level motion risk used to decide when to recompute depth."""
+
+    motion_signal = (0.65 * flow.magnitude_norm) + (0.35 * flow.divergence_norm)
+    if motion_signal.size == 0:
+        return 0.0
+    return float(np.percentile(motion_signal, 90))
+
+
+def build_object_events(
+    *,
+    frame_index: int,
+    timestamp_sec: float,
+    tracks: list[Track],
+    fields: SpatialFields,
+    expansion_smoother: ExpansionSmoother,
+    depth_smoother: DepthDeltaSmoother,
+) -> tuple[RiskEvent, list[RiskEvent]]:
+    """Build per-object risk events plus a primary event for the frame."""
+
+    if not tracks:
+        expansion_smoother.forget(set())
+        depth_smoother.forget(set())
+        safe = make_safe_event(
+            frame_index=frame_index,
+            timestamp_sec=timestamp_sec,
+        )
+        return safe, [safe]
+
+    events: list[RiskEvent] = []
+    active_ids: set[int] = set()
+    for track in tracks:
+        active_ids.add(track.track_id)
+        raw_rate = expansion_rate_from_track(track)
+        expansion_rate = expansion_smoother.update(track.track_id, raw_rate)
+        event = calculate_track_risk(
+            track=track,
+            near_map=fields.depth.near_map,
+            flow=fields.flow.flow,
+            magnitude_norm=fields.flow.magnitude_norm,
+            lane=fields.lane,
+            expansion_rate=expansion_rate,
+            depth_history=depth_smoother.state,
+            flow_dt_sec=fields.flow_dt_sec,
+            depth_is_fresh=fields.depth_is_fresh,
+        )
+        events.append(event)
+
+    expansion_smoother.forget(active_ids)
+    depth_smoother.forget(active_ids)
+
+    primary = max(events, key=lambda e: (
+        {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(e.state, 0.0)
+        + (0.0 if e.ttc_sec is None else max(0.0, 3.0 - e.ttc_sec) / 3.0)
+        + e.closing_speed
+        + (0.5 * e.crossing_risk)
+    ))
+    return primary, events

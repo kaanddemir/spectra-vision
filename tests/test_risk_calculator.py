@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from zone_risk.pipeline.risk_calculator import (
+from spectra.analysis.risk import (
     ExpansionSmoother,
     RiskEvent,
     StateStabilizer,
@@ -21,9 +21,9 @@ from zone_risk.pipeline.risk_calculator import (
     ttc_from_expansion,
     ttc_from_flow,
 )
-from zone_risk.pipeline.tracker import IoUTracker, Track, TrackSample
-from zone_risk.vision.object_detector import Detection
-from zone_risk.vision.road_geometry import LaneFrame, lane_position
+from spectra.analysis.tracking import IoUTracker, Track, TrackSample
+from spectra.vision.detection import Detection
+from spectra.vision.road import LaneFrame, lane_position
 
 
 def make_lane(detected=True):

@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from zone_risk.vision import depth_model
-from zone_risk.vision.depth_estimator import DepthResult, _calibrate_model_near_map, estimate_frame_depth
-from zone_risk.vision.preprocess import preprocess_frame
+from spectra.vision import models
+from spectra.vision.depth import DepthResult, _calibrate_model_near_map, estimate_frame_depth
+from spectra.vision.preprocessing import preprocess_frame
 
 
 class TestModelNearMapCalibration:
@@ -41,7 +41,7 @@ class TestDepthEstimator:
                 values = np.linspace(0.0, 1.0, height * width, dtype=np.float32)
                 return values.reshape(height, width)
 
-        monkeypatch.setattr(depth_model, "get_model", lambda: FakeDepthModel())
+        monkeypatch.setattr(models, "get_depth_model", lambda: FakeDepthModel())
         frame_bgr = np.zeros((64, 96, 3), dtype=np.uint8)
         frame_bgr[:, :, 0] = np.linspace(20, 180, 96, dtype=np.uint8)
         frame_bgr[:, :, 1] = np.linspace(40, 200, 64, dtype=np.uint8).reshape(64, 1)
@@ -57,7 +57,7 @@ class TestDepthEstimator:
         assert 0.0 <= float(result.near_map.min()) <= float(result.near_map.max()) <= 1.0
 
     def test_estimate_frame_depth_errors_when_onnx_missing(self, monkeypatch):
-        monkeypatch.setattr(depth_model, "get_model", lambda: None)
+        monkeypatch.setattr(models, "get_depth_model", lambda: None)
         frame = preprocess_frame(np.zeros((32, 48, 3), dtype=np.uint8), max_side=48)
 
         with pytest.raises(RuntimeError, match="Depth Anything ONNX model missing"):

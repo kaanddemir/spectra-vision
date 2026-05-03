@@ -3,14 +3,14 @@
 import numpy as np
 import pytest
 
-from zone_risk.app import _serialize_result
-from zone_risk.vision import flow_model
-from zone_risk.vision.optical_flow import compute_velocity
-from zone_risk.vision.preprocess import preprocess_frame
+from spectra.app import _serialize_result
+from spectra.vision import models
+from spectra.vision.motion import compute_velocity
+from spectra.vision.preprocessing import preprocess_frame
 
 
 def test_compute_velocity_errors_when_neuflow_missing(monkeypatch):
-    monkeypatch.setattr(flow_model, "get_model", lambda: None)
+    monkeypatch.setattr(models, "get_flow_model", lambda: None)
     previous = preprocess_frame(np.zeros((32, 48, 3), dtype=np.uint8), max_side=48)
     current = preprocess_frame(np.ones((32, 48, 3), dtype=np.uint8) * 16, max_side=48)
 

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import depth_model
-from .preprocess import PreprocessedFrame
+from . import models
+from .preprocessing import PreprocessedFrame
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ def _calibrate_model_near_map(near_map: np.ndarray) -> np.ndarray:
 
 
 def _depth_from_model(rgb: np.ndarray) -> DepthResult:
-    model = depth_model.get_model()
+    model = models.get_depth_model()
     if model is None:
         raise RuntimeError("Depth Anything ONNX model missing at models/depth_anything_v2_small.onnx")
     near_map = _calibrate_model_near_map(model.predict(rgb))

@@ -1,13 +1,18 @@
-"""Unit tests for fusion.py: quick motion and object event assembly."""
+"""Unit tests for risk event assembly and quick motion scoring."""
 
 import numpy as np
 
-from zone_risk.pipeline.fusion import SpatialFields, build_object_events, compute_quick_risk
-from zone_risk.pipeline.risk_calculator import DepthDeltaSmoother, ExpansionSmoother
-from zone_risk.pipeline.tracker import Track, TrackSample
-from zone_risk.vision.depth_estimator import DepthResult
-from zone_risk.vision.optical_flow import FlowResult
-from zone_risk.vision.road_geometry import LaneFrame
+from spectra.analysis.risk import (
+    DepthDeltaSmoother,
+    ExpansionSmoother,
+    SpatialFields,
+    build_object_events,
+    compute_quick_risk,
+)
+from spectra.analysis.tracking import Track, TrackSample
+from spectra.vision.depth import DepthResult
+from spectra.vision.motion import FlowResult
+from spectra.vision.road import LaneFrame
 
 
 def make_lane():

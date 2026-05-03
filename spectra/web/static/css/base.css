@@ -1,0 +1,9 @@
+/* ─── Shell ──────────────────────────────────────────────── */
+.app-shell {
+  min-height: 100vh;
+  padding: 14px 16px 18px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+}
+

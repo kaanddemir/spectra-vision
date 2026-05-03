@@ -7,8 +7,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from . import flow_model
-from .preprocess import PreprocessedFrame
+from . import models
+from .preprocessing import PreprocessedFrame
 
 
 @dataclass(frozen=True)
@@ -125,7 +125,7 @@ def _flow_from_neural_model(
     previous_frame: PreprocessedFrame,
     current_frame: PreprocessedFrame,
 ) -> np.ndarray:
-    model = flow_model.get_model()
+    model = models.get_flow_model()
     if model is None:
         raise RuntimeError("NeuFlow ONNX model missing at models/neuflow_v2.onnx")
     return model.predict(previous_frame.denoised_rgb, current_frame.denoised_rgb)

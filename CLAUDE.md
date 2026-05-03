@@ -1,127 +1,8 @@
-# Spectra
-
-Spectra is a lane-relative video risk analysis tool. It processes uploaded driving-view videos, detects road geometry and YOLO traffic participants, fuses visual nearness with optical flow and track expansion, then reports risk state, TTC, and timeline events.
-
-The current pipeline is object-centric and does not use external narrative services.
-
-## Features
-
-- Video upload and browser-based analysis UI
-- YOLO-based road participant tracking
-- Road/lane-relative risk scoring
-- Required Depth Anything V2 ONNX depth estimation
-- Required NeuFlow ONNX dense optical flow with ego-motion compensation
-- Fused TTC from bbox expansion, radial flow, and depth delta
-- `SAFE`, `CAUTION`, and `DANGER` states
-- Timeline rows, lane metrics, event snapshots, depth view, motion view, and overlay view
-
-## Requirements
-
-- Python 3.8+
-- A local virtual environment at `.venv` if using `start.sh`
-- Dependencies listed in `requirements.txt`
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Run
-
-Using the project script:
-
-```bash
-./start.sh
-```
-
-The app starts at:
-
-```text
-http://localhost:8000
-```
-
-Stop the server:
-
-```bash
-./stop.sh
-```
-
-Manual run:
-
-```bash
-python -m uvicorn spectra.app:app --host localhost --port 8000 --reload
-```
-
-## Project Structure
-
-```text
-spectra/
-  app.py
-  analysis/
-    video.py
-    risk.py
-    tracking.py
-    overlay.py
-  vision/
-    models.py
-    preprocessing.py
-    depth.py
-    motion.py
-    detection.py
-    road.py
-  web/
-    static/
-      index.html
-      js/
-        main.js
-        controls.js
-      css/
-        main.css
-```
-
-## Pipeline
-
-1. `spectra/app.py`
-   - FastAPI entry point
-   - Serves the UI
-   - Accepts video uploads through `/api/analyze`
-   - Serializes analysis results for the frontend
-
-2. `spectra/analysis/video.py`
-   - Web-facing analysis adapter
-   - Runs the frame loop
-   - Builds timeline rows, event payloads, and image outputs
-   - Reads video frames with OpenCV
-   - Provides frame index and timestamp metadata
-
-3. `spectra/vision/preprocessing.py`
-   - Resizes frames
-   - Converts BGR frames to RGB and grayscale
-   - Applies denoising and CLAHE enhancement
-   - Produces enhanced grayscale and denoised RGB images
-
-4. `spectra/vision/motion.py`
-   - Uses required NeuFlow ONNX dense optical flow with ego-motion compensation
-   - Produces motion magnitude, normalized motion, divergence, and RGB flow visualization
-
-5. `spectra/vision/depth.py`
-   - Coordinates per-frame nearness estimation
-   - Uses required Depth Anything V2 ONNX for per-frame nearness maps
-
-6. `spectra/analysis/risk.py`
-    - Bundles depth, flow, lane geometry, and track history into spatial fields
-    - Builds per-object risk events and selects the primary event
-    - Calculates lane position, crossing risk, fused TTC, confidence, and risk state
-
-7. `spectra/analysis/overlay.py`
-    - Draws lane corridor, object boxes, TTC components, and summary text onto frames
-
-## How the Algorithm Works
+# How the Algorithm Works
 
 This document explains Spectra's video risk analysis algorithm using the current `spectra` package structure. The system processes a driving-view video frame by frame, extracts road geometry and traffic participants, then combines nearness, motion, and object expansion signals to classify each situation as `SAFE`, `CAUTION`, or `DANGER`.
 
-### 1. High-Level Goal
+## 1. High-Level Goal
 
 Spectra is designed to find risk-relevant objects in forward-facing driving footage relative to the ego lane. The algorithm relies only on visual signals:
 
@@ -134,7 +15,7 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 
 The backend returns timeline rows, the peak event, lane metrics, TTC components, and visual overlays to the frontend.
 
-### 2. Main Entry Point
+## 2. Main Entry Point
 
 The request flow starts in `spectra/app.py`.
 
@@ -152,7 +33,7 @@ The public routes remain:
 - `POST /api/analyze`
 - `WS /ws/preview/{session_id}`
 
-### 3. Required Models
+## 3. Required Models
 
 Before analysis starts, `_ensure_required_models()` in `spectra/analysis/video.py` verifies required ONNX models.
 
@@ -163,7 +44,7 @@ Required model files:
 
 If either required model is missing, analysis fails before frame processing begins. YOLO is lazy-loaded in `spectra/vision/detection.py`; if Ultralytics or the detector model cannot be loaded, detections are empty and frames resolve to safe synthetic events.
 
-### 4. Video Frame Loop
+## 4. Video Frame Loop
 
 The main frame loop lives in `spectra/analysis/video.py`.
 
@@ -184,7 +65,7 @@ For each frame:
 13. Overlay, depth view, motion view, and road view images are generated.
 14. A timeline row and event payload are produced.
 
-### 5. Preprocessing
+## 5. Preprocessing
 
 Preprocessing is implemented in `spectra/vision/preprocessing.py`.
 
@@ -206,7 +87,7 @@ The output is a `PreprocessedFrame`:
 - `enhanced_gray`: contrast-enhanced grayscale frame
 - `denoised_rgb`: cleaned RGB frame used by the ONNX models
 
-### 6. Road and Lane Geometry
+## 6. Road and Lane Geometry
 
 Road geometry is computed in `spectra/vision/road.py`.
 
@@ -235,7 +116,7 @@ Object lateral position is normalized relative to the lane, not raw pixels:
 
 This keeps the same thresholds usable across different camera angles and image sizes.
 
-### 7. Optical Flow and Ego-Motion Compensation
+## 7. Optical Flow and Ego-Motion Compensation
 
 Motion analysis is implemented in `spectra/vision/motion.py`.
 
@@ -258,7 +139,7 @@ The output is a `FlowResult`:
 
 This signal is used both for TTC estimation and the frontend motion visualization.
 
-### 8. Depth and Nearness Map
+## 8. Depth and Nearness Map
 
 Depth estimation is implemented in `spectra/vision/depth.py`.
 
@@ -281,7 +162,7 @@ Depth is not recomputed every frame. In `spectra/analysis/video.py`, depth refre
 
 This balances performance with freshness.
 
-### 9. Object Detection
+## 9. Object Detection
 
 Object detection is implemented in `spectra/vision/detection.py`.
 
@@ -305,7 +186,7 @@ Each detection is stored as `Detection`:
 
 Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals. Static objects such as traffic lights and stop signs receive lower risk weights.
 
-### 10. Object Tracking
+## 10. Object Tracking
 
 Tracking is implemented in `spectra/analysis/tracking.py`.
 
@@ -323,11 +204,11 @@ Each track stores short history. That history is required for:
 - Bounding-box expansion rate
 - Lane-relative lateral velocity
 
-### 11. TTC Estimation
+## 11. TTC Estimation
 
 TTC means "time to collision." Spectra estimates TTC from three independent sources rather than trusting a single signal.
 
-#### 11.1 Bounding-Box Expansion TTC
+### 11.1 Bounding-Box Expansion TTC
 
 Code: `expansion_rate_from_track()` and `ttc_from_expansion()`
 
@@ -340,7 +221,7 @@ Logic:
 
 Very small growth is treated as jitter and does not produce TTC.
 
-#### 11.2 Flow TTC
+### 11.2 Flow TTC
 
 Code: `ttc_from_flow()`
 
@@ -354,7 +235,7 @@ Logic:
 
 This provides additional evidence when bounding-box size changes are weak.
 
-#### 11.3 Depth Delta TTC
+### 11.3 Depth Delta TTC
 
 Code: `ttc_from_depth_delta()`
 
@@ -367,7 +248,7 @@ Logic:
 
 This component updates history only when depth is fresh. If an old depth map is reused, history is not mutated, preventing false deltas.
 
-### 12. TTC Fusion
+## 12. TTC Fusion
 
 Code: `fuse_ttc()`
 
@@ -387,7 +268,7 @@ Each component has:
 
 If there are no valid components, fused TTC is `None`.
 
-### 13. Lane Relationship and Crossing Risk
+## 13. Lane Relationship and Crossing Risk
 
 Code: `lane_position()`, `lane_lateral_velocity()`, `lane_crossing_risk()`
 
@@ -402,7 +283,7 @@ Signals:
 
 For example, a vehicle in the right lane may stay low risk even if it is approaching. If it is laterally moving toward the ego lane, crossing risk rises.
 
-### 14. Closing Speed and Confidence
+## 14. Closing Speed and Confidence
 
 For every object, Spectra computes a normalized closing-speed-like signal:
 
@@ -421,7 +302,7 @@ Fused confidence combines:
 
 Very low detection confidence can force the state to `SAFE`.
 
-### 15. Risk State Classification
+## 15. Risk State Classification
 
 Code: `classify_state()`
 
@@ -443,7 +324,7 @@ Main thresholds:
 
 This raw decision is later stabilized.
 
-### 16. State Stabilization
+## 16. State Stabilization
 
 Code: `StateStabilizer` and `stabilized_event_state()`
 
@@ -457,7 +338,7 @@ Default behavior:
 
 This reduces flicker in the frontend risk banner.
 
-### 17. Multiple Objects in One Frame
+## 17. Multiple Objects in One Frame
 
 Each active track produces its own `RiskEvent`. Then `build_object_events()` selects the primary event.
 
@@ -470,7 +351,7 @@ Primary event selection considers:
 
 If there are no active tracks, Spectra emits a synthetic `SAFE` event. This keeps the frontend payload consistent for every frame.
 
-### 18. Event Payload and Timeline
+## 18. Event Payload and Timeline
 
 For each frame, `spectra/analysis/video.py` produces:
 
@@ -487,7 +368,7 @@ For each frame, `spectra/analysis/video.py` produces:
 
 Saved events are deduplicated within a 1-second window. If a stronger event appears in the same window, it replaces the previous saved event.
 
-### 19. Visual Overlay
+## 19. Visual Overlay
 
 Overlay rendering is implemented in `spectra/analysis/overlay.py`.
 
@@ -503,7 +384,7 @@ It draws:
 
 This overlay is used for live preview and saved event imagery.
 
-### 20. Frontend Role
+## 20. Frontend Role
 
 The frontend does not compute risk. `spectra/web/static/js/controls.js` and related modules visualize backend payloads.
 
@@ -518,7 +399,7 @@ Frontend responsibilities:
 
 Risk scores and risk states are determined by the backend. The frontend presents them in an understandable interface.
 
-### 21. Short Summary Flow
+## 21. Short Summary Flow
 
 The algorithm runs in this order:
 
@@ -539,46 +420,3 @@ The algorithm runs in this order:
 15. Send timeline, event payload, and visual outputs to the frontend.
 
 The core design is to avoid relying on a single visual cue. Spectra combines three independent approach signals with lane relevance before declaring risk.
-
-## API
-
-Health check:
-
-```text
-GET /api/health
-```
-
-Analyze video:
-
-```text
-POST /api/analyze
-```
-
-Form fields:
-
-- `file`: video file, required
-- `mode`: must be `video`
-- `max_processed_frames`: maximum number of frames to process
-- `max_saved_events`: number of top events to keep
-- `resize_max_side`: max frame side before processing
-- `depth_every`: depth sampling interval
-
-Supported video extensions:
-
-```text
-mp4, mov, avi, mkv, m4v
-```
-
-## Development Checks
-
-Compile Python files:
-
-```bash
-python -m compileall spectra
-```
-
-Quick import check:
-
-```bash
-python -c "from spectra.app import app; print(app.title)"
-```

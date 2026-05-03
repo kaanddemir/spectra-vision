@@ -5,8 +5,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Spectra</title>
-  <link rel="stylesheet" href="/static/style.css?v=147">
-  <script src="/static/app.js?v=148" defer></script>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <script type="module" src="/static/js/main.js"></script>
 </head>
 
 <body>
@@ -418,16 +418,14 @@
               </header>
               <div class="chart-container">
                 <div class="chart-y-axis">
-                  <span></span>
-                  <span></span>
-                  <span></span>
+                  <span>6</span>
+                  <span>4</span>
+                  <span>2</span>
+                  <span>0</span>
                 </div>
                 <div class="chart-stage">
                   <div class="chart-grid-bg"></div>
                   <svg id="chart-svg" viewBox="0 0 400 150" preserveAspectRatio="none">
-                    <line x1="0" y1="30" x2="400" y2="30" stroke="rgba(239,68,68,0.25)" stroke-width="1" />
-                    <line x1="0" y1="75" x2="400" y2="75" stroke="rgba(245,158,11,0.25)" stroke-width="1" />
-                    <line x1="0" y1="120" x2="400" y2="120" stroke="rgba(16,185,129,0.25)" stroke-width="1" />
                     <g id="chart-area"></g>
                     <g id="chart-line"></g>
                     <line id="chart-cursor" class="chart-cursor" x1="-4" y1="0" x2="-4" y2="150" stroke="white"
@@ -601,9 +599,8 @@
               <h5>Real-time Input & WebSocket</h5>
               <p>Videos are streamed to the pipeline via FastAPI. A dedicated WebSocket channel provides live analysis previews and telemetry synchronization.</p>
               <div class="step-files">
-                <code>zone_risk/app.py</code>
-                <code>zone_risk/pipeline/api.py</code>
-                <code>zone_risk/pipeline/video_loader.py</code>
+                <code>spectra/app.py</code>
+                <code>spectra/analysis/video.py</code>
               </div>
             </div>
             <div class="help-step">
@@ -611,8 +608,7 @@
               <h5>Vision Pre-processing</h5>
               <p>Frames undergo CLAHE enhancement and LAB color normalization to stabilize depth estimation across varying lighting conditions.</p>
               <div class="step-files">
-                <code>zone_risk/vision/preprocess.py</code>
-                <code>zone_risk/vision/image_preprocess.py</code>
+                <code>spectra/vision/preprocessing.py</code>
               </div>
             </div>
             <div class="help-step">
@@ -620,7 +616,7 @@
               <h5>Road & Lane Tracking</h5>
               <p>Dynamic detection of road boundaries and lane markers defines the Region of Interest (ROI) and filters non-threat background motion.</p>
               <div class="step-files">
-                <code>zone_risk/vision/road_roi.py</code>
+                <code>spectra/vision/road.py</code>
               </div>
             </div>
             <div class="help-step">
@@ -628,8 +624,8 @@
               <h5>Dense Flow & Proximity</h5>
               <p>Required ONNX Depth Anything and NeuFlow feed the lane-relative TTC fusion used by object tracks.</p>
               <div class="step-files">
-                <code>zone_risk/vision/optical_flow.py</code>
-                <code>zone_risk/vision/depth_estimator.py</code>
+                <code>spectra/vision/motion.py</code>
+                <code>spectra/vision/depth.py</code>
               </div>
             </div>
             <div class="help-step">
@@ -637,9 +633,8 @@
               <h5>Lane-Relative Risk Fusion</h5>
               <p>Tracked objects are evaluated in road-relative coordinates. TTC is fused from bbox expansion, radial motion, and depth-delta evidence.</p>
               <div class="step-files">
-                <code>zone_risk/pipeline/fusion.py</code>
-                <code>zone_risk/pipeline/risk_calculator.py</code>
-                <code>zone_risk/pipeline/api.py</code>
+                <code>spectra/analysis/risk.py</code>
+                <code>spectra/analysis/video.py</code>
               </div>
             </div>
             <div class="help-step">
@@ -647,9 +642,9 @@
               <h5>Telemetry & Output</h5>
               <p>Annotated visuals and telemetry are generated for real-time review and post-analysis export.</p>
               <div class="step-files">
-                <code>zone_risk/pipeline/annotator.py</code>
-                <code>zone_risk/pipeline/api.py</code>
-                <code>zone_risk/web/static/app.js</code>
+                <code>spectra/analysis/overlay.py</code>
+                <code>spectra/analysis/video.py</code>
+                <code>spectra/web/static/js/main.js</code>
               </div>
             </div>
           </div>

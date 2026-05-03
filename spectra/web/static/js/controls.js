@@ -1,4 +1,4 @@
-(() => {
+export function initializeSpectra() {
   const MISSING = "—";
 
 
@@ -834,15 +834,15 @@
 
     const rows = result?.timelineRows || [];
     const eventItems = timelineEventItems(result);
-    const severityRank = { safe: 0, caution: 1, danger: 2 };
     const points = rows
       .map((r) => {
         const rowState = rowValue(r, "riskState", "State");
         const sc = stateClass(rowState);
+        const rawTtc = num(rowValue(r, "ttcSec", "TTC (s)"), null);
         return {
           t: num(rowValue(r, "timeSec", "Time (s)"), null),
           sc: sc === "none" ? "safe" : sc,
-          ttc: normalizeDisplayTtc(rowState, rowValue(r, "ttcSec", "TTC (s)")),
+          ttc: rawTtc !== null && rawTtc > 0.05 ? rawTtc : normalizeDisplayTtc(rowState, rawTtc),
         };
       })
       .filter((p) => p.t !== null)
@@ -882,13 +882,9 @@
     if (totalEventsEl) totalEventsEl.textContent = String(eventItems.length);
 
     const W = 400;
-    const rowCenter = { danger: 30, caution: 75, safe: 120 };
-    const bandH = 18;
-    const colorByState = {
-      danger: "rgba(239,68,68,0.72)",
-      caution: "rgba(245,158,11,0.66)",
-      safe: "rgba(16,185,129,0.50)",
-    };
+    const H = 150;
+    const yMax = 6.0;
+    const yTicks = [6, 4, 2, 0];
     const markerColorByState = {
       danger: "#ef4444",
       caution: "#f59e0b",
@@ -905,112 +901,95 @@
     lineGroup.replaceChildren();
 
     const xForTime = (t) => (t / Math.max(totalDur, 0.01)) * W;
+    const yForTtc = (ttc) => H - ((clamp(ttc, 0, yMax) / yMax) * H);
+    const chartPoints = points
+      .filter((p) => p.ttc !== null && p.ttc > 0.05)
+      .map((p) => ({ ...p, x: clamp(xForTime(p.t), 0, W), y: yForTtc(p.ttc) }));
 
-    const timeSteps = [];
-    for (let i = 1; i < points.length; i++) {
-      const step = points[i].t - points[i - 1].t;
-      if (step > 0.01) timeSteps.push(step);
-    }
-    timeSteps.sort((a, b) => a - b);
-    const medianStep = timeSteps.length ? timeSteps[Math.floor(timeSteps.length / 2)] : 0.25;
-    const eventHalfWindow = clamp(medianStep * 0.8, 0.18, 0.45);
-
-    let segments = [];
-    if (points.length) {
-      let start = 0;
-      for (let i = 1; i <= points.length; i++) {
-        if (i === points.length || points[i].sc !== points[start].sc) {
-          segments.push({
-            sc: points[start].sc,
-            startT: points[start].t,
-            endT: i < points.length ? points[i].t : totalDur,
-          });
-          start = i;
-        }
-      }
-    } else {
-      segments = [{ sc: "safe", startT: 0, endT: totalDur }];
-    }
-
-    eventItems
-      .slice()
-      .sort((a, b) => severityRank[a.sc] - severityRank[b.sc])
-      .forEach((item) => {
-        const overrideStart = clamp(item.ts - eventHalfWindow, 0, totalDur);
-        const overrideEnd = clamp(item.ts + eventHalfWindow, overrideStart + 0.05, totalDur);
-        const nextSegments = [];
-        segments.forEach((segment) => {
-          if (segment.endT <= overrideStart || segment.startT >= overrideEnd) {
-            nextSegments.push(segment);
-            return;
-          }
-          if (segment.startT < overrideStart) {
-            nextSegments.push({ ...segment, endT: overrideStart });
-          }
-          nextSegments.push({
-            sc: item.sc,
-            startT: Math.max(segment.startT, overrideStart),
-            endT: Math.min(segment.endT, overrideEnd),
-          });
-          if (segment.endT > overrideEnd) {
-            nextSegments.push({ ...segment, startT: overrideEnd });
-          }
+    if (!chartPoints.length) {
+      eventItems.forEach((item) => {
+        if (item.ttc === null || item.ttc <= 0.05) return;
+        chartPoints.push({
+          t: item.ts,
+          sc: item.sc,
+          ttc: item.ttc,
+          x: clamp(xForTime(item.ts), 0, W),
+          y: yForTtc(item.ttc),
         });
-        segments = nextSegments;
       });
+      chartPoints.sort((a, b) => a.t - b.t);
+    }
 
-    const mergedSegments = [];
-    segments
-      .filter((segment) => segment.endT > segment.startT)
-      .sort((a, b) => a.startT - b.startT)
-      .forEach((segment) => {
-        const prev = mergedSegments[mergedSegments.length - 1];
-        // Merge segments of same state if gap is less than 0.5s
-        if (prev && prev.sc === segment.sc && Math.abs(segment.startT - prev.endT) < 0.5) {
-          prev.endT = segment.endT;
-        } else {
-          mergedSegments.push({ ...segment });
-        }
+    const yAxis = document.querySelector(".chart-y-axis");
+    if (yAxis) {
+      yAxis.replaceChildren();
+      yTicks.forEach((tick) => {
+        const label = document.createElement("span");
+        label.textContent = String(tick);
+        yAxis.appendChild(label);
       });
+    }
 
-    mergedSegments.forEach((segment) => {
-      const duration = segment.endT - segment.startT;
-      const sc = segment.sc;
-
-      // Skip ultra-short non-critical segments (< 0.1s)
-      if (duration < 0.1 && sc !== "danger") return;
-
-      const x1 = clamp(xForTime(segment.startT), 0, W);
-      const x2 = clamp(xForTime(segment.endT), x1 + 0.8, W);
-
-
-      // Render standard blocks
-      areaGroup.appendChild(createSvg("rect", {
-        x: x1.toFixed(1),
-        y: (rowCenter[sc] - (bandH / 2)).toFixed(1),
-        width: Math.max(1.2, x2 - x1).toFixed(1),
-        height: bandH,
-        rx: 3,
-        fill: colorByState[sc] || colorByState.safe,
-        stroke: "none",
+    const thresholds = [
+      { label: "SAFE", value: 6.0, color: "#22c55e" },
+      { label: "CAUTION", value: 3.0, color: "#f59e0b" },
+      { label: "DANGER", value: 1.0, color: "#ef4444" },
+    ];
+    thresholds.forEach((threshold) => {
+      const y = yForTtc(threshold.value);
+      areaGroup.appendChild(createSvg("line", {
+        x1: 0,
+        y1: y.toFixed(1),
+        x2: W,
+        y2: y.toFixed(1),
+        stroke: threshold.color,
+        "stroke-width": 1.4,
+        "stroke-dasharray": "5 4",
+        "stroke-opacity": 0.78,
       }));
+      const label = createSvg("text", {
+        x: W - 4,
+        y: (y - 5).toFixed(1),
+        "text-anchor": "end",
+        fill: threshold.color,
+        "font-size": 10,
+        "font-weight": 800,
+        "letter-spacing": 0,
+      });
+      label.textContent = threshold.label;
+      areaGroup.appendChild(label);
     });
 
-    const labelIndexes = new Set();
-    if (eventItems.length <= 3) {
-      eventItems.forEach((item) => labelIndexes.add(item.index));
-    } else {
-      ["danger", "caution"].forEach((sc) => {
-        const best = eventItems
-          .filter((item) => item.sc === sc)
-          .sort((a, b) => (a.ttc ?? Infinity) - (b.ttc ?? Infinity) || eventSeverityScore(b.ev) - eventSeverityScore(a.ev))[0];
-        if (best) labelIndexes.add(best.index);
+    if (chartPoints.length) {
+      const linePath = chartPoints
+        .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
+        .join(" ");
+      lineGroup.appendChild(createSvg("path", {
+        d: linePath,
+        fill: "none",
+        stroke: "#ef4444",
+        "stroke-width": 2.4,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "vector-effect": "non-scaling-stroke",
+      }));
+
+      const shadowPath = createSvg("path", {
+        d: linePath,
+        fill: "none",
+        stroke: "rgba(239,68,68,0.25)",
+        "stroke-width": 6,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "vector-effect": "non-scaling-stroke",
       });
+      lineGroup.insertBefore(shadowPath, lineGroup.firstChild);
     }
 
     eventItems.forEach((item) => {
       const x = clamp(xForTime(item.ts), 0, W);
-      const y = rowCenter[item.sc] ?? rowCenter.caution;
+      const displayTtc = item.ttc ?? (item.sc === "danger" ? 1.0 : 3.0);
+      const y = yForTtc(displayTtc);
       const color = markerColorByState[item.sc] || markerColorByState.caution;
       const group = createSvg("g", {
         class: `chart-event-marker chart-event-${item.sc}`,
@@ -1030,15 +1009,6 @@
       title.textContent = eventTooltip(item);
       group.appendChild(title);
 
-      group.appendChild(createSvg("text", {
-        x: x.toFixed(1),
-        y: (y - 10).toFixed(1),
-        "text-anchor": "middle",
-        fill: "white",
-        "font-size": "10",
-        "font-weight": "700",
-      })).textContent = item.ttc !== null ? item.ttc.toFixed(1) : "";
-
       group.appendChild(createSvg("rect", {
         x: (x - 8).toFixed(1),
         y: (y - 15).toFixed(1),
@@ -1050,18 +1020,18 @@
       }));
       group.appendChild(createSvg("line", {
         x1: x.toFixed(1),
-        y1: (y - 13).toFixed(1),
+        y1: H.toFixed(1),
         x2: x.toFixed(1),
-        y2: (y + 13).toFixed(1),
+        y2: y.toFixed(1),
         stroke: color,
-        "stroke-width": item.sc === "danger" ? 2.5 : 2,
-        "stroke-opacity": 0.55,
+        "stroke-width": item.sc === "danger" ? 1.8 : 1.3,
+        "stroke-opacity": 0.35,
         "stroke-linecap": "round",
       }));
       group.appendChild(createSvg("circle", {
         cx: x.toFixed(1),
         cy: y.toFixed(1),
-        r: item.sc === "danger" ? 4.6 : 4,
+        r: item.sc === "danger" ? 4.2 : 3.5,
         fill: color,
         stroke: "rgba(255,255,255,0.92)",
         "stroke-width": 1.1,
@@ -1926,4 +1896,4 @@
   }
 
   initialize();
-})();
+}

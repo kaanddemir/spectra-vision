@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from zone_risk.pipeline.api import analyze_spatial_video
+from spectra.analysis.video import analyze_spatial_video
 
 
 _PREVIEW_QUEUES: dict[str, asyncio.Queue] = {}

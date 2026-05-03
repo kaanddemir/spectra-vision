@@ -5,8 +5,8 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .risk_calculator import RiskEvent
-from ..vision.road_geometry import LaneFrame, lane_edges_at_y
+from .risk import RiskEvent
+from ..vision.road import LaneFrame, lane_edges_at_y
 
 
 COLORS = {
