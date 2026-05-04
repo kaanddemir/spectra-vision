@@ -294,6 +294,7 @@ def analyze_spatial_video(
     pending_renders: dict[int, _DeferredRender] = {}
     timeline_rows: list[dict[str, Any]] = []
     preview_rows_buffer: list[dict[str, Any]] = []
+    performance_logs: list[str] = []
     expansion_smoother = ExpansionSmoother()
     depth_smoother = DepthDeltaSmoother()
     vp_smoother = VanishingPointSmoother()
@@ -375,7 +376,7 @@ def analyze_spatial_video(
         t_yolo = time.perf_counter()
 
         if processed_frames % 30 == 0:
-            print(
+            log_line = (
                 f"[FRAME {fi:4d}] "
                 f"preprocess={1000*(t_preprocess-t0):.0f}ms  "
                 f"lane={'skip' if (enable_road_roi and fi % max(lane_every,1) != 0) else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
@@ -383,6 +384,7 @@ def analyze_spatial_video(
                 f"depth={'skip' if not needs_depth else f'{1000*(t_depth-t_flow):.0f}ms':>7}  "
                 f"yolo={'skip' if not should_detect else f'{1000*(t_yolo-t_depth):.0f}ms':>7}"
             )
+            performance_logs.append(log_line)
 
         # 3. Per-object risk via scale-expansion TTC + lateral crossing.
         primary_event, all_events = build_object_events(
@@ -450,8 +452,13 @@ def analyze_spatial_video(
             "riskState": primary_event.state,
             "lane": primary_event.lane,
             "ttcSec": primary_event.ttc_sec,
+            "objectId": primary_event.object_id,
+            "objectType": primary_event.object_type,
             "nearScore": primary_event.near_score,
             "closingSpeed": primary_event.closing_speed,
+            "crossingRisk": primary_event.crossing_risk,
+            "lanePosition": primary_event.lane_position,
+            "confidencePct": round(primary_event.confidence * 100.0, 1),
             "objects": object_metrics,
         }
         timeline_rows.append(timeline_row)
@@ -474,10 +481,12 @@ def analyze_spatial_video(
                         "riskState": primary_event.state,
                         "ttcSec": None if primary_event.ttc_sec is None else float(primary_event.ttc_sec),
                         "lane": primary_event.lane,
+                        "objectId": primary_event.object_id,
                         "objectType": primary_event.object_type,
                         "nearScore": float(primary_event.near_score),
                         "closingSpeed": float(primary_event.closing_speed),
                         "crossingRisk": float(primary_event.crossing_risk),
+                        "lanePosition": float(primary_event.lane_position),
                         "confidencePct": float(primary_event.confidence * 100.0),
                         "frame": preview_uri,
                         "objects": object_metrics,
@@ -501,8 +510,13 @@ def analyze_spatial_video(
                     "riskState": final_row["riskState"],
                     "ttcSec": None if final_row["ttcSec"] is None else float(final_row["ttcSec"]),
                     "lane": final_row["lane"],
+                    "objectId": final_row["objectId"],
+                    "objectType": final_row["objectType"],
                     "nearScore": float(final_row["nearScore"]),
                     "closingSpeed": float(final_row["closingSpeed"]),
+                    "crossingRisk": float(final_row["crossingRisk"]),
+                    "lanePosition": float(final_row["lanePosition"]),
+                    "confidencePct": float(final_row["confidencePct"]),
                     "timelineRow": final_row,
                     "timelineRows": list(preview_rows_buffer),
                 }
@@ -527,6 +541,7 @@ def analyze_spatial_video(
         "timeline_rows": timeline_rows,
         "events": saved_events,
         "peak_event": peak_event,
+        "performance_logs": performance_logs,
     }
 
 

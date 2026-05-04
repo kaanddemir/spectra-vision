@@ -6,7 +6,7 @@
   display: grid;
   place-items: center;
   padding: 36px;
-  background: rgba(3,5,9,0.92);
+  background: rgba(5,5,6,0.92);
   backdrop-filter: blur(8px);
 }
 .media-overlay img,
@@ -14,7 +14,7 @@
   max-width: 94vw;
   max-height: 88vh;
   border-radius: var(--radius);
-  background: #07080c;
+  background: #08080a;
   box-shadow: 0 30px 80px rgba(0,0,0,0.75);
 }
 .media-overlay .close-btn {

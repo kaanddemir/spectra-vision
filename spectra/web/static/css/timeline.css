@@ -1,21 +1,23 @@
 /* ─── Timeline + Events ────────────────────────────────────── */
 .timeline-track {
-  padding: 12px 16px 16px;
+  padding: 16px 20px 8px;
 }
 .timeline-axis {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
   color: var(--muted);
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.05em;
 }
 .timeline-rail {
   position: relative;
-  height: 2px;
-  background: rgba(255,255,255,0.05);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
   overflow: visible;
 }
 .timeline-events {
@@ -27,37 +29,37 @@
   top: 50%;
   z-index: 10;
   display: block;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   padding: 0;
-  background: var(--muted);
-  border: 1.5px solid #000;
+  background: var(--panel);
+  border: 2px solid var(--muted);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   cursor: pointer;
-  transition: transform 200ms ease-out, background 200ms ease-out, box-shadow 200ms ease-out;
+  transition: transform 200ms ease, border-color 200ms ease, background 200ms ease;
 }
 .timeline-event:hover {
-  transform: translate(-50%, -50%) scale(1.5);
+  transform: translate(-50%, -50%) scale(1.3);
   z-index: 20;
 }
-.timeline-event:active {
-  transform: translate(-50%, -50%) scale(1.1);
-}
-.timeline-event.ev-danger  { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
-.timeline-event.ev-caution { background: var(--caution); box-shadow: 0 0 4px var(--caution); }
-.timeline-event.ev-safe    { background: var(--safe);    box-shadow: 0 0 3px var(--safe); }
+.timeline-event.ev-danger  { border-color: var(--danger); background: rgba(255, 68, 68, 0.2); }
+.timeline-event.ev-caution { border-color: var(--caution); background: rgba(255, 176, 32, 0.2); }
+.timeline-event.ev-safe    { border-color: var(--safe); background: rgba(18, 212, 146, 0.2); }
+
 .timeline-event.is-active {
-  transform: translate(-50%, -50%) scale(1.45);
-  border-color: rgba(255,255,255,0.9);
+  transform: translate(-50%, -50%) scale(1.4);
+  background: var(--text);
+  border-color: var(--text);
   z-index: 25;
 }
 
 .timeline-cursor {
   position: absolute;
-  top: -6px; bottom: -6px;
+  top: -8px; bottom: -8px;
   width: 2px;
-  background: #fff;
+  border-radius: 1px;
+  background: var(--text);
   pointer-events: none;
   transform: translateX(-50%);
   z-index: 5;
@@ -68,20 +70,19 @@
   flex-direction: row;
   overflow-x: auto;
   overflow-y: hidden;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 16px;
+  padding: 16px 20px 20px;
   flex: 0 0 auto;
-  min-height: 360px;
+  min-height: 380px;
   scrollbar-width: thin;
 }
 
 .event-strip::-webkit-scrollbar {
-  height: 4px;
+  height: 6px;
 }
-
 .event-strip::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .event-strip:has(.event-empty) {
@@ -96,7 +97,7 @@
   flex: 1;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   text-align: center;
   display: flex;
   align-items: center;
@@ -106,38 +107,34 @@
 
 .event-card {
   --evrgb: 88, 104, 122;
-  flex: 0 0 380px;
+  flex: 0 0 340px;
   display: flex;
   flex-direction: column;
   padding: 0;
-  border-radius: 14px;
-  background: var(--panel-2);
-  backdrop-filter: blur(16px);
-  box-shadow: inset 0 0 0 1px rgba(var(--evrgb), 0.25), 0 12px 36px rgba(0,0,0,0.45);
-  transition: all 350ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.015);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+  transition: transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 250ms ease, background 250ms ease;
   cursor: pointer;
   overflow: hidden;
-  height: 340px;
-  margin-bottom: 4px;
+  height: auto;
 }
 .event-card:hover {
-  box-shadow: inset 0 0 0 1px rgba(var(--evrgb), 0.6), 0 24px 64px rgba(0,0,0,0.6);
-  transform: translateY(-8px) scale(1.02);
-  background: var(--panel-3);
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1.5px rgba(var(--evrgb), 0.5);
   z-index: 50;
 }
 .event-card.is-active {
-  box-shadow: inset 0 0 0 2.5px rgba(var(--evrgb), 1), 0 24px 64px rgba(0,0,0,0.6);
-  background: var(--panel-3);
-  transform: translateY(-4px);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 2px rgba(var(--evrgb), 1);
 }
 
 .event-card .card-visual {
   width: 100%;
-  height: 140px;
+  height: 180px;
   position: relative;
   flex-shrink: 0;
-  background: #000;
+  background: var(--panel-hi);
   border-bottom: 1px solid var(--border-soft);
 }
 .event-card .card-visual img {
@@ -151,18 +148,31 @@
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: -4px;
+  align-items: center;
 }
-.card-header .status { font-weight: 800; font-size: 14px; color: rgba(var(--evrgb), 1); letter-spacing: 0.02em; }
-.card-header .time { font-size: 11px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.card-header .status { 
+  font-weight: 800; 
+  font-size: 11px; 
+  color: rgba(var(--evrgb), 1); 
+  letter-spacing: 0.05em; 
+  text-transform: uppercase;
+  padding: 4px 8px;
+  background: rgba(var(--evrgb), 0.1);
+  border-radius: 4px;
+}
+.card-header .time { 
+  font-size: 12px; 
+  color: var(--text-soft); 
+  font-weight: 700; 
+  font-variant-numeric: tabular-nums; 
+}
 
 .card-boxes {
   display: grid;
@@ -170,35 +180,75 @@
   gap: 8px;
 }
 .box-item {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  padding: 6px 4px;
-  text-align: center;
+  background: transparent;
+  border-right: 1px solid var(--border-soft);
+  padding: 0 4px;
+  text-align: left;
 }
-.box-item .lbl { font-size: 7.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 2px; letter-spacing: 0.03em; }
-.box-item .val { font-size: 10.5px; font-weight: 800; color: var(--text); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box-item:last-child {
+  border-right: none;
+}
+.box-item .lbl { 
+  font-size: 9px; 
+  color: var(--muted); 
+  font-weight: 700; 
+  text-transform: uppercase; 
+  display: block; 
+  margin-bottom: 4px; 
+  letter-spacing: 0.05em; 
+}
+.box-item .val { 
+  font-size: 11.5px; 
+  font-weight: 800; 
+  color: var(--text); 
+  display: block; 
+  white-space: nowrap; 
+  overflow: hidden; 
+  text-overflow: ellipsis; 
+}
 
 .card-bars {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 10px;
+  margin-top: 4px;
 }
 .bar-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 75px 1fr 35px;
   align-items: center;
   gap: 10px;
 }
-.bar-row .lbl { width: 70px; font-size: 9px; font-weight: 700; color: var(--muted); text-transform: capitalize; }
-.bar-row .bar-outer { flex: 1; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; }
-.bar-row .bar-inner { height: 100%; border-radius: 2px; transition: width 0.4s ease-out; }
+.bar-row .lbl { 
+  font-size: 10px; 
+  font-weight: 700; 
+  color: var(--muted); 
+  text-transform: capitalize; 
+}
+.bar-row .bar-outer { 
+  height: 4px; 
+  background: rgba(255,255,255,0.05); 
+  border-radius: 2px; 
+  overflow: hidden; 
+}
+.bar-row .bar-inner { 
+  height: 100%; 
+  border-radius: 2px; 
+  transition: width 0.4s ease-out; 
+}
 
-.bar-proximity .bar-inner { background: #38bdf8; }
-.bar-approach .bar-inner  { background: #f87171; }
-.bar-crossing .bar-inner  { background: #fbbf24; }
-.bar-confidence .bar-inner { background: #4ade80; }
+.bar-proximity .bar-inner { background: var(--signal-proximity); }
+.bar-approach .bar-inner  { background: var(--signal-approach); }
+.bar-crossing .bar-inner  { background: var(--signal-crossing); }
+.bar-confidence .bar-inner { background: var(--signal-confidence); }
 
-.bar-row .val { width: 30px; font-size: 10px; font-weight: 700; color: var(--text); text-align: right; }
+.bar-row .val { 
+  font-size: 11px; 
+  font-weight: 800; 
+  color: var(--text); 
+  text-align: right; 
+  font-variant-numeric: tabular-nums;
+}
 
 .event-card.ev-danger  { --evrgb: var(--danger-rgb); }
 .event-card.ev-caution { --evrgb: var(--caution-rgb); }

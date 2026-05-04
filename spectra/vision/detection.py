@@ -19,8 +19,6 @@ RELEVANT_CLASSES: dict[str, str] = {
     "bus": "bus",
     "train": "train",
     "truck": "truck",
-    "traffic light": "traffic light",
-    "stop sign": "stop sign",
 }
 
 
@@ -34,8 +32,6 @@ CLASS_RISK_WEIGHT: dict[str, float] = {
     "bus": 0.95,
     "truck": 0.95,
     "train": 0.90,
-    "traffic light": 0.40,
-    "stop sign": 0.40,
 }
 
 

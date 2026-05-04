@@ -277,9 +277,10 @@
           </figure>
 
           <div class="timeline-content">
-            <header class="cockpit-header"
-              style="border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); flex-direction: row; justify-content: space-between; align-items: center;">
-              <h2>Event Timeline</h2>
+            <header class="risk-panel-header" style="border-top: 1px solid var(--border-soft);">
+              <h2 style="margin: 0; font-size: 13px; font-weight: 800; color: var(--text); text-transform: uppercase; letter-spacing: 0.05em;">
+                Event Timeline
+              </h2>
               <div class="header-row">
                 <div class="event-count-simple">Total Events: <span id="stat-total-events">—</span></div>
               </div>
@@ -319,106 +320,137 @@
 
 
         <!-- Risk banner -->
-        <article class="card risk-banner risk-none" id="risk-banner">
-          <header class="cockpit-header"
-            style="flex-direction: row; justify-content: space-between; align-items: center;">
-            <h2>Risk Level</h2>
-            <div class="header-row">
-              <span id="risk-time-tag" class="detail-ts" hidden></span>
+        <article class="card risk-banner risk-none modern-risk-panel" id="risk-banner">
+
+          <!-- SUPER HEADER -->
+          <header class="risk-panel-header">
+            <h2
+              style="margin: 0; font-size: 13px; font-weight: 800; color: var(--text); text-transform: uppercase; letter-spacing: 0.05em;">
+              Risk Analysis</h2>
+            <div class="modern-mode-toggle">
+              <button type="button" id="toggle-mode-live" class="mode-btn is-active" title="Show current video time">
+                Live
+              </button>
+              <button type="button" id="toggle-mode-summary" class="mode-btn" title="Show most critical moment">
+                Summary
+              </button>
             </div>
           </header>
-          <div class="risk-banner-body">
-            <div class="risk-banner-upper">
-              <div class="risk-banner-main">
-                <div class="risk-icon"><svg>
-                    <use href="#icon-alert"></use>
-                  </svg></div>
-                <div class="risk-text">
-                  <h1 id="risk-band-main">—</h1>
-                  <p class="risk-ttc">TTC: <strong id="alert-ttc">—</strong></p>
-                  <p class="risk-subtitle" id="risk-subtitle">No analysis yet</p>
-                </div>
-              </div>
-              <ul class="risk-legend">
-                <li class="leg-danger"><i></i><span>DANGER</span><small>0.0 - 1.0s</small></li>
-                <li class="leg-caution"><i></i><span>CAUTION</span><small>1.0 - 3.0s</small></li>
-                <li class="leg-safe"><i></i><span>SAFE</span><small>&gt; 3.0s</small></li>
-              </ul>
-            </div>
 
-            <div class="risk-banner-lower">
-              <div class="threat-signals" id="threat-signals">
-                <div class="threat-panel-head">
-                  <h3>Tracked Objects</h3>
-                  <span id="threat-count" title="Number of unique objects detected">Detected IDs: <span>0</span></span>
-                  <div class="threat-mode-toggle">
-                    <button type="button" id="toggle-mode-frame" class="is-active" title="Show metrics for current frame">Live</button>
-                    <button type="button" id="toggle-mode-avg" title="Show historical average for each object">Avg</button>
-                  </div>
+          <div class="risk-banner-body modern-body">
+
+            <!-- SUB PANEL 1: Risk Overview -->
+            <div class="risk-sub-panel">
+
+              <div class="risk-sub-panel-head">
+                <h3 id="risk-panel-title">Current Risk</h3>
+                <span id="risk-time-tag" class="detail-ts" hidden></span>
+              </div>
+
+              <div class="modern-risk-main">
+                <div class="modern-risk-ring">
+                  <div class="risk-icon"><svg>
+                      <use href="#icon-alert"></use>
+                    </svg></div>
                 </div>
-                <div class="threat-object-layout">
-                  <div class="detection-list" id="detection-list">
-                    <div class="detection-empty">No tracked objects</div>
-                  </div>
-                  <div class="object-risk-detail">
-                    <div class="threat-summary">
-                      <div title="Tracker reference for this object across frames">
-                        <span>ID</span>
-                        <strong id="threat-id">—</strong>
-                      </div>
-                      <div title="Detected object class (car, person, bicycle, etc.)">
-                        <span>Type</span>
-                        <strong id="threat-object">—</strong>
-                      </div>
-                      <div title="Time to Collision — estimated seconds until impact">
-                        <span>TTC</span>
-                        <strong id="threat-ttc">—</strong>
-                      </div>
-                      <div title="Lane Position — where the object sits relative to the ego lane">
-                        <span>Lane</span>
-                        <strong id="threat-lane">—</strong>
-                      </div>
-                    </div>
-                    <div class="signal-bars">
-                      <div class="signal-row" data-signal="near" title="Proximity — how close the object appears in the scene">
-                        <span class="signal-label">Proximity</span>
-                        <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
-                        <span class="signal-value" id="signal-near-value">—</span>
-                      </div>
-                      <div class="signal-row" data-signal="closing" title="Approach — how quickly the object is closing on the ego vehicle">
-                        <span class="signal-label">Approach</span>
-                        <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
-                        <span class="signal-value" id="signal-closing-value">—</span>
-                      </div>
-                      <div class="signal-row" data-signal="crossing" title="Crossing — likelihood the object will cross into the ego lane">
-                        <span class="signal-label">Crossing</span>
-                        <div class="signal-track"><span class="signal-fill" id="signal-crossing" style="width:0%"></span></div>
-                        <span class="signal-value" id="signal-crossing-value">—</span>
-                      </div>
-                      <div class="signal-row" data-signal="confidence" title="Confidence — detector confidence in this object">
-                        <span class="signal-label">Confidence</span>
-                        <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
-                        <span class="signal-value" id="signal-confidence-value">—</span>
-                      </div>
-                    </div>
-                  </div>
+                <div class="modern-risk-info">
+                  <h1 id="risk-band-main" class="modern-risk-title">—</h1>
+                  <div class="modern-ttc">TTC: <strong id="alert-ttc">—</strong></div>
+                </div>
+                <ul class="risk-legend modern-legend">
+                  <li class="leg-danger"><i></i><span>DANGER</span><small>0.0 - 1.0s</small></li>
+                  <li class="leg-caution"><i></i><span>CAUTION</span><small>1.0 - 3.0s</small></li>
+                  <li class="leg-safe"><i></i><span>SAFE</span><small>&gt; 3.0s</small></li>
+                </ul>
+              </div>
+
+              <div class="modern-metrics-grid">
+                <div class="metric-box">
+                  <span class="metric-lbl">Primary Object</span>
+                  <span class="metric-val" id="risk-object">—</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-lbl">Lane Tracking</span>
+                  <span class="metric-val" id="risk-lane">—</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-lbl">Confidence Level</span>
+                  <span class="metric-val" id="risk-confidence">—</span>
                 </div>
               </div>
             </div>
 
-            <div class="risk-banner-chart">
-              <header class="chart-mini-header">
-                <h3>Temporal Analysis</h3>
-                <div class="event-count-simple">Event Min TTC: <span id="stat-min-ttc">—</span></div>
-              </header>
+            <!-- SUB PANEL 2: Active Objects -->
+            <div class="risk-sub-panel">
+              <div class="risk-sub-panel-head">
+                <h3 id="objects-panel-title">Active Objects</h3>
+                <span id="threat-count" style="font-size: 11.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;">Objects: <span>0</span></span>
+              </div>
+              <div class="threat-object-layout modern-threat-layout">
+                <div class="detection-list" id="detection-list">
+                  <div class="detection-empty">No tracked objects</div>
+                </div>
+                <div class="object-risk-detail">
+                  <h3 class="risk-factors-title">Risk Factors</h3>
+                  <div class="signal-bars">
+                    <div class="signal-row" data-signal="near">
+                      <span class="signal-label">Proximity 
+                        <span class="info-tip">
+                          <svg><use href="#icon-info"></use></svg>
+                          <div class="tooltip-content">Distance between the vehicle and the object, calculated using depth estimation.</div>
+                        </span>
+                      </span>
+                      <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
+                      <span class="signal-value" id="signal-near-value">—</span>
+                    </div>
+                    <div class="signal-row" data-signal="closing">
+                      <span class="signal-label">Approach 
+                        <span class="info-tip">
+                          <svg><use href="#icon-info"></use></svg>
+                          <div class="tooltip-content">Relative closing speed, indicating how fast the object is nearing the camera.</div>
+                        </span>
+                      </span>
+                      <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
+                      <span class="signal-value" id="signal-closing-value">—</span>
+                    </div>
+                    <div class="signal-row" data-signal="crossing">
+                      <span class="signal-label">Crossing 
+                        <span class="info-tip">
+                          <svg><use href="#icon-info"></use></svg>
+                          <div class="tooltip-content">Lateral movement risk, predicting the chance of the object intruding into your lane.</div>
+                        </span>
+                      </span>
+                      <div class="signal-track"><span class="signal-fill" id="signal-crossing" style="width:0%"></span></div>
+                      <span class="signal-value" id="signal-crossing-value">—</span>
+                    </div>
+                    <div class="signal-row" data-signal="confidence">
+                      <span class="signal-label">Confidence 
+                        <span class="info-tip">
+                          <svg><use href="#icon-info"></use></svg>
+                          <div class="tooltip-content">Detection reliability score, based on the consistency of visual and spatial signals.</div>
+                        </span>
+                      </span>
+                      <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
+                      <span class="signal-value" id="signal-confidence-value">—</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SUB PANEL 3: Chart -->
+            <div class="risk-sub-panel">
+              <div class="risk-sub-panel-head">
+                <h3>Risk Timeline</h3>
+                <span class="event-count-simple">Risk Points: <span id="stat-risk-points">0</span></span>
+              </div>
               <div class="chart-container">
                 <div class="chart-y-axis">
-                  <span>6</span>
-                  <span>4</span>
-                  <span>2</span>
-                  <span>0</span>
+                  <span>DANGER</span>
+                  <span>CAUTION</span>
+                  <span>SAFE</span>
                 </div>
-                <div class="chart-stage">
+                <div class="chart-stage modern-chart-stage">
                   <div class="chart-grid-bg"></div>
                   <svg id="chart-svg" viewBox="0 0 400 150" preserveAspectRatio="none">
                     <g id="chart-area"></g>
@@ -428,25 +460,22 @@
                   </svg>
                 </div>
                 <div class="chart-x-axis" id="chart-axis-x"></div>
-                <div class="chart-annotations" aria-label="TTC threshold legend">
-                  <span class="ann-safe">SAFE &gt; 3s</span>
-                  <span class="ann-caution">CAUTION 1–3s</span>
-                  <span class="ann-danger">DANGER &lt; 1s</span>
-                </div>
               </div>
             </div>
 
-            <div class="analysis-stats">
-              <header class="chart-mini-header"
-                style="border-top: 1px solid var(--border-soft); padding-top: 15px; margin-top: 5px;">
-                <h3>Analysis Statistics</h3>
-              </header>
-              <div class="stats-footer" style="margin-top: 18px;">
-                <button class="header-btn" style="width: 100%; justify-content: center; gap: 10px;" type="button" id="view-json-btn">
-                  <svg style="width: 14px; height: 14px;"><use href="#icon-file-text"></use></svg>
-                  <span>View Analysis JSON</span>
-                </button>
-              </div>
+            <div class="risk-sub-panel" style="padding-top: 0; padding-bottom: 20px; display: flex; gap: 8px;">
+              <button class="modern-json-btn" type="button" id="view-json-btn" style="flex: 1;">
+                <svg style="width: 14px; height: 14px;">
+                  <use href="#icon-file-text"></use>
+                </svg>
+                <span>View Analysis JSON</span>
+              </button>
+              <button class="modern-json-btn" type="button" id="view-logs-btn" style="flex: 1;">
+                <svg style="width: 14px; height: 14px;">
+                  <use href="#icon-list"></use>
+                </svg>
+                <span>View Logs</span>
+              </button>
             </div>
 
           </div>
@@ -465,22 +494,56 @@
         <h2>Raw Telemetry</h2>
         <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
           <button class="bar-btn" id="copy-json-btn" title="Copy to Clipboard">
-            <svg style="width: 14px; height: 14px;"><use href="#icon-copy"></use></svg>
+            <svg style="width: 14px; height: 14px;">
+              <use href="#icon-copy"></use>
+            </svg>
           </button>
           <button class="bar-btn" id="download-json-btn" title="Download JSON Result">
-            <svg style="width: 14px; height: 14px;"><use href="#icon-download"></use></svg>
+            <svg style="width: 14px; height: 14px;">
+              <use href="#icon-download"></use>
+            </svg>
           </button>
           <button class="drawer-close" type="button" data-telemetry-close aria-label="Close">
-            <svg><use href="#icon-x"></use></svg>
+            <svg>
+              <use href="#icon-x"></use>
+            </svg>
           </button>
         </div>
       </header>
 
       <div class="drawer-body" style="padding: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-        <pre id="telemetry-json-view" style="margin: 0; flex: 1; padding: 24px; background: #07080c; color: #10b981; font-size: 11px; font-family: var(--font-mono); overflow: auto; scrollbar-width: thin; line-height: 1.6; white-space: pre-wrap; word-break: break-all;"></pre>
+        <pre id="telemetry-json-view"
+          style="margin: 0; flex: 1; padding: 24px; background: #0e0e12; color: var(--red); font-size: 11px; font-family: var(--font-mono); overflow: auto; scrollbar-width: thin; line-height: 1.6; white-space: pre-wrap; overflow-wrap: break-word;"></pre>
       </div>
 
 
+    </aside>
+  </div>
+
+  <!-- ─── Logs Drawer ────────────────────────────────────── -->
+  <div id="logs-drawer" class="settings-drawer" hidden>
+    <div class="drawer-backdrop" data-logs-close></div>
+    <aside class="drawer-panel">
+      <header>
+        <h2>Performance Logs</h2>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+          <button class="bar-btn" id="copy-logs-btn" title="Copy to Clipboard">
+            <svg style="width: 14px; height: 14px;">
+              <use href="#icon-copy"></use>
+            </svg>
+          </button>
+          <button class="drawer-close" type="button" data-logs-close aria-label="Close">
+            <svg>
+              <use href="#icon-x"></use>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="drawer-body" style="padding: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <pre id="logs-view"
+          style="margin: 0; flex: 1; padding: 24px; background: #0e0e12; color: var(--red); font-size: 11px; font-family: var(--font-mono); overflow: auto; scrollbar-width: thin; line-height: 1.6; white-space: pre-wrap; overflow-wrap: break-word;"></pre>
+      </div>
     </aside>
   </div>
 
@@ -506,15 +569,15 @@
                 <use href="#icon-info"></use>
               </svg>
               <div class="tooltip-content">
-                <div class="tip-row"><strong>Frames:</strong> Max frames to process from start.</div>
-                <div class="tip-row"><strong>Depth:</strong> Frequency of depth-cue refresh.</div>
+                Adjust frame count and sampling rate.
               </div>
             </span>
           </div>
           <label class="drawer-row">
             <span>Max Processed Frames</span>
             <div class="input-with-shortcuts">
-              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1" placeholder="Auto" disabled>
+              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1"
+                placeholder="Auto" disabled>
               <div class="input-shortcuts">
                 <button type="button" class="shortcut-btn" id="frames-min" disabled>MIN</button>
                 <button type="button" class="shortcut-btn" id="frames-max" disabled>MAX</button>
@@ -543,13 +606,14 @@
                 <use href="#icon-info"></use>
               </svg>
               <div class="tooltip-content">
-                Specify a specific time range in seconds to analyze. Use 0 for end time to process until max frames.
+                Set specific time range for analysis.
               </div>
             </span>
           </div>
           <label class="drawer-row">
             <span>Start Time (s)</span>
-            <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" placeholder="0.0" disabled>
+            <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" placeholder="0.0"
+              disabled>
           </label>
           <label class="drawer-row">
             <span>End Time (s)</span>
@@ -590,19 +654,18 @@
 
       <div class="help-body">
         <section class="help-section">
-          <div class="help-section-header">
-            <h4>Core Analysis Pipeline</h4>
-            <p>Spectra combines three independent visual signals to ensure reliable hazard detection.</p>
-          </div>
           <div class="help-steps">
             <!-- Step 1: Ingestion -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-upload"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-upload"></use>
+                </svg>
                 <div class="step-num">01</div>
               </div>
               <h5>Data Ingestion</h5>
-              <p>Frames are streamed through a WebSocket for real-time preview while the backend initializes the vision stack.</p>
+              <p>Frames are streamed through a WebSocket for real-time preview while the backend initializes the vision
+                stack.</p>
               <div class="step-tags">
                 <span>FastAPI</span>
                 <span>WebSockets</span>
@@ -612,11 +675,14 @@
             <!-- Step 2: Geometry -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-lane"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-lane"></use>
+                </svg>
                 <div class="step-num">02</div>
               </div>
               <h5>Road Geometry</h5>
-              <p>Estimates lane corridor and vanishing point using Canny/Hough. Normalizes positions relative to the ego-lane.</p>
+              <p>Estimates lane corridor and vanishing point using Canny/Hough. Normalizes positions relative to the
+                ego-lane.</p>
               <div class="step-tags">
                 <span>Lane ROI</span>
                 <span>Vanishing Point</span>
@@ -626,11 +692,14 @@
             <!-- Step 3: Spatial -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-expand"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-expand"></use>
+                </svg>
                 <div class="step-num">03</div>
               </div>
               <h5>Depth (Spatial)</h5>
-              <p>Depth Anything V2 produces relative nearness maps. CoreML acceleration is used on Apple Silicon for high FPS.</p>
+              <p>Depth Anything V2 produces relative nearness maps. CoreML acceleration is used on Apple Silicon for
+                high FPS.</p>
               <div class="step-tags">
                 <span>ONNX</span>
                 <span>CoreML</span>
@@ -640,11 +709,14 @@
             <!-- Step 4: Motion -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-pulse"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-pulse"></use>
+                </svg>
                 <div class="step-num">04</div>
               </div>
               <h5>Motion Analysis</h5>
-              <p>DIS Optical Flow calculates pixel-level vectors. RANSAC-based homography compensates for camera ego-motion.</p>
+              <p>DIS Optical Flow calculates pixel-level vectors. RANSAC-based homography compensates for camera
+                ego-motion.</p>
               <div class="step-tags">
                 <span>OpenCV DIS</span>
                 <span>Ego-Motion</span>
@@ -654,11 +726,14 @@
             <!-- Step 5: Perception -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-car"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-car"></use>
+                </svg>
                 <div class="step-num">05</div>
               </div>
               <h5>Object Tracking</h5>
-              <p>YOLO detects road participants. A lightweight IoU tracker maintains history for velocity and expansion rates.</p>
+              <p>YOLO detects road participants. A lightweight IoU tracker maintains history for velocity and expansion
+                rates.</p>
               <div class="step-tags">
                 <span>YOLOv8</span>
                 <span>IoU Tracker</span>
@@ -668,11 +743,14 @@
             <!-- Step 6: Fusion -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-shield"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-shield"></use>
+                </svg>
                 <div class="step-num">06</div>
               </div>
               <h5>Risk Fusion</h5>
-              <p>Fuses TTC from three sources: BBox Expansion, Radial Flow, and Depth-Delta using weighted median logic.</p>
+              <p>Fuses TTC from three sources: BBox Expansion, Radial Flow, and Depth-Delta using weighted median logic.
+              </p>
               <div class="step-tags">
                 <span>TTC Fusion</span>
                 <span>Median Filter</span>
@@ -682,11 +760,14 @@
             <!-- Step 7: Decision -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-alert"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-alert"></use>
+                </svg>
                 <div class="step-num">07</div>
               </div>
               <h5>Decision Engine</h5>
-              <p>Classifies state as SAFE, CAUTION, or DANGER. Hysteresis stabilization prevents jitter in risk transitions.</p>
+              <p>Classifies state as SAFE, CAUTION, or DANGER. Hysteresis stabilization prevents jitter in risk
+                transitions.</p>
               <div class="step-tags">
                 <span>Hysteresis</span>
                 <span>State Machine</span>
@@ -696,7 +777,9 @@
             <!-- Step 8: Output -->
             <div class="help-step">
               <div class="step-icon-wrap">
-                <svg class="step-svg"><use href="#icon-list"></use></svg>
+                <svg class="step-svg">
+                  <use href="#icon-list"></use>
+                </svg>
                 <div class="step-num">08</div>
               </div>
               <h5>Efficiency</h5>
@@ -706,6 +789,81 @@
                 <span>Deferred Render</span>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section class="help-section" style="margin-top: 28px;">
+          <div class="help-section-header">
+            <h4>Per-Frame Processing Plan</h4>
+          </div>
+
+          <div class="frame-plan-table-wrap">
+            <table class="frame-plan-table">
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Frequency</th>
+                  <th>When Skipped</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="module-name">Preprocess</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Optical Flow</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">YOLO Detection</span></td>
+                  <td><span class="freq-badge freq-periodic">Every 3rd frame</span></td>
+                  <td class="skip-cell">Tracker propagates existing IDs</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Tracking</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Lane Detection</span></td>
+                  <td><span class="freq-badge freq-periodic">Every 5th frame</span></td>
+                  <td class="skip-cell">Last high-confidence ROI reused</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Depth Estimation</span></td>
+                  <td><span class="freq-badge freq-slow">Every 10th frame</span></td>
+                  <td class="skip-cell">Previous depth map retained</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Risk Calculation</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">State Stabilization</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Timeline Row</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Render Images</span></td>
+                  <td><span class="freq-badge freq-event">Saved events only</span></td>
+                  <td class="skip-cell">No render on normal frames</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="frame-plan-note">
+            <svg style="width:13px; height:13px; flex-shrink:0; color: var(--red);"><use href="#icon-info"></use></svg>
+            <span>Depth runs adaptively — also triggered when motion risk exceeds 15%, regardless of schedule.</span>
           </div>
         </section>
       </div>

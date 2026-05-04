@@ -151,7 +151,7 @@ def annotate_frame(
         inner_w = card_w - 2 * pad
 
         # background
-        card_y2 = card_y + 138
+        card_y2 = card_y + 64
         panel = output.copy()
         cv2.rectangle(panel, (card_x, card_y), (card_x + card_w, card_y2), (8, 12, 20), thickness=-1)
         cv2.addWeighted(panel, 0.78, output, 0.22, 0, output)
@@ -204,17 +204,5 @@ def annotate_frame(
             1,
             cv2.LINE_AA,
         )
-
-        # rows 3-6 — metric bars
-        metrics = [
-            ("Prox", proximity_pct),
-            ("Appr", approach_pct),
-            ("Cross", crossing_pct),
-            ("Conf", confidence_pct),
-        ]
-        bar_y = card_y + 72
-        for label, pct in metrics:
-            _draw_metric_bar(output, inner_x, bar_y, inner_w, label, pct, color)
-            bar_y += 16
 
     return output

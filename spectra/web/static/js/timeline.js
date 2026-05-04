@@ -1,3 +1,4 @@
 export function timelineKey(row) {
-  return `${row?.frameIndex ?? ""}:${row?.timeSec ?? ""}`;
+  const t = Number(row?.timeSec);
+  return Number.isFinite(t) ? (Math.round(t * 100) / 100).toFixed(2) : "";
 }

@@ -81,7 +81,7 @@ def _serialize_event(
         "confidencePct": event.get("confidence_pct"),
         "objectId": event.get("object_id"),
         "objectType": event.get("object_type"),
-        "objects": event.get("objects", []),
+        "objects": event.get("objects") or [],
     }
 
     if include_images:
@@ -113,11 +113,11 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
             "processedFrames": result.get("processed_frames"),
             "elapsedSec": round(elapsed_sec, 3),
         },
-        "timelineRows": result.get("timeline_rows", []),
+        "timelineRows": result.get("timeline_rows") or [],
         "peakEvent": None if peak_event is None else _serialize_event(peak_event),
         "events": [
             _serialize_event(event)
-            for event in result.get("events", [])
+            for event in (result.get("events") or [])
             if not _is_same_event(event, peak_event)
         ],
     }

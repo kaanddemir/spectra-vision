@@ -31,7 +31,15 @@ def test_serialized_result_uses_lane_contract_only():
         "heuristic_summary": "CAUTION in the center lane",
         "reasons": ["test"],
         "lane_metrics": [{"lane": "center", "score": 0.5}],
-        "objects": [{"objectId": 7, "objectType": "car", "ttcSec": 2.2, "riskState": "CAUTION"}],
+        "objects": [{
+            "objectId": 7,
+            "objectType": "car",
+            "ttcSec": 2.2,
+            "riskState": "CAUTION",
+            "lanePosition": 0.0,
+            "crossingRisk": 0.2,
+            "confidencePct": 67.0,
+        }],
         "object_type": "car",
         "approach": "approaching",
         "bbox": [1, 2, 3, 4],
@@ -51,7 +59,21 @@ def test_serialized_result_uses_lane_contract_only():
         "frame_count": 3,
         "processed_frames": 3,
         "sampled_frames": 3,
-        "timeline_rows": [{"frameIndex": 1, "lane": "center", "laneScores": {"center": 0.5}}],
+        "timeline_rows": [{
+            "frameIndex": 1,
+            "timeSec": 0.1,
+            "riskState": "CAUTION",
+            "lane": "center",
+            "ttcSec": 2.2,
+            "objectId": 7,
+            "objectType": "car",
+            "nearScore": 0.4,
+            "closingSpeed": 0.3,
+            "crossingRisk": 0.2,
+            "lanePosition": 0.0,
+            "confidencePct": 67.0,
+            "objects": event["objects"],
+        }],
         "events": [event],
         "peak_event": event,
     }
@@ -60,9 +82,14 @@ def test_serialized_result_uses_lane_contract_only():
     peak = payload["peakEvent"]
 
     assert peak["lane"] == "center"
-    assert peak["laneMetrics"] == [{"lane": "center", "score": 0.5}]
-    assert peak["objects"] == [{"objectId": 7, "objectType": "car", "ttcSec": 2.2, "riskState": "CAUTION"}]
-    assert peak["detections"] == peak["objects"]
+    assert peak["objects"] == event["objects"]
+    row = payload["timelineRows"][0]
+    assert row["objectId"] == 7
+    assert row["objectType"] == "car"
+    assert row["lanePosition"] == 0.0
+    assert row["crossingRisk"] == 0.2
+    assert row["confidencePct"] == 67.0
+    assert row["objects"] == event["objects"]
     legacy_lane_key = "zo" + "ne"
     legacy_metrics_key = legacy_lane_key + "Metrics"
     legacy_scores_key = legacy_lane_key + "Scores"
@@ -70,6 +97,7 @@ def test_serialized_result_uses_lane_contract_only():
 
     assert legacy_lane_key not in peak
     assert legacy_metrics_key not in peak
+    assert "detections" not in peak
     assert legacy_image_key not in peak.get("images", {})
-    assert "laneScores" in payload["timelineRows"][0]
+    assert "laneScores" not in row
     assert legacy_scores_key not in payload["timelineRows"][0]
