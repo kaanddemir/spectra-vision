@@ -42,7 +42,7 @@ class RiskEvent:
     ttc_sec: float | None
     direction: str
     lane: str
-    object_type: str
+    object_type: str | None
     confidence: float
     near_score: float
     velocity_magnitude: float
@@ -69,9 +69,9 @@ class SpatialFields:
 # Hard floors and ceilings on the reported TTC. The fusion can swing wildly
 # when bboxes flicker by 1-2 px between frames; clamping keeps the downstream
 # UI from showing nonsense values.
-_TTC_MIN_EXPANSION_RATE = 0.05  # per-second; below this we treat as "stable"
+_TTC_MIN_EXPANSION_RATE = 0.01  # per-second; below this we treat as "stable"
 _TTC_FLOOR_SEC = 0.15
-_TTC_MAX_REPORTED_SEC = 9.9
+_TTC_MAX_REPORTED_SEC = 30.0
 
 # State thresholds. Tuned for highway/urban dashcam: 1 s gives a driver one
 # reaction-time before impact, 3 s is roughly the recommended following gap.
@@ -137,7 +137,9 @@ def ttc_from_expansion(expansion_rate: float, *, history_age: int) -> TtcCompone
         return TtcComponent("expansion", None, 0.0)
     # Confidence grows with how many samples back the history goes (a one-
     # sample history can be a single-frame jitter; >3 samples is reliable).
-    confidence = float(np.clip(history_age / 4.0, 0.0, 1.0))
+    # Confidence grows with how many samples back the history goes.
+    # We allow a baseline confidence even for new tracks so the UI shows data early.
+    confidence = float(np.clip(0.15 + (history_age / 4.0), 0.0, 1.0))
     return TtcComponent("expansion", round(float(ttc), 2), confidence)
 
 
@@ -181,7 +183,7 @@ def ttc_from_flow(
     # Use the high-percentile outward velocity to suppress static background
     # pixels mixed into the bbox.
     radial_p75 = float(np.percentile(radial_velocity, 75))
-    if radial_p75 <= 0.5:
+    if radial_p75 <= 0.1:
         return TtcComponent("flow", None, 0.0)
 
     bbox_cx = (x1 + x2) / 2.0
@@ -248,7 +250,7 @@ def ttc_from_depth_delta(
         return TtcComponent("depth", None, 0.0)
 
     near_rate = (near_now - prev_near) / dt
-    if near_rate <= 0.02:
+    if near_rate <= 0.005:
         return TtcComponent("depth", None, 0.0)
 
     distance_proxy = max(0.05, 1.0 - near_now)
@@ -646,7 +648,7 @@ def make_safe_event(
         ttc_sec=None,
         direction="center",
         lane="center",
-        object_type="none",
+        object_type=None,
         confidence=0.0,
         near_score=0.0,
         velocity_magnitude=0.0,

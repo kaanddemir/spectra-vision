@@ -61,11 +61,12 @@ def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
 
     cv2.rectangle(output, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
 
-    label_parts = [event.object_type.upper()]
-    if event.ttc_sec is not None:
-        label_parts.append(f"{event.ttc_sec:.1f}s")
+    label_parts = []
     if event.object_id is not None:
         label_parts.append(f"#{event.object_id}")
+    label_parts.append(event.object_type.upper())
+    if event.ttc_sec is not None:
+        label_parts.append(f"{event.ttc_sec:.1f}s")
     label = " ".join(label_parts)
 
     (tw, th), baseline = cv2.getTextSize(label, _FONT, 0.42, 1)
@@ -140,79 +141,80 @@ def annotate_frame(
     lane_lbl = _readable_lane(primary_event.lane)
     obj_lbl = (primary_event.object_type or "scene").upper()
 
-    # Compact card pinned to top-left with a fixed footprint so it never
-    # overflows narrow previews. Layout:
-    #   row 1 — STATE pill + TTC
-    #   row 2 — object · lane
-    #   rows 3-6 — Prox / Appr / Cross / Conf bars
-    card_x, card_y = 12, 10
-    card_w = min(220, max(160, width - 24))
-    pad = 10
-    inner_x = card_x + pad
-    inner_w = card_w - 2 * pad
+    # 3. Telemetry HUD card. Only visible in CAUTION/DANGER states to keep 
+    # the SAFE view clean, matching the event timeline logic.
+    if primary_event.state in {"CAUTION", "DANGER"}:
+        card_x, card_y = 12, 10
+        card_w = min(220, max(160, width - 24))
+        pad = 10
+        inner_x = card_x + pad
+        inner_w = card_w - 2 * pad
 
-    # background
-    card_y2 = card_y + 116
-    panel = output.copy()
-    cv2.rectangle(panel, (card_x, card_y), (card_x + card_w, card_y2), (8, 12, 20), thickness=-1)
-    cv2.addWeighted(panel, 0.78, output, 0.22, 0, output)
-    cv2.rectangle(output, (card_x, card_y), (card_x + card_w, card_y2), (40, 50, 65), 1, cv2.LINE_AA)
+        # background
+        card_y2 = card_y + 138
+        panel = output.copy()
+        cv2.rectangle(panel, (card_x, card_y), (card_x + card_w, card_y2), (8, 12, 20), thickness=-1)
+        cv2.addWeighted(panel, 0.78, output, 0.22, 0, output)
+        cv2.rectangle(output, (card_x, card_y), (card_x + card_w, card_y2), (40, 50, 65), 1, cv2.LINE_AA)
 
-    # row 1 — state pill + TTC
-    pill_h = 18
-    state_text = primary_event.state
-    (stw, sth), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
-    pill_w = stw + 14
-    pill_y = card_y + 8
-    cv2.rectangle(output, (inner_x, pill_y), (inner_x + pill_w, pill_y + pill_h), color, thickness=-1)
-    cv2.putText(
-        output,
-        state_text,
-        (inner_x + 7, pill_y + pill_h - 5),
-        _FONT,
-        0.45,
-        (15, 18, 24),
-        1,
-        cv2.LINE_AA,
-    )
-    ttc_label = f"TTC {ttc_str}"
-    cv2.putText(
-        output,
-        ttc_label,
-        (inner_x + pill_w + 10, pill_y + pill_h - 4),
-        _FONT,
-        0.5,
-        color,
-        1,
-        cv2.LINE_AA,
-    )
+        # row 1 — state pill + TTC
+        pill_h = 18
+        state_text = primary_event.state
+        (stw, sth), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
+        pill_w = stw + 14
+        pill_y = card_y + 10
+        cv2.rectangle(output, (inner_x, pill_y), (inner_x + pill_w, pill_y + pill_h), color, thickness=-1)
+        cv2.putText(
+            output,
+            state_text,
+            (inner_x + 7, pill_y + pill_h - 5),
+            _FONT,
+            0.45,
+            (15, 18, 24),
+            1,
+            cv2.LINE_AA,
+        )
+        ttc_label = f"TTC {ttc_str}"
+        cv2.putText(
+            output,
+            ttc_label,
+            (inner_x + pill_w + 12, pill_y + pill_h - 4),
+            _FONT,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
 
-    # row 2 — object · lane
-    sub_parts = [obj_lbl]
-    if lane_lbl and primary_event.bbox is not None:
-        sub_parts.append(lane_lbl)
-    sub_text = "  ·  ".join(sub_parts)
-    cv2.putText(
-        output,
-        sub_text,
-        (inner_x, card_y + 44),
-        _FONT,
-        0.4,
-        (200, 210, 225),
-        1,
-        cv2.LINE_AA,
-    )
+        # row 2 — ID | object | lane
+        sub_parts = []
+        if primary_event.object_id is not None:
+            sub_parts.append(f"#{primary_event.object_id}")
+        sub_parts.append(obj_lbl)
+        if lane_lbl and primary_event.bbox is not None:
+            sub_parts.append(lane_lbl)
+        sub_text = " | ".join(sub_parts)
+        cv2.putText(
+            output,
+            sub_text,
+            (inner_x, card_y + 50),
+            _FONT,
+            0.4,
+            (200, 210, 225),
+            1,
+            cv2.LINE_AA,
+        )
 
-    # rows 3-6 — metric bars
-    metrics = [
-        ("Prox", proximity_pct),
-        ("Appr", approach_pct),
-        ("Cross", crossing_pct),
-        ("Conf", confidence_pct),
-    ]
-    bar_y = card_y + 60
-    for label, pct in metrics:
-        _draw_metric_bar(output, inner_x, bar_y, inner_w, label, pct, color)
-        bar_y += 14
+        # rows 3-6 — metric bars
+        metrics = [
+            ("Prox", proximity_pct),
+            ("Appr", approach_pct),
+            ("Cross", crossing_pct),
+            ("Conf", confidence_pct),
+        ]
+        bar_y = card_y + 72
+        for label, pct in metrics:
+            _draw_metric_bar(output, inner_x, bar_y, inner_w, label, pct, color)
+            bar_y += 16
 
     return output

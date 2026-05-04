@@ -350,7 +350,11 @@
               <div class="threat-signals" id="threat-signals">
                 <div class="threat-panel-head">
                   <h3>Tracked Objects</h3>
-                  <span id="threat-count" title="Number of objects currently being tracked">0</span>
+                  <span id="threat-count" title="Number of unique objects detected">Detected IDs: <span>0</span></span>
+                  <div class="threat-mode-toggle">
+                    <button type="button" id="toggle-mode-frame" class="is-active" title="Show metrics for current frame">Live</button>
+                    <button type="button" id="toggle-mode-avg" title="Show historical average for each object">Avg</button>
+                  </div>
                 </div>
                 <div class="threat-object-layout">
                   <div class="detection-list" id="detection-list">
@@ -586,59 +590,120 @@
 
       <div class="help-body">
         <section class="help-section">
-          <h4>Processing Pipeline</h4>
+          <div class="help-section-header">
+            <h4>Core Analysis Pipeline</h4>
+            <p>Spectra combines three independent visual signals to ensure reliable hazard detection.</p>
+          </div>
           <div class="help-steps">
+            <!-- Step 1: Ingestion -->
             <div class="help-step">
-              <div class="step-num">01</div>
-              <h5>Upload & Live Preview</h5>
-              <p>FastAPI receives the uploaded video, stores it temporarily, and streams preview telemetry through a WebSocket while the analysis runs.</p>
-              <div class="step-files">
-                <code>spectra/app.py</code>
-                <code>spectra/analysis/video.py</code>
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-upload"></use></svg>
+                <div class="step-num">01</div>
+              </div>
+              <h5>Data Ingestion</h5>
+              <p>Frames are streamed through a WebSocket for real-time preview while the backend initializes the vision stack.</p>
+              <div class="step-tags">
+                <span>FastAPI</span>
+                <span>WebSockets</span>
               </div>
             </div>
+
+            <!-- Step 2: Geometry -->
             <div class="help-step">
-              <div class="step-num">02</div>
-              <h5>Vision Pre-processing</h5>
-              <p>Each frame is resized, denoised, contrast-enhanced, and converted into model-ready RGB and grayscale representations.</p>
-              <div class="step-files">
-                <code>spectra/vision/preprocessing.py</code>
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-lane"></use></svg>
+                <div class="step-num">02</div>
               </div>
-            </div>
-            <div class="help-step">
-              <div class="step-num">03</div>
               <h5>Road Geometry</h5>
-              <p>Road boundaries, lane corridor, and vanishing point are estimated so object positions can be measured relative to the ego lane.</p>
-              <div class="step-files">
-                <code>spectra/vision/road.py</code>
+              <p>Estimates lane corridor and vanishing point using Canny/Hough. Normalizes positions relative to the ego-lane.</p>
+              <div class="step-tags">
+                <span>Lane ROI</span>
+                <span>Vanishing Point</span>
               </div>
             </div>
+
+            <!-- Step 3: Spatial -->
             <div class="help-step">
-              <div class="step-num">04</div>
-              <h5>Depth & Motion</h5>
-              <p>Depth Anything creates a nearness map, while NeuFlow estimates dense optical flow after ego-motion compensation.</p>
-              <div class="step-files">
-                <code>spectra/vision/motion.py</code>
-                <code>spectra/vision/depth.py</code>
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-expand"></use></svg>
+                <div class="step-num">03</div>
+              </div>
+              <h5>Depth (Spatial)</h5>
+              <p>Depth Anything V2 produces relative nearness maps. CoreML acceleration is used on Apple Silicon for high FPS.</p>
+              <div class="step-tags">
+                <span>ONNX</span>
+                <span>CoreML</span>
               </div>
             </div>
+
+            <!-- Step 4: Motion -->
             <div class="help-step">
-              <div class="step-num">05</div>
-              <h5>Object Risk Fusion</h5>
-              <p>YOLO detections are tracked over time, then TTC is fused from bbox expansion, radial flow, and depth-delta evidence.</p>
-              <div class="step-files">
-                <code>spectra/vision/detection.py</code>
-                <code>spectra/analysis/tracking.py</code>
-                <code>spectra/analysis/risk.py</code>
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-pulse"></use></svg>
+                <div class="step-num">04</div>
+              </div>
+              <h5>Motion Analysis</h5>
+              <p>DIS Optical Flow calculates pixel-level vectors. RANSAC-based homography compensates for camera ego-motion.</p>
+              <div class="step-tags">
+                <span>OpenCV DIS</span>
+                <span>Ego-Motion</span>
               </div>
             </div>
+
+            <!-- Step 5: Perception -->
             <div class="help-step">
-              <div class="step-num">06</div>
-              <h5>Timeline & Output</h5>
-              <p>The highest-risk event, lane metrics, TTC components, timeline rows, and visual overlays are sent back to the interface.</p>
-              <div class="step-files">
-                <code>spectra/analysis/overlay.py</code>
-                <code>spectra/analysis/video.py</code>
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-car"></use></svg>
+                <div class="step-num">05</div>
+              </div>
+              <h5>Object Tracking</h5>
+              <p>YOLO detects road participants. A lightweight IoU tracker maintains history for velocity and expansion rates.</p>
+              <div class="step-tags">
+                <span>YOLOv8</span>
+                <span>IoU Tracker</span>
+              </div>
+            </div>
+
+            <!-- Step 6: Fusion -->
+            <div class="help-step">
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-shield"></use></svg>
+                <div class="step-num">06</div>
+              </div>
+              <h5>Risk Fusion</h5>
+              <p>Fuses TTC from three sources: BBox Expansion, Radial Flow, and Depth-Delta using weighted median logic.</p>
+              <div class="step-tags">
+                <span>TTC Fusion</span>
+                <span>Median Filter</span>
+              </div>
+            </div>
+
+            <!-- Step 7: Decision -->
+            <div class="help-step">
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-alert"></use></svg>
+                <div class="step-num">07</div>
+              </div>
+              <h5>Decision Engine</h5>
+              <p>Classifies state as SAFE, CAUTION, or DANGER. Hysteresis stabilization prevents jitter in risk transitions.</p>
+              <div class="step-tags">
+                <span>Hysteresis</span>
+                <span>State Machine</span>
+              </div>
+            </div>
+
+            <!-- Step 8: Output -->
+            <div class="help-step">
+              <div class="step-icon-wrap">
+                <svg class="step-svg"><use href="#icon-list"></use></svg>
+                <div class="step-num">08</div>
+              </div>
+              <h5>Efficiency</h5>
+              <p>Deferred rendering ensures heavy overlays are only drawn for saved events or on-demand previews.</p>
+              <div class="step-tags">
+                <span>Telemetry</span>
+                <span>Deferred Render</span>
               </div>
             </div>
           </div>

@@ -8,7 +8,7 @@ import io
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
@@ -32,26 +32,25 @@ app = FastAPI(title="Spectra", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-def _image_to_png_bytes(image: Any) -> bytes:
-    """Encode an RGB or grayscale array as PNG bytes."""
+def _image_to_jpeg_bytes(image: Any, quality: int = 85) -> bytes:
+    """Encode an RGB array as JPEG bytes."""
 
     array = np.asarray(image)
     if array.dtype != np.uint8:
         array = np.clip(array, 0, 255).astype(np.uint8)
 
-    if array.ndim == 2:
-        pil_image = Image.fromarray(array)
-    else:
-        pil_image = Image.fromarray(array[:, :, :3])
+    pil_image = Image.fromarray(array[:, :, :3] if array.ndim == 3 else array)
+    if pil_image.mode != "RGB":
+        pil_image = pil_image.convert("RGB")
 
     buffer = io.BytesIO()
-    pil_image.save(buffer, format="PNG")
+    pil_image.save(buffer, format="JPEG", quality=quality, optimize=True)
     return buffer.getvalue()
 
 
 def _image_data_uri(image: Any) -> str:
-    encoded = base64.b64encode(_image_to_png_bytes(image)).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+    encoded = base64.b64encode(_image_to_jpeg_bytes(image)).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
 
 
 def _event_image_payload(event: dict[str, Any], fields: Iterable[tuple[str, str]]) -> dict[str, str]:
@@ -67,44 +66,30 @@ def _serialize_event(
     event: dict[str, Any],
     *,
     include_images: bool = True,
-    image_fields: Iterable[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "frameIndex": event.get("frame_index"),
         "timestampSec": event.get("timestamp_sec"),
-        "riskScore": event.get("risk_score", event.get("hazard_score")),
-        "riskBand": event.get("risk_band", event.get("hazard_band")),
+        "riskScore": event.get("risk_score"),
+        "riskState": event.get("risk_state"),
         "lane": event.get("primary_lane"),
         "ttcSec": event.get("estimated_ttc_sec"),
-        "uncertaintyPct": event.get("uncertainty_pct"),
-        "summary": event.get("heuristic_summary"),
-        "reasons": event.get("reasons", []),
-        "laneMetrics": event.get("lane_metrics", []),
-        "objects": event.get("objects", []),
-        "detections": event.get("objects", []),
-        "riskState": event.get("risk_state"),
-        "objectType": event.get("object_type"),
-        "approach": event.get("approach"),
-        "bbox": event.get("bbox"),
-        "objectId": event.get("object_id"),
         "nearScore": event.get("near_score"),
         "closingSpeed": event.get("closing_speed"),
-        "velocityMagnitude": event.get("velocity_magnitude"),
-        "expansionRate": event.get("expansion_rate"),
         "crossingRisk": event.get("crossing_risk"),
         "lanePosition": event.get("lane_position"),
-        "ttcComponents": event.get("ttc_components", []),
+        "confidencePct": event.get("confidence_pct"),
+        "objectId": event.get("object_id"),
+        "objectType": event.get("object_type"),
+        "objects": event.get("objects", []),
     }
 
     if include_images:
-        fields = image_fields or (
+        payload["images"] = _event_image_payload(event, (
             ("original", "original_rgb"),
-            ("depth", "depth_rgb"),
             ("road", "road_rgb"),
-            ("motion", "motion_rgb"),
             ("blend", "overlay_rgb"),
-        )
-        payload["images"] = _event_image_payload(event, fields)
+        ))
 
     return payload
 
@@ -121,24 +106,17 @@ def _is_same_event(left: dict[str, Any] | None, right: dict[str, Any] | None) ->
 def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name: str) -> dict[str, Any]:
     peak_event = result.get("peak_event")
     payload: dict[str, Any] = {
-        "summary": result.get("summary"),
         "metadata": {
-            "mediaType": result.get("media_type"),
             "sourceName": source_name,
             "fps": result.get("fps"),
             "frameCount": result.get("frame_count"),
             "processedFrames": result.get("processed_frames"),
-            "sampledFrames": result.get("sampled_frames"),
             "elapsedSec": round(elapsed_sec, 3),
         },
         "timelineRows": result.get("timeline_rows", []),
         "peakEvent": None if peak_event is None else _serialize_event(peak_event),
         "events": [
-            _serialize_event(
-                event,
-                include_images=True,
-                image_fields=(("blend", "overlay_rgb"),),
-            )
+            _serialize_event(event)
             for event in result.get("events", [])
             if not _is_same_event(event, peak_event)
         ],
@@ -225,8 +203,11 @@ async def analyze_endpoint(
     mode: str = Form("video"),
     max_processed_frames: int = Form(180),
     max_saved_events: int = Form(20),
-    resize_max_side: int = Form(640),
+    resize_max_side: int = Form(512),
     depth_every: int = Form(10),
+    detect_every: int = Form(3),
+    lane_every: int = Form(5),
+    flow_every: int = Form(1),
     start_sec: float = Form(0.0),
     end_sec: float = Form(0.0),
     session_id: str = Form(""),
@@ -281,6 +262,9 @@ async def analyze_endpoint(
                 max_saved_events=min(50, max(1, int(max_saved_events))),
                 resize_max_side=min(1920, max(128, int(resize_max_side))),
                 depth_every=max(1, int(depth_every)),
+                detect_every=max(1, int(detect_every)),
+                lane_every=max(1, int(lane_every)),
+                flow_every=max(1, int(flow_every)),
                 enable_road_roi=True,
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -24,7 +25,7 @@ from .risk import (
 from ..vision.depth import DepthResult, estimate_frame_depth
 from ..vision.detection import get_detector
 from ..vision.models import is_depth_available, is_flow_available
-from ..vision.motion import compute_velocity, flow_to_rgb
+from ..vision.motion import compute_velocity
 from ..vision.preprocessing import preprocess_frame
 from ..vision.road import (
     VanishingPointSmoother,
@@ -37,12 +38,6 @@ from ..vision.road import (
 from .tracking import IoUTracker
 from .overlay import annotate_frame
 
-
-BAND_BY_STATE = {
-    "SAFE": "low",
-    "CAUTION": "medium",
-    "DANGER": "critical",
-}
 
 
 @dataclass(frozen=True)
@@ -111,11 +106,6 @@ def _ensure_required_models() -> None:
 
 def _to_rgb(image_bgr: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-
-
-def _depth_rgb(depth: DepthResult) -> np.ndarray:
-    colorized = cv2.applyColorMap(depth.depth_map, cv2.COLORMAP_INFERNO)
-    return _to_rgb(colorized)
 
 
 def _road_tracking_rgb(frame_bgr: np.ndarray, road_roi: RoadROI | None = None) -> np.ndarray:
@@ -192,81 +182,19 @@ def _risk_score(event: RiskEvent) -> float:
     return round(float(max(state_floor, (0.48 * signal) + (0.52 * ttc_pressure))), 3)
 
 
-def _lane_metric(event: RiskEvent) -> dict[str, Any]:
-    return {
-        "lane": event.lane,
-        "score": _risk_score(event),
-        "meanDepth": event.near_score,
-        "motionEnergy": event.velocity_magnitude,
-        "expansionEnergy": event.closing_speed,
-        "structureSignal": event.confidence,
-        "nearRatio": event.near_score,
-        "ttcSec": event.ttc_sec,
-        "estimated_ttc_sec": event.ttc_sec,
-        "directionHint": event.direction,
-        "objectType": event.object_type,
-        "object_type": event.object_type,
-        "objectId": event.object_id,
-        "object_id": event.object_id,
-        "riskState": event.state,
-        "risk_state": event.state,
-        "near_score": event.near_score,
-        "closing_speed": event.closing_speed,
-        "confidence_pct": round(event.confidence * 100.0, 1),
-        "bbox": list(event.bbox) if event.bbox is not None else None,
-        "expansionRate": event.expansion_rate,
-        "crossingRisk": event.crossing_risk,
-        "lateralVelocityNorm": event.lateral_velocity_norm,
-        "lanePosition": event.lane_position,
-        "ttcComponents": [
-            {
-                "name": component.name,
-                "value": component.value,
-                "confidence": round(component.confidence, 3),
-            }
-            for component in event.ttc_components
-        ],
-    }
-
-
 def _object_metric(event: RiskEvent) -> dict[str, Any]:
     return {
         "objectId": event.object_id,
-        "object_id": event.object_id,
         "objectType": event.object_type,
-        "object_type": event.object_type,
         "riskState": event.state,
-        "risk_state": event.state,
         "riskScore": _risk_score(event),
-        "risk_score": _risk_score(event),
         "lane": event.lane,
         "ttcSec": event.ttc_sec,
-        "estimated_ttc_sec": event.ttc_sec,
         "nearScore": event.near_score,
-        "near_score": event.near_score,
         "closingSpeed": event.closing_speed,
-        "closing_speed": event.closing_speed,
-        "velocityMagnitude": event.velocity_magnitude,
-        "velocity_magnitude": event.velocity_magnitude,
-        "confidencePct": round(event.confidence * 100.0, 1),
-        "confidence_pct": round(event.confidence * 100.0, 1),
-        "bbox": list(event.bbox) if event.bbox is not None else None,
-        "expansionRate": event.expansion_rate,
-        "expansion_rate": event.expansion_rate,
         "crossingRisk": event.crossing_risk,
-        "crossing_risk": event.crossing_risk,
-        "lateralVelocityNorm": event.lateral_velocity_norm,
-        "lateral_velocity_norm": event.lateral_velocity_norm,
         "lanePosition": event.lane_position,
-        "lane_position": event.lane_position,
-        "ttcComponents": [
-            {
-                "name": component.name,
-                "value": component.value,
-                "confidence": round(component.confidence, 3),
-            }
-            for component in event.ttc_components
-        ],
+        "confidencePct": round(event.confidence * 100.0, 1),
     }
 
 
@@ -277,93 +205,43 @@ def _event_payload_base(
 ) -> dict[str, Any]:
     """Build the metadata-only event payload. RGB views are attached later."""
 
-    band = BAND_BY_STATE.get(event.state, "low")
-    confidence_pct = round(event.confidence * 100.0, 1)
-    uncertainty_pct = round((1.0 - event.confidence) * 100.0, 1)
-    summary = f"{event.state} in the {event.lane} lane"
-    if event.ttc_sec is not None:
-        summary += f", TTC {event.ttc_sec:.2f}s"
-    summary += f", direction {event.direction}"
-
     return {
         "frame_index": event.frame_index,
         "timestamp_sec": event.timestamp_sec,
         "risk_score": _risk_score(event),
-        "risk_band": band,
         "risk_state": event.state,
         "primary_lane": event.lane,
         "estimated_ttc_sec": event.ttc_sec,
-        "confidence_pct": confidence_pct,
-        "uncertainty_pct": uncertainty_pct,
-        "heuristic_summary": summary,
-        "reasons": [event.reason, f"{event.object_type} in {event.lane} lane", f"motion direction: {event.direction}"],
-        "lane_metrics": [_lane_metric(item) for item in all_events],
-        "objects": [_object_metric(item) for item in all_events if item.object_id is not None],
+        "confidence_pct": round(event.confidence * 100.0, 1),
         "object_type": event.object_type,
-        "approach": "approaching" if event.state in {"CAUTION", "DANGER"} else "stable",
-        "lane": event.lane,
-        "bbox": list(event.bbox) if event.bbox is not None else None,
         "object_id": event.object_id,
         "near_score": event.near_score,
         "closing_speed": event.closing_speed,
-        "velocity_magnitude": event.velocity_magnitude,
-        "expansion_rate": event.expansion_rate,
         "crossing_risk": event.crossing_risk,
         "lane_position": event.lane_position,
-        "ttc_components": [
-            {
-                "name": component.name,
-                "value": component.value,
-                "confidence": round(component.confidence, 3),
-            }
-            for component in event.ttc_components
-        ],
-        "payload": {
-            "risk_state": event.state,
-            "object_type": event.object_type,
-            "lane": event.lane,
-            "direction": event.direction,
-            "ttc_sec": event.ttc_sec,
-            "near_score": event.near_score,
-            "closing_speed": event.closing_speed,
-            "confidence_pct": confidence_pct,
-            "object_id": event.object_id,
-            "lane_position": event.lane_position,
-            "ttc_components": [
-                {
-                    "name": component.name,
-                    "value": component.value,
-                    "confidence": round(component.confidence, 3),
-                }
-                for component in event.ttc_components
-            ],
-        },
+        "objects": [_object_metric(item) for item in all_events if item.object_id is not None],
     }
 
 
 @dataclass
 class _DeferredRender:
-    """Inputs needed to materialize the heavy RGB views for a saved event."""
+    """Inputs needed to materialize the RGB views for a saved event."""
 
     frame_bgr: np.ndarray
     primary_event: RiskEvent
     all_events: list[RiskEvent]
     lane: Any
-    flow: np.ndarray
-    depth: DepthResult | None
     road_roi: RoadROI | None
 
 
 def _attach_render(payload: dict[str, Any], render: "_DeferredRender") -> dict[str, Any]:
-    """Materialize the heavy RGB views and attach them to the payload in place."""
+    """Materialize RGB views and attach them to the payload in place."""
 
     annotated = annotate_frame(
         render.frame_bgr, render.primary_event, render.all_events, lane=render.lane
     )
     payload["original_rgb"] = _to_rgb(render.frame_bgr)
-    payload["depth_rgb"] = _depth_rgb(render.depth) if render.depth is not None else _to_rgb(render.frame_bgr)
     payload["road_rgb"] = _road_tracking_rgb(render.frame_bgr, render.road_roi)
-    payload["motion_rgb"] = flow_to_rgb(render.flow)
     payload["overlay_rgb"] = _to_rgb(annotated)
     return payload
 
@@ -388,6 +266,9 @@ def analyze_spatial_video(
     max_saved_events: int,
     resize_max_side: int,
     depth_every: int = 10,
+    detect_every: int = 3,
+    lane_every: int = 5,
+    flow_every: int = 1,
     enable_road_roi: bool = False,
     start_sec: float = 0.0,
     end_sec: float | None = None,
@@ -407,6 +288,8 @@ def analyze_spatial_video(
 
     previous_frame = None
     last_depth: DepthResult | None = None
+    last_flow = None
+    cached_road_roi: RoadROI | None = None
     saved_events: list[dict[str, Any]] = []
     pending_renders: dict[int, _DeferredRender] = {}
     timeline_rows: list[dict[str, Any]] = []
@@ -421,8 +304,25 @@ def analyze_spatial_video(
     previous_timestamp_sec: float | None = None
 
     for video_frame in loader.frames():
+        t0 = time.perf_counter()
+
         frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
-        road_roi = estimate_road_roi(frame.bgr) if enable_road_roi else default_road_roi(frame.bgr.shape)
+        t_preprocess = time.perf_counter()
+
+        # Lane detection with caching: only re-run Canny+Hough on scheduled
+        # frames; between detections the cached high-confidence result is reused.
+        fi = video_frame.frame_index
+        if enable_road_roi:
+            if fi % max(lane_every, 1) == 0:
+                new_roi = estimate_road_roi(frame.bgr)
+                if new_roi.confidence >= 0.50:
+                    cached_road_roi = new_roi
+                road_roi = new_roi if new_roi.confidence >= 0.50 else (cached_road_roi or default_road_roi(frame.bgr.shape))
+            else:
+                road_roi = cached_road_roi or default_road_roi(frame.bgr.shape)
+        else:
+            road_roi = default_road_roi(frame.bgr.shape)
+
         frame_h, frame_w = frame.gray.shape
         raw_vp = compute_vanishing_point(road_roi, frame_w, frame_h)
         smoothed_vp = vp_smoother.update(raw_vp, road_roi.confidence)
@@ -432,33 +332,57 @@ def analyze_spatial_video(
             height=frame_h,
             smoothed_vp=smoothed_vp,
         )
+        t_lane = time.perf_counter()
 
         if previous_timestamp_sec is None:
             flow_dt_sec = 1.0 / loader.fps if loader.fps > 0.0 else 1.0 / 30.0
         else:
             flow_dt_sec = max(1.0 / 120.0, video_frame.timestamp_sec - previous_timestamp_sec)
-        flow = compute_velocity(previous_frame, frame)
+
+        # Flow every N frames: reuse previous result on skipped frames.
+        if last_flow is None or fi % max(flow_every, 1) == 0:
+            flow = compute_velocity(previous_frame, frame)
+            last_flow = flow
+        else:
+            flow = last_flow
+
         previous_frame = frame
         previous_timestamp_sec = video_frame.timestamp_sec
+        t_flow = time.perf_counter()
 
         # 1. Fast motion check: is the scene busy enough to re-run depth?
         quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
         is_high_risk = quick_risk > 0.15
-        is_periodic = video_frame.frame_index % max(depth_every, 1) == 0
+        is_periodic = fi % max(depth_every, 1) == 0
         needs_depth = last_depth is None or is_periodic or is_high_risk
         depth_is_fresh = bool(needs_depth)
         if needs_depth:
             last_depth = estimate_frame_depth(frame)
+        t_depth = time.perf_counter()
 
-        # 2. Detect objects on the original (preprocessed) BGR frame and track
-        # them across frames. The tracker links bboxes by IoU so per-object
-        # scale expansion (TTC source) survives detection jitter.
-        detections = detector.detect(frame.bgr)
-        active_tracks = tracker.update(
-            detections,
-            frame_index=video_frame.frame_index,
-            timestamp_sec=video_frame.timestamp_sec,
-        )
+        # 2. Detect objects every N frames; between detections the tracker
+        # propagates existing tracks so IDs and TTC history stay continuous.
+        should_detect = (fi % max(detect_every, 1) == 0)
+        if should_detect:
+            detections = detector.detect(frame.bgr)
+            active_tracks = tracker.update(
+                detections,
+                frame_index=fi,
+                timestamp_sec=video_frame.timestamp_sec,
+            )
+        else:
+            active_tracks = tracker.propagate()
+        t_yolo = time.perf_counter()
+
+        if processed_frames % 30 == 0:
+            print(
+                f"[FRAME {fi:4d}] "
+                f"preprocess={1000*(t_preprocess-t0):.0f}ms  "
+                f"lane={'skip' if (enable_road_roi and fi % max(lane_every,1) != 0) else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
+                f"flow={'skip' if fi % max(flow_every,1) != 0 else f'{1000*(t_flow-t_lane):.0f}ms':>7}  "
+                f"depth={'skip' if not needs_depth else f'{1000*(t_depth-t_flow):.0f}ms':>7}  "
+                f"yolo={'skip' if not should_detect else f'{1000*(t_yolo-t_depth):.0f}ms':>7}"
+            )
 
         # 3. Per-object risk via scale-expansion TTC + lateral crossing.
         primary_event, all_events = build_object_events(
@@ -492,8 +416,6 @@ def analyze_spatial_video(
             primary_event=primary_event,
             all_events=all_events,
             lane=lane,
-            flow=flow.flow,
-            depth=last_depth,
             road_roi=road_roi,
         )
 
@@ -521,29 +443,16 @@ def analyze_spatial_video(
         live_ids = {id(item) for item in saved_events}
         pending_renders = {pid: ref for pid, ref in pending_renders.items() if pid in live_ids}
 
-        # Aggregate lane-bucket scores by taking the max per object bucket.
-        # Multiple objects can sit in the same lane, and only the worst one
-        # should drive that lane's alert.
         object_metrics = [_object_metric(ev) for ev in all_events if ev.object_id is not None]
-        lane_scores: dict[str, float] = {}
-        for ev in all_events:
-            z_key = str(ev.lane).lower().split()[0] if ev.lane else "center"
-            score = _risk_score(ev)
-            lane_scores[z_key] = max(lane_scores.get(z_key, 0.0), score)
-
         timeline_row = {
             "frameIndex": primary_event.frame_index,
             "timeSec": round(primary_event.timestamp_sec, 2),
             "riskState": primary_event.state,
-            "riskBand": BAND_BY_STATE.get(primary_event.state, "low"),
             "lane": primary_event.lane,
-            "direction": primary_event.direction,
             "ttcSec": primary_event.ttc_sec,
             "nearScore": primary_event.near_score,
             "closingSpeed": primary_event.closing_speed,
-            "laneScores": lane_scores,
             "objects": object_metrics,
-            "detections": object_metrics,
         }
         timeline_rows.append(timeline_row)
         if progress_callback is not None:
@@ -552,13 +461,9 @@ def analyze_spatial_video(
 
         is_first_frame = (processed_frames == 1)
         if progress_callback is not None and (is_first_frame or processed_frames % max(1, int(progress_every)) == 0):
-            # Annotate only here — non-preview frames skip this entirely.
             annotated = annotate_frame(frame.bgr, primary_event, all_events, lane=lane)
             preview_uri = _encode_preview_jpeg(annotated)
             progress_pct = min(100.0, round((processed_frames / max(1, max_processed_frames)) * 100.0, 1))
-            lane_metrics_payload = [_lane_metric(ev) for ev in all_events if ev.object_id is not None]
-            object_metrics_payload = [_object_metric(ev) for ev in all_events if ev.object_id is not None]
-            timeline_rows_payload = list(preview_rows_buffer)
             try:
                 progress_callback(
                     {
@@ -575,11 +480,9 @@ def analyze_spatial_video(
                         "crossingRisk": float(primary_event.crossing_risk),
                         "confidencePct": float(primary_event.confidence * 100.0),
                         "frame": preview_uri,
-                        "laneMetrics": lane_metrics_payload,
-                        "objects": object_metrics_payload,
-                        "detections": object_metrics_payload,
+                        "objects": object_metrics,
                         "timelineRow": timeline_row,
-                        "timelineRows": timeline_rows_payload,
+                        "timelineRows": list(preview_rows_buffer),
                     }
                 )
             except Exception:
@@ -618,17 +521,12 @@ def analyze_spatial_video(
 
     peak_event = saved_events[0] if saved_events else None
     return {
-        "media_type": "video",
-        "pipeline": "spatial_awareness",
         "fps": loader.fps,
         "frame_count": loader.frame_count,
         "processed_frames": processed_frames,
-        "sampled_frames": processed_frames,
         "timeline_rows": timeline_rows,
         "events": saved_events,
         "peak_event": peak_event,
-        "summary": None if peak_event is None else peak_event["heuristic_summary"],
-        "analysis_mode": "lane_relative",
     }
 
 

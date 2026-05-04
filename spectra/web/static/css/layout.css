@@ -49,6 +49,7 @@
 .event-count-simple span {
   color: var(--text-soft);
   margin-left: 2px;
+  font-weight: 600;
 }
 
 .timeline-content {

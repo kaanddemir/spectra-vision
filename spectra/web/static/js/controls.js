@@ -38,6 +38,8 @@ export function initializeSpectra() {
     liveTimelineRows: [],
     liveEvents: [],
     selectedObjectId: null,
+    threatMode: "frame", // "frame" or "avg"
+    trackedObjectStats: {}, // { id: { ttc: {sum, count}, near: {sum, count}, ... } }
   };
 
   const byId = (id) => document.getElementById(id);
@@ -119,23 +121,22 @@ export function initializeSpectra() {
     return "none";
   };
   const eventSeverityScore = (ev) => {
-    const sc = stateClass(ev?.riskState || ev?.riskBand || ev?.hazardBand);
+    const sc = stateClass(ev?.riskState);
     const stateWeight = sc === "danger" ? 2 : sc === "caution" ? 1 : 0;
-    const ttc = num(ev?.ttcSec ?? ev?.estimatedTtcSec ?? ev?.estimated_ttc_sec, null);
+    const ttc = num(ev?.ttcSec, null);
     const ttcWeight = ttc === null ? 0 : clamp((3 - ttc) / 3, 0, 1);
-    const near = num(ev?.nearScore ?? ev?.near_score, 0);
-    const closing = num(ev?.closingSpeed ?? ev?.closing_speed, 0);
+    const near = num(ev?.nearScore, 0);
+    const closing = num(ev?.closingSpeed, 0);
     return stateWeight + ttcWeight + near + closing;
   };
-  const eventStateClass = (ev) => stateClass(ev?.riskState || ev?.riskBand || ev?.hazardBand || ev?.metrics?.riskState);
-  const eventTimestamp = (ev) => num(ev?.timestampSec ?? ev?.timestamp_sec ?? ev?.timeSec, null);
+  const eventStateClass = (ev) => stateClass(ev?.riskState || ev?.metrics?.riskState);
+  const eventTimestamp = (ev) => num(ev?.timestampSec ?? ev?.timeSec, null);
   const eventDisplayTtc = (ev) => {
     const m = ev?.metrics || {};
-    const ttc = ev?.ttcSec ?? ev?.estimatedTtcSec ?? ev?.estimated_ttc_sec ?? ev?.ttc
-      ?? m.ttcSec ?? m.estimatedTtcSec ?? m.estimated_ttc_sec ?? m.ttc;
-    return normalizeDisplayTtc(ev?.riskState || ev?.riskBand || ev?.hazardBand || m.riskState, ttc);
+    const ttc = ev?.ttcSec ?? m.ttcSec;
+    return normalizeDisplayTtc(ev?.riskState || m.riskState, ttc);
   };
-  const eventLane = (ev) => titleCase(ev?.lane || ev?.primaryLane || ev?.primary_lane || ev?.metrics?.lane);
+  const eventLane = (ev) => titleCase(ev?.lane || ev?.metrics?.lane);
   const eventRank = (sc) => (sc === "danger" ? 2 : sc === "caution" ? 1 : 0);
   const eventItemsFromEvents = (events) => (Array.isArray(events) ? events : [])
     .map((ev, sourceIndex) => ({
@@ -229,7 +230,7 @@ export function initializeSpectra() {
     if (item.ttc !== null) parts.push(`TTC ${item.ttc.toFixed(1)}s`);
     const lane = eventLane(item.ev);
     if (lane) parts.push(lane);
-    return parts.join(" · ");
+    return parts.join(" | ");
   };
   const riskClass = (sb) => {
     const c = stateClass(sb);
@@ -242,33 +243,35 @@ export function initializeSpectra() {
   const englishLane = (lane) => {
     if (!isReal(lane)) return MISSING;
     const v = String(lane).toLowerCase();
-    if (v.includes("left")) return "Left Lane";
-    if (v.includes("right")) return "Right Lane";
-    if (v.includes("center")) return "Same Lane";
+    if (v.includes("left")) return "Left";
+    if (v.includes("right")) return "Right";
+    if (v.includes("center")) return "Central";
     return titleCase(lane) || MISSING;
   };
   const shortLane = (lane) => {
     if (!isReal(lane)) return MISSING;
     const v = String(lane).toLowerCase();
-    if (v.includes("left")) return "L. Lane";
-    if (v.includes("right")) return "R. Lane";
-    if (v.includes("center")) return "C. Lane";
+    if (v.includes("left")) return "Left";
+    if (v.includes("right")) return "Right";
+    if (v.includes("center")) return "Central";
     return titleCase(lane) || MISSING;
   };
   const shortType = (type) => {
     if (!isReal(type)) return MISSING;
     const v = String(type).toLowerCase();
-    if (v.includes("left lane")) return "L. Lane";
-    if (v.includes("right lane")) return "R. Lane";
-    if (v.includes("center lane")) return "C. Lane";
+    if (v === "none") return MISSING;
+    if (v.includes("left lane")) return "Left";
+    if (v.includes("right lane")) return "Right";
+    if (v.includes("center lane")) return "Central";
     return titleCase(type) || MISSING;
   };
   const subtitleFor = (sc, lane) => {
     if (sc === "none") return "No analysis yet";
     if (sc === "danger") {
       const l = englishLane(lane);
-      if (l !== MISSING && l !== "Same Lane") return `Object approaching from ${l.replace(" Lane", "").toLowerCase()}`;
-      if (l === "Same Lane") return "Object approaching in same lane";
+      if (l === "Left") return "Object approaching from left";
+      if (l === "Right") return "Object approaching from right";
+      if (l === "Central") return "Object approaching in same lane";
       return "High collision risk detected";
     }
     if (sc === "caution") return "Drive with caution";
@@ -430,31 +433,23 @@ export function initializeSpectra() {
     const metadata = payload?.metadata || {};
     const event = payload?.peakEvent || {};
     const rawImages = event.images || {};
-    const sources = [event, payload];
 
-    const riskRaw = firstValue(sources, ["riskScore", "hazardScore", "risk_score"]);
-    const riskNum = num(riskRaw, null);
+    const riskNum = num(event.riskScore, null);
     const riskScore = riskNum === null ? null : clamp(Math.round(riskNum <= 1 ? riskNum * 100 : riskNum), 0, 100);
-    const explicitBand = firstValue(sources, ["riskBand", "hazardBand", "riskLevel", "band"]);
-    const riskState = firstValue(sources, ["riskState", "risk_state"]);
+    const riskState = event.riskState || null;
 
     const metrics = {
       riskScore,
-      band: titleCase(explicitBand),
       state: riskState ? String(riskState).toUpperCase() : null,
-      ttc: num(firstValue(sources, ["ttcSec", "estimatedTtcSec", "estimated_ttc_sec", "ttc"]), null),
-      nearScore: num(firstValue(sources, ["nearScore", "near_score"]), null),
-      closingSpeed: num(firstValue(sources, ["closingSpeed", "closing_speed"]), null),
-      crossingRisk: num(firstValue(sources, ["crossingRisk", "crossing_risk"]), null),
-      lanePosition: num(firstValue(sources, ["lanePosition", "lane_position"]), null),
-      confidencePct: num(firstValue(sources, ["confidencePct", "confidence_pct"]), null),
-      objectId: firstValue(sources, ["objectId", "object_id"]),
-      objectType: titleCase(firstValue(sources, ["objectType", "object_type"])),
-      approach: titleCase(firstValue(sources, ["approach"])),
-      lane: titleCase(firstValue(sources, ["lane", "primaryLane", "primary_lane"])),
-      bbox: event.bbox || null,
-      motionMagnitude: num(firstValue(sources, ["velocityMagnitude", "velocity_magnitude", "motionMagnitude", "motion_magnitude"]), null),
-      ttcComponents: Array.isArray(event.ttcComponents) ? event.ttcComponents : [],
+      ttc: num(event.ttcSec, null),
+      nearScore: num(event.nearScore, null),
+      closingSpeed: num(event.closingSpeed, null),
+      crossingRisk: num(event.crossingRisk, null),
+      lanePosition: num(event.lanePosition, null),
+      confidencePct: num(event.confidencePct, null),
+      objectId: event.objectId || null,
+      objectType: titleCase(event.objectType || null),
+      lane: titleCase(event.lane || null),
     };
 
     const eventKey = (ev) => `${ev?.frameIndex ?? ""}:${num(ev?.timestampSec, null) ?? ""}`;
@@ -476,25 +471,18 @@ export function initializeSpectra() {
     return {
       images: {
         original: rawImages.original,
-        depth: rawImages.depth,
         road: rawImages.road,
-        motion: rawImages.motion,
         blend: rawImages.blend,
       },
       metrics,
-      elapsedSec: num(metadata.elapsedSec ?? payload?.elapsedSec ?? payload?.elapsed_sec, null),
-      fps: num(metadata.fps ?? payload?.fps, null),
-      frameCount: num(metadata.frameCount ?? payload?.frameCount, null),
-      processedFrames: num(metadata.processedFrames ?? payload?.processedFrames, null),
-      sampledFrames: num(metadata.sampledFrames ?? payload?.sampledFrames, null),
-      summary: event.summary || payload?.summary || null,
-      reasons: Array.isArray(event.reasons) ? event.reasons : [],
-      laneMetrics: Array.isArray(event.laneMetrics) ? event.laneMetrics : [],
-      objects: Array.isArray(event.objects) ? event.objects : (Array.isArray(event.detections) ? event.detections : []),
-
+      elapsedSec: num(metadata.elapsedSec, null),
+      fps: num(metadata.fps, null),
+      frameCount: num(metadata.frameCount, null),
+      processedFrames: num(metadata.processedFrames, null),
+      objects: Array.isArray(event.objects) ? event.objects : [],
       events,
       timelineRows: Array.isArray(payload?.timelineRows) ? payload.timelineRows : [],
-      sourceName: metadata.sourceName || payload?.sourceName || fileInput.files[0]?.name || null,
+      sourceName: metadata.sourceName || fileInput.files[0]?.name || null,
     };
   }
 
@@ -590,8 +578,8 @@ export function initializeSpectra() {
     }
   }
   function renderRiskBannerFromMetrics(m) {
-    const sc = stateClass(m?.state || m?.band);
-    applyRiskBannerState({ stateLabel: m?.state || (m?.band ? m.band.toUpperCase() : null), ttc: m?.ttc, lane: m?.lane, sc });
+    const sc = stateClass(m?.state);
+    applyRiskBannerState({ stateLabel: m?.state, ttc: m?.ttc, lane: m?.lane, sc });
   }
 
 
@@ -608,20 +596,18 @@ export function initializeSpectra() {
   function normalizeThreatObject(raw, fallback = {}) {
     if (!raw) return null;
     const m = raw.metrics || raw;
-    const id = firstValue([m, raw, fallback], ["objectId", "object_id", "trackId", "track_id", "id"]);
-    const ttcRaw = firstValue([m, raw, fallback], ["ttc", "ttcSec", "estimatedTtcSec", "estimated_ttc_sec", "ttc_sec"]);
-    const stateRaw = firstValue([m, raw, fallback], ["riskState", "risk_state", "state", "riskBand", "risk_band", "band"]);
+    const id = m.objectId || raw.objectId || null;
+    const ttcRaw = m.ttcSec ?? raw.ttcSec ?? null;
+    const stateRaw = m.riskState || raw.riskState || null;
     const ttc = normalizeDisplayTtc(stateRaw, ttcRaw);
-    const confidencePct = num(firstValue([m, raw, fallback], ["confidencePct", "confidence_pct"]), null);
-    const confidence = confidencePct === null
-      ? num(firstValue([m, raw, fallback], ["confidence", "structureSignal", "structure_signal"]), null)
-      : confidencePct / 100;
-    const score = num(firstValue([m, raw, fallback], ["riskScore", "risk_score", "score"]), null);
-    const near = num(firstValue([m, raw, fallback], ["nearScore", "near_score", "meanDepth", "nearRatio"]), null);
-    const closing = num(firstValue([m, raw, fallback], ["closingSpeed", "closing_speed", "expansionEnergy", "motionEnergy", "velocityMagnitude", "velocity_magnitude"]), null);
-    const crossing = num(firstValue([m, raw, fallback], ["crossingRisk", "crossing_risk"]), null);
-    const lane = titleCase(firstValue([m, raw, fallback], ["lane", "primaryLane", "primary_lane"]));
-    const objectType = titleCase(firstValue([m, raw, fallback], ["objectType", "object_type", "className", "class_name", "type"]));
+    const confidencePct = num(m.confidencePct ?? raw.confidencePct, null);
+    const confidence = confidencePct === null ? null : confidencePct / 100;
+    const score = num(m.riskScore ?? raw.riskScore, null);
+    const near = num(m.nearScore ?? raw.nearScore, null);
+    const closing = num(m.closingSpeed ?? raw.closingSpeed, null);
+    const crossing = num(m.crossingRisk ?? raw.crossingRisk, null);
+    const lane = titleCase(m.lane || raw.lane || null);
+    const objectType = titleCase(m.objectType || raw.objectType || null);
     let sc = stateClass(stateRaw);
     if (sc === "none") {
       if (ttc !== null && ttc < 1.0) sc = "danger";
@@ -639,7 +625,7 @@ export function initializeSpectra() {
       nearScore: near,
       closingSpeed: closing,
       confidence,
-      lanePosition: num(firstValue([m, raw, fallback], ["lanePosition", "lane_position"]), null),
+      lanePosition: num(m.lanePosition ?? raw.lanePosition, null),
       riskScore: score,
       stateClass: sc,
     };
@@ -647,18 +633,11 @@ export function initializeSpectra() {
 
   function collectThreatObjects(source = null) {
     const candidates = [];
-    const pushMany = (items) => {
-      if (Array.isArray(items)) candidates.push(...items);
-    };
-    pushMany(source?.objects);
-    pushMany(source?.detections);
-    pushMany(source?.laneMetrics);
-    pushMany(source?.event?.objects);
-    pushMany(source?.event?.detections);
-    pushMany(source?.event?.laneMetrics);
-    const hasObjectCollections = candidates.length > 0;
+    if (Array.isArray(source?.objects)) candidates.push(...source.objects);
+    if (Array.isArray(source?.event?.objects)) candidates.push(...source.event.objects);
+    const hasObjects = candidates.length > 0;
     if (source?.metrics) candidates.push(source.metrics);
-    if (source && !Array.isArray(source) && !hasObjectCollections && !source.metrics && !source.event) {
+    if (source && !Array.isArray(source) && !hasObjects && !source.metrics && !source.event) {
       candidates.push(source);
     }
 
@@ -682,21 +661,37 @@ export function initializeSpectra() {
   }
 
   function updateThreatDetail(metric) {
-    byId("threat-id").textContent = metric?.id ? `#${metric.id}` : MISSING;
-    byId("threat-object").textContent = metric?.objectType ? shortType(metric.objectType) : MISSING;
-    byId("threat-lane").textContent = metric?.lane ? shortLane(metric.lane) : MISSING;
-    byId("threat-ttc").textContent = ttcLabel(metric?.ttc);
-    setSignalBar("near", metric?.nearScore);
-    setSignalBar("closing", metric?.closingSpeed);
-    setSignalBar("crossing", metric?.crossingRisk);
-    setSignalBar("confidence", metric?.confidence);
+    let display = metric;
+    if (state.threatMode === "avg" && metric?.id) {
+      const stats = state.trackedObjectStats[String(metric.id)];
+      if (stats) {
+        const avg = (f) => stats[f].count > 0 ? stats[f].sum / stats[f].count : null;
+        display = {
+          ...metric,
+          ttc: avg("ttc"),
+          nearScore: avg("near"),
+          closingSpeed: avg("approach"),
+          crossingRisk: avg("crossing"),
+          confidence: avg("confidence"),
+        };
+      }
+    }
+
+    byId("threat-id").textContent = display?.id ? `#${display.id}` : MISSING;
+    byId("threat-object").textContent = display?.objectType ? shortType(display.objectType) : MISSING;
+    byId("threat-lane").textContent = display?.lane ? shortLane(display.lane) : MISSING;
+    byId("threat-ttc").textContent = ttcLabel(display?.ttc);
+    setSignalBar("near", display?.nearScore);
+    setSignalBar("closing", display?.closingSpeed);
+    setSignalBar("crossing", display?.crossingRisk);
+    setSignalBar("confidence", display?.confidence);
   }
 
   function renderThreatSignals(source = null) {
     const objects = collectThreatObjects(source);
     const list = byId("detection-list");
     const count = byId("threat-count");
-    if (count) count.textContent = String(objects.length);
+    if (count) count.innerHTML = `Detected IDs: <span>${objects.length}</span>`;
 
     const selectedExists = objects.some((item) => item.id !== null && item.id === String(state.selectedObjectId));
     if (!selectedExists) state.selectedObjectId = objects[0]?.id || null;
@@ -711,6 +706,12 @@ export function initializeSpectra() {
         list.appendChild(empty);
       } else {
         objects.forEach((item) => {
+          let displayTtc = item.ttc;
+          if (state.threatMode === "avg" && item.id) {
+            const stats = state.trackedObjectStats[String(item.id)];
+            if (stats && stats.ttc.count > 0) displayTtc = stats.ttc.sum / stats.ttc.count;
+          }
+
           const button = document.createElement("button");
           button.type = "button";
           button.className = `detection-row is-${item.stateClass}${selected && item.id === selected.id ? " is-selected" : ""}`;
@@ -718,7 +719,7 @@ export function initializeSpectra() {
           button.innerHTML = `
             <span class="detection-dot" aria-hidden="true"></span>
             <span class="detection-main">${shortType(item.objectType) || MISSING}</span>
-            <span class="detection-ttc">${ttcLabel(item.ttc)}</span>
+            <span class="detection-ttc">${ttcLabel(displayTtc)}</span>
           `;
           button.addEventListener("click", () => {
             state.selectedObjectId = item.id;
@@ -795,38 +796,60 @@ export function initializeSpectra() {
       const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || resultImages.original || resultImages.blend);
       const m = ev.metrics || ev || {};
       const displayTtcVal = item.ttc;
-      const nearVal = num(m.nearScore ?? m.near_score, null);
-      const speedVal = num(m.closingSpeed ?? m.closing_speed ?? m.velocityMagnitude ?? m.velocity_magnitude, null);
+      const nearVal = num(m.nearScore, null);
+      const speedVal = num(m.closingSpeed, null);
+      const crossVal = num(m.crossingRisk, null);
+      const confVal = num(m.confidence, null);
 
       card.innerHTML = `
         <div class="card-visual">
           ${thumbImg ? `<img src="${thumbImg}" alt="Event">` : '<div style="height:100%; display:grid; place-items:center; color:var(--muted); font-size:11px; font-weight:700;">—</div>'}
         </div>
         <div class="card-info">
-          <div class="card-metrics-grid">
-            <div class="metric-box m-risk">
-              <span class="m-label">Status</span>
-              <span class="m-value" style="color:rgba(var(--evrgb),1);">${sc.toUpperCase()}</span>
+          <div class="card-header">
+            <span class="status">${sc.toUpperCase()}</span>
+            <span class="time">${formatSeconds(ts)}</span>
+          </div>
+
+          <div class="card-boxes">
+            <div class="box-item">
+              <span class="lbl">ID</span>
+              <span class="val">#${ev.object_id || ev.objectId || (idx + 1)}</span>
             </div>
-            <div class="metric-box">
-              <span class="m-label">Time</span>
-              <span class="m-value">${formatSeconds(ts)}</span>
+            <div class="box-item">
+              <span class="lbl">TYPE</span>
+              <span class="val">${shortType(ev.objectType || m.objectType)}</span>
             </div>
-            <div class="metric-box m-risk">
-              <span class="m-label">TTC</span>
-              <span class="m-value">${ttcLabel(displayTtcVal)}</span>
+            <div class="box-item">
+              <span class="lbl">TTC</span>
+              <span class="val">${ttcLabel(displayTtcVal)}</span>
             </div>
-            <div class="metric-box">
-              <span class="m-label">Near</span>
-              <span class="m-value">${nearVal !== null ? (nearVal * 100).toFixed(0) + '%' : '—'}</span>
+            <div class="box-item">
+              <span class="lbl">LANE</span>
+              <span class="val">${shortLane(ev.lane || m.lane) || '—'}</span>
             </div>
-            <div class="metric-box">
-              <span class="m-label">Speed</span>
-              <span class="m-value">${speedVal !== null ? (speedVal * 100).toFixed(0) + '%' : '—'}</span>
+          </div>
+
+          <div class="card-bars">
+            <div class="bar-row bar-proximity">
+              <span class="lbl">Proximity</span>
+              <div class="bar-outer"><div class="bar-inner" style="width: ${(nearVal || 0) * 100}%"></div></div>
+              <span class="val">${nearVal !== null ? (nearVal * 100).toFixed(0) + '%' : '—'}</span>
             </div>
-            <div class="metric-box">
-              <span class="m-label">Type</span>
-              <span class="m-value">${shortType(ev.objectType || m.objectType)}</span>
+            <div class="bar-row bar-approach">
+              <span class="lbl">Approach</span>
+              <div class="bar-outer"><div class="bar-inner" style="width: ${(speedVal || 0) * 100}%"></div></div>
+              <span class="val">${speedVal !== null ? (speedVal * 100).toFixed(0) + '%' : '—'}</span>
+            </div>
+            <div class="bar-row bar-crossing">
+              <span class="lbl">Crossing</span>
+              <div class="bar-outer"><div class="bar-inner" style="width: ${(crossVal || 0) * 100}%"></div></div>
+              <span class="val">${crossVal !== null ? (crossVal * 100).toFixed(0) + '%' : '—'}</span>
+            </div>
+            <div class="bar-row bar-confidence">
+              <span class="lbl">Confidence</span>
+              <div class="bar-outer"><div class="bar-inner" style="width: ${(confVal || 0) * 100}%"></div></div>
+              <span class="val">${confVal !== null ? (confVal * 100).toFixed(0) + '%' : '—'}</span>
             </div>
           </div>
         </div>
@@ -1000,12 +1023,11 @@ export function initializeSpectra() {
     const totalEventsEl = byId("stat-total-events");
     if (totalEventsEl) totalEventsEl.textContent = String(eventItems.length);
 
-    // Light EMA on per-frame TTC: smooths single-frame jitter (which made
-    // the chart spike between extremes) while preserving real risk trends.
+    // Apply heavier smoothing for a more stable, premium chart response
     const chartPoints = (() => {
       const filtered = points.filter((p) => p.ttc !== null && p.ttc > 0.05);
       if (!filtered.length) return [];
-      const alpha = 0.35;
+      const alpha = 0.15; // Increased smoothing (reduced alpha) to prevent "wavy" look
       let smoothed = filtered[0].ttc;
       return filtered.map((p, idx) => {
         smoothed = idx === 0 ? p.ttc : alpha * p.ttc + (1 - alpha) * smoothed;
@@ -1018,7 +1040,6 @@ export function initializeSpectra() {
         if (item.ttc === null || item.ttc <= 0.05) return;
         chartPoints.push({
           t: item.ts,
-          sc: item.sc,
           ttc: item.ttc,
           x: clamp(xForTime(item.ts), 0, W),
           y: yForTtc(item.ttc),
@@ -1028,26 +1049,29 @@ export function initializeSpectra() {
     }
 
     if (chartPoints.length) {
-      const linePath = chartPoints
-        .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
-        .join(" ");
+      // Render as a single, consistent color for a cleaner "algorithm" look
+      const path = chartPoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+      const singleColor = "#3b82f6"; // Premium blue signal
+      
+      // Glow effect
       lineGroup.appendChild(createSvg("path", {
-        d: linePath,
+        d: path,
         fill: "none",
-        stroke: "rgba(239,68,68,0.25)",
-        "stroke-width": 6,
+        stroke: singleColor,
+        "stroke-width": 4.5,
+        "stroke-opacity": 0.15,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
-        "vector-effect": "non-scaling-stroke",
       }));
+      
+      // Main line
       lineGroup.appendChild(createSvg("path", {
-        d: linePath,
+        d: path,
         fill: "none",
-        stroke: "#ef4444",
-        "stroke-width": 2.4,
+        stroke: singleColor,
+        "stroke-width": 2.2,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
-        "vector-effect": "non-scaling-stroke",
       }));
     }
 
@@ -1361,12 +1385,16 @@ export function initializeSpectra() {
     }
 
     if (Array.isArray(msg.objects) && msg.objects.length) {
+      updateTrackedObjectStats(msg.objects);
       renderThreatSignals({ objects: msg.objects });
     } else if (Array.isArray(msg.detections) && msg.detections.length) {
+      updateTrackedObjectStats(msg.detections);
       renderThreatSignals({ detections: msg.detections });
     } else if (Array.isArray(msg.laneMetrics) && msg.laneMetrics.length) {
+      updateTrackedObjectStats(msg.laneMetrics);
       renderThreatSignals({ laneMetrics: msg.laneMetrics });
     } else {
+      updateTrackedObjectStats([msg]);
       renderThreatSignals({
         objectType: msg.objectType,
         lane: msg.lane,
@@ -1389,6 +1417,41 @@ export function initializeSpectra() {
     if (!state.analyzing && (rowsChanged || eventsChanged)) {
       renderTtcChart({ timelineRows: state.liveTimelineRows, events: state.liveEvents });
     }
+  }
+
+  function updateTrackedObjectStats(objects) {
+    if (!Array.isArray(objects)) return;
+    objects.forEach((obj) => {
+      const id = obj.objectId || obj.id;
+      if (!isReal(id)) return;
+      const sId = String(id);
+      if (!state.trackedObjectStats[sId]) {
+        state.trackedObjectStats[sId] = {
+          ttc: { sum: 0, count: 0 },
+          near: { sum: 0, count: 0 },
+          approach: { sum: 0, count: 0 },
+          crossing: { sum: 0, count: 0 },
+          confidence: { sum: 0, count: 0 },
+        };
+      }
+      const s = state.trackedObjectStats[sId];
+      const m = obj.metrics || obj;
+      
+      const ttc = num(m.ttcSec, null);
+      if (ttc !== null) { s.ttc.sum += ttc; s.ttc.count++; }
+
+      const near = num(m.nearScore, null);
+      if (near !== null) { s.near.sum += near; s.near.count++; }
+
+      const speed = num(m.closingSpeed, null);
+      if (speed !== null) { s.approach.sum += speed; s.approach.count++; }
+
+      const cross = num(m.crossingRisk, null);
+      if (cross !== null) { s.crossing.sum += cross; s.crossing.count++; }
+
+      const conf = num(m.confidencePct, null);
+      if (conf !== null) { s.confidence.sum += (conf > 1 ? conf / 100 : conf); s.confidence.count++; }
+    });
   }
 
   function startLivePreview() {
@@ -1579,6 +1642,7 @@ export function initializeSpectra() {
     state.liveTimelineRows = [];
     state.liveEvents = [];
     state.events = [];
+    state.trackedObjectStats = {};
     renderThreatSignals(null);
     renderTimeline({ events: [] });
     renderTtcChart({ timelineRows: [], events: [] });
@@ -1872,6 +1936,16 @@ export function initializeSpectra() {
     byId("view-json-btn")?.addEventListener("click", openJsonView);
     byId("download-json-btn")?.addEventListener("click", downloadJson);
     byId("copy-json-btn")?.addEventListener("click", copyJson);
+    
+    // Threat Mode Toggle
+    const toggleThreatMode = (mode) => {
+      state.threatMode = mode;
+      byId("toggle-mode-frame").classList.toggle("is-active", mode === "frame");
+      byId("toggle-mode-avg").classList.toggle("is-active", mode === "avg");
+      renderThreatSignals(state.currentResult || state.lastResult);
+    };
+    byId("toggle-mode-frame")?.addEventListener("click", () => toggleThreatMode("frame"));
+    byId("toggle-mode-avg")?.addEventListener("click", () => toggleThreatMode("avg"));
 
     document.querySelectorAll("[data-telemetry-close]").forEach(el => el.addEventListener("click", closeTelemetryDrawer));
     

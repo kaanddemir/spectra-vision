@@ -152,6 +152,15 @@ class IoUTracker:
 
         return [self._tracks[tid] for tid in updated_ids]
 
+    def propagate(self) -> list[Track]:
+        """Return all surviving tracks without consuming a detection frame.
+
+        Called on frames where YOLO is intentionally skipped. Tracks are
+        returned as-is so risk estimation continues; miss counters are not
+        incremented because we chose not to look, not because objects vanished.
+        """
+        return list(self._tracks.values())
+
     def reset(self) -> None:
         self._tracks.clear()
         self._next_id = 1

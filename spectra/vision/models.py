@@ -18,7 +18,7 @@ import numpy as np
 _DEFAULT_DEPTH_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "depth_anything_v2_small.onnx"
 _DEPTH_MODEL_PATH = Path(os.environ.get("SPECTRA_DEPTH_MODEL", str(_DEFAULT_DEPTH_MODEL_PATH)))
 
-_INPUT_SIZE = int(os.environ.get("SPECTRA_DEPTH_INPUT", "392"))
+_INPUT_SIZE = int(os.environ.get("SPECTRA_DEPTH_INPUT", "256"))
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 

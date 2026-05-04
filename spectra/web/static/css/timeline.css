@@ -71,7 +71,7 @@
   gap: 12px;
   padding: 12px 16px;
   flex: 0 0 auto;
-  min-height: 130px;
+  min-height: 360px;
   scrollbar-width: thin;
 }
 
@@ -101,80 +101,104 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100px;
+  height: 100%;
 }
 
 .event-card {
   --evrgb: 88, 104, 122;
-  flex: 0 0 calc(50% - 6px);
-  min-width: 320px;
+  flex: 0 0 380px;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-2);
-  backdrop-filter: blur(12px);
-  /* Inset shadow stays on top of the image and stays uniform on all 4 sides */
-  box-shadow: inset 0 0 0 1px rgba(var(--evrgb), 0.4), 0 4px 16px rgba(0,0,0,0.3);
-  transition: all 240ms cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgba(var(--evrgb), 0.25), 0 12px 36px rgba(0,0,0,0.45);
+  transition: all 350ms cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
   overflow: hidden;
-  height: 100px;
+  height: 340px;
+  margin-bottom: 4px;
 }
 .event-card:hover {
-  box-shadow: inset 0 0 0 1px rgba(var(--evrgb), 0.8), 0 12px 24px rgba(0,0,0,0.4);
-  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1px rgba(var(--evrgb), 0.6), 0 24px 64px rgba(0,0,0,0.6);
+  transform: translateY(-8px) scale(1.02);
+  background: var(--panel-3);
+  z-index: 50;
 }
 .event-card.is-active {
-  box-shadow: inset 0 0 0 2px rgba(var(--evrgb), 1), 0 12px 24px rgba(0,0,0,0.4);
+  box-shadow: inset 0 0 0 2.5px rgba(var(--evrgb), 1), 0 24px 64px rgba(0,0,0,0.6);
   background: var(--panel-3);
+  transform: translateY(-4px);
 }
 
 .event-card .card-visual {
-  width: 160px;
-  height: 100%;
+  width: 100%;
+  height: 140px;
   position: relative;
   flex-shrink: 0;
   background: #000;
+  border-bottom: 1px solid var(--border-soft);
 }
 .event-card .card-visual img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: opacity 0.3s ease;
 }
 
 .event-card .card-info {
   flex: 1;
-  padding: 10px 16px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  gap: 14px;
   min-width: 0;
 }
 
-.card-metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px 16px;
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: -4px;
 }
-.metric-box {
+.card-header .status { font-weight: 800; font-size: 14px; color: rgba(var(--evrgb), 1); letter-spacing: 0.02em; }
+.card-header .time { font-size: 11px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.card-boxes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.box-item {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 4px;
+  text-align: center;
+}
+.box-item .lbl { font-size: 7.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 2px; letter-spacing: 0.03em; }
+.box-item .val { font-size: 10.5px; font-weight: 800; color: var(--text); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.card-bars {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 7px;
 }
-.metric-box .m-label {
-  font-size: 8.5px;
-  color: var(--muted);
-  text-transform: uppercase;
-  font-weight: 700;
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.metric-box .m-value {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--text);
-}
-.metric-box.m-risk .m-value { color: rgba(var(--evrgb), 1); }
+.bar-row .lbl { width: 70px; font-size: 9px; font-weight: 700; color: var(--muted); text-transform: capitalize; }
+.bar-row .bar-outer { flex: 1; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; }
+.bar-row .bar-inner { height: 100%; border-radius: 2px; transition: width 0.4s ease-out; }
+
+.bar-proximity .bar-inner { background: #38bdf8; }
+.bar-approach .bar-inner  { background: #f87171; }
+.bar-crossing .bar-inner  { background: #fbbf24; }
+.bar-confidence .bar-inner { background: #4ade80; }
+
+.bar-row .val { width: 30px; font-size: 10px; font-weight: 700; color: var(--text); text-align: right; }
 
 .event-card.ev-danger  { --evrgb: var(--danger-rgb); }
 .event-card.ev-caution { --evrgb: var(--caution-rgb); }
