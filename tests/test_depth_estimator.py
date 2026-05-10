@@ -57,8 +57,11 @@ class TestDepthEstimator:
         assert 0.0 <= float(result.near_map.min()) <= float(result.near_map.max()) <= 1.0
 
     def test_estimate_frame_depth_errors_when_onnx_missing(self, monkeypatch):
-        monkeypatch.setattr(models, "get_depth_model", lambda: None)
+        def raise_missing():
+            raise RuntimeError("Depth Anything ONNX model unavailable")
+
+        monkeypatch.setattr(models, "get_depth_model", raise_missing)
         frame = preprocess_frame(np.zeros((32, 48, 3), dtype=np.uint8), max_side=48)
 
-        with pytest.raises(RuntimeError, match="Depth Anything ONNX model missing"):
+        with pytest.raises(RuntimeError, match="Depth Anything ONNX model unavailable"):
             estimate_frame_depth(frame)

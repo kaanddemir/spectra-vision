@@ -55,118 +55,6 @@ def default_road_roi(shape: tuple[int, int] | tuple[int, int, int]) -> RoadROI:
     )
 
 
-def estimate_road_roi(frame_bgr: np.ndarray) -> RoadROI:
-    """Estimate a lane-bounded road ROI with a fixed default."""
-
-    height, width = frame_bgr.shape[:2]
-    default = default_road_roi(frame_bgr.shape)
-    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 60, 160)
-
-    search_mask = np.zeros((height, width), dtype=np.uint8)
-    search_poly = np.array(
-        [
-            [int(width * 0.03), height - 1],
-            [int(width * 0.39), int(height * 0.50)],
-            [int(width * 0.61), int(height * 0.50)],
-            [int(width * 0.97), height - 1],
-        ],
-        dtype=np.int32,
-    )
-    cv2.fillPoly(search_mask, [search_poly], 255)
-    edges = cv2.bitwise_and(edges, search_mask)
-
-    lines = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180,
-        threshold=max(18, width // 35),
-        minLineLength=max(24, width // 12),
-        maxLineGap=max(12, width // 40),
-    )
-    if lines is None:
-        return default
-
-    left_points: list[tuple[int, int]] = []
-    right_points: list[tuple[int, int]] = []
-    for item in lines[:, 0]:
-        x1, y1, x2, y2 = (int(v) for v in item)
-        dx = x2 - x1
-        dy = y2 - y1
-        if abs(dx) < 2:
-            continue
-        slope = dy / float(dx)
-        if abs(slope) < 0.35 or abs(slope) > 4.0:
-            continue
-        if max(y1, y2) < int(height * 0.56):
-            continue
-        center_x = (x1 + x2) / 2.0
-        if slope < 0 and center_x < width * 0.58:
-            left_points.extend([(x1, y1), (x2, y2)])
-        elif slope > 0 and center_x > width * 0.42:
-            right_points.extend([(x1, y1), (x2, y2)])
-
-    y_top = int(height * 0.58)
-    y_bottom = height - 1
-    left_line = _fit_line(left_points, y_top, y_bottom, width)
-    right_line = _fit_line(right_points, y_top, y_bottom, width)
-
-    detected_count = int(left_line is not None) + int(right_line is not None)
-    if detected_count == 0:
-        return default
-
-    left_line = left_line or default.left_line
-    right_line = right_line or default.right_line
-    if left_line is None or right_line is None:
-        return default
-
-    lx_top, ly_top, lx_bottom, ly_bottom = left_line
-    rx_top, ry_top, rx_bottom, ry_bottom = right_line
-    if rx_top - lx_top < width * 0.06 or rx_bottom - lx_bottom < width * 0.18:
-        return default
-
-    polygon = np.array(
-        [
-            [lx_top, ly_top],
-            [rx_top, ry_top],
-            [rx_bottom, ry_bottom],
-            [lx_bottom, ly_bottom],
-        ],
-        dtype=np.int32,
-    )
-    mask = _polygon_mask((height, width), polygon)
-    confidence = 0.55 if detected_count == 1 else 0.85
-    return RoadROI(
-        mask=mask,
-        polygon=polygon,
-        left_line=left_line,
-        right_line=right_line,
-        confidence=confidence,
-        detected=True,
-    )
-
-
-def _fit_line(
-    points: list[tuple[int, int]],
-    y_top: int,
-    y_bottom: int,
-    width: int,
-) -> Line | None:
-    if len(points) < 4:
-        return None
-
-    xs = np.array([p[0] for p in points], dtype=np.float32)
-    ys = np.array([p[1] for p in points], dtype=np.float32)
-    if float(np.max(ys) - np.min(ys)) < 8.0:
-        return None
-
-    slope, intercept = np.polyfit(ys, xs, 1)
-    x_top = int(np.clip((slope * y_top) + intercept, 0, width - 1))
-    x_bottom = int(np.clip((slope * y_bottom) + intercept, 0, width - 1))
-    return (x_top, y_top, x_bottom, y_bottom)
-
-
 def _polygon_mask(shape: tuple[int, int], polygon: np.ndarray) -> np.ndarray:
     mask = np.zeros(shape, dtype=np.uint8)
     cv2.fillPoly(mask, [polygon.astype(np.int32)], 1)
@@ -174,8 +62,6 @@ def _polygon_mask(shape: tuple[int, int], polygon: np.ndarray) -> np.ndarray:
 
 
 _DEFAULT_VP_Y_FRACTION = 0.55
-_VP_EMA_RISE = 0.40
-_VP_EMA_FALL = 0.15
 
 
 @dataclass(frozen=True)
@@ -325,36 +211,267 @@ def lane_corridor_relevance(
     return float(np.clip((0.20 + (0.80 * proximity)) * (0.40 + (0.60 * vertical_weight)), 0.0, 1.0))
 
 
-class VanishingPointSmoother:
-    """EMA on the vanishing point so frame-frame Hough jitter is absorbed."""
+def _fit_polyline_to_y_range(
+    points: np.ndarray,
+    y_top: int,
+    y_bottom: int,
+    width: int,
+) -> Line | None:
+    """Fit x = a*y + b to a polyline and return endpoints at y_top / y_bottom."""
 
-    def __init__(
+    if points.shape[0] < 2:
+        return None
+    xs = points[:, 0].astype(np.float32)
+    ys = points[:, 1].astype(np.float32)
+    if float(np.max(ys) - np.min(ys)) < 8.0:
+        return None
+    slope, intercept = np.polyfit(ys, xs, 1)
+    x_top = int(np.clip((slope * y_top) + intercept, 0, width - 1))
+    x_bottom = int(np.clip((slope * y_bottom) + intercept, 0, width - 1))
+    return (x_top, y_top, x_bottom, y_bottom)
+
+
+def estimate_road_roi_from_lanes(
+    lanes: list[np.ndarray],
+    *,
+    width: int,
+    height: int,
+) -> RoadROI:
+    """Build a RoadROI from UFLDv2 lane polylines.
+
+    The input is a 4-element list [left-left, left, right, right-right] of
+    (N, 2) ``(x, y)`` polylines. Empty arrays signal a missing lane. The ego
+    corridor is defined strictly by the inner pair (indices 1 and 2).
+
+    We never promote an outer lane to ego — doing so traces the road edges
+    instead of the ego lane, which is worse than dropping to the cached or
+    default ROI for that frame. When the inner pair is incomplete this function
+    returns a non-detected ROI so the caller's fallback chain
+    (cached_road_roi -> default) takes over.
+    """
+
+    y_top = int(height * 0.58)
+    y_bottom = height - 1
+
+    left = lanes[1] if len(lanes) > 1 and lanes[1].size else np.empty((0, 2), dtype=np.float32)
+    right = lanes[2] if len(lanes) > 2 and lanes[2].size else np.empty((0, 2), dtype=np.float32)
+
+    left_line = _fit_polyline_to_y_range(left, y_top, y_bottom, width) if left.size else None
+    right_line = _fit_polyline_to_y_range(right, y_top, y_bottom, width) if right.size else None
+
+    detected_count = int(left_line is not None) + int(right_line is not None)
+    if detected_count == 0:
+        return default_road_roi((height, width))
+
+    if left_line is None or right_line is None:
+        return default_road_roi((height, width))
+
+    lx_top, ly_top, lx_bottom, ly_bottom = left_line
+    rx_top, ry_top, rx_bottom, ry_bottom = right_line
+    # Sanity-check at the bottom only. UFLD often detects lanes confidently
+    # only in the lower portion of the frame; polyfit extrapolation up to
+    # y_top can cross the lines even when the underlying data is good. The
+    # bottom separation is what actually matters for ego-lane assignment.
+    if rx_bottom - lx_bottom < width * 0.12:
+        return default_road_roi((height, width))
+    # If extrapolated tops cross, snap them to the bottom slope so the
+    # polygon stays well-formed without throwing the detection away.
+    if rx_top - lx_top < width * 0.02:
+        midpoint_top = (lx_top + rx_top) // 2
+        margin = max(int(width * 0.01), 4)
+        lx_top = max(0, midpoint_top - margin)
+        rx_top = min(width - 1, midpoint_top + margin)
+        left_line = (lx_top, ly_top, lx_bottom, ly_bottom)
+        right_line = (rx_top, ry_top, rx_bottom, ry_bottom)
+
+    polygon = np.array(
+        [
+            [lx_top, ly_top],
+            [rx_top, ry_top],
+            [rx_bottom, ry_bottom],
+            [lx_bottom, ly_bottom],
+        ],
+        dtype=np.int32,
+    )
+    mask = _polygon_mask((height, width), polygon)
+    # Both inner lines from UFLDv2 are treated as a strong signal.
+    confidence = 0.75 if detected_count == 1 else 0.92
+    return RoadROI(
+        mask=mask,
+        polygon=polygon,
+        left_line=left_line,
+        right_line=right_line,
+        confidence=confidence,
+        detected=True,
+    )
+
+
+class LaneKalman:
+    """Constant-velocity Kalman filter on the four lane endpoint x-positions.
+
+    State vector: ``[lx_top, lx_bot, rx_top, rx_bot, vlx_top, vlx_bot, vrx_top, vrx_bot]``.
+    Smoothing happens in image-x space at fixed y-anchors (top/bottom of the
+    detection band), so it is independent of whether the source is UFLDv2 or
+    the fixed default. The same smoother absorbs UFLDv2 row-anchor flicker.
+    """
+
+    _STATE_DIM = 8
+    _MEAS_DIM = 4
+
+    def __init__(self, *, process_var: float = 4.0, measurement_var_high_conf: float = 6.0) -> None:
+        self._process_var = float(process_var)
+        self._meas_var_hi = float(measurement_var_high_conf)
+        self._initialized = False
+        self._x = np.zeros((self._STATE_DIM, 1), dtype=np.float32)
+        self._P = np.eye(self._STATE_DIM, dtype=np.float32) * 100.0
+
+        F = np.eye(self._STATE_DIM, dtype=np.float32)
+        for i in range(4):
+            F[i, i + 4] = 1.0  # x += v
+        self._F = F
+
+        H = np.zeros((self._MEAS_DIM, self._STATE_DIM), dtype=np.float32)
+        for i in range(4):
+            H[i, i] = 1.0
+        self._H = H
+
+        Q = np.eye(self._STATE_DIM, dtype=np.float32) * (self._process_var * 0.25)
+        for i in range(4, 8):
+            Q[i, i] = self._process_var
+        self._Q = Q
+
+    def update(
         self,
+        left_line: Line | None,
+        right_line: Line | None,
+        confidence: float,
+    ) -> tuple[Line | None, Line | None]:
+        """Smooth lane endpoints. Returns the filtered (left, right) lines.
+
+        When both lines are missing we predict forward (no measurement
+        update) so the corridor coasts through brief detection gaps.
+        """
+
+        if left_line is None and right_line is None:
+            if not self._initialized:
+                return None, None
+            self._predict()
+            return self._emit(left_line, right_line)
+
+        # Anchor y values come from whichever UFLDv2 line is present; endpoints
+        # are pinned at the same y_top / y_bottom so this is consistent.
+        ref_line = left_line if left_line is not None else right_line
+        assert ref_line is not None
+        y_top = float(ref_line[1])
+        y_bottom = float(ref_line[3])
+
+        meas = np.zeros((self._MEAS_DIM, 1), dtype=np.float32)
+        meas_mask = np.zeros(self._MEAS_DIM, dtype=bool)
+        if left_line is not None:
+            meas[0, 0] = float(left_line[0])
+            meas[1, 0] = float(left_line[2])
+            meas_mask[0] = True
+            meas_mask[1] = True
+        if right_line is not None:
+            meas[2, 0] = float(right_line[0])
+            meas[3, 0] = float(right_line[2])
+            meas_mask[2] = True
+            meas_mask[3] = True
+
+        if not self._initialized:
+            for i in range(4):
+                if meas_mask[i]:
+                    self._x[i, 0] = meas[i, 0]
+            self._initialized = True
+            return self._emit(left_line, right_line, y_top=y_top, y_bottom=y_bottom)
+
+        self._predict()
+
+        # Per-component Kalman update — confidence raises measurement
+        # variance so low-confidence frames bend the state less.
+        gain = float(np.clip(confidence, 0.05, 1.0))
+        meas_var = self._meas_var_hi / max(gain, 0.1)
+        for i in range(self._MEAS_DIM):
+            if not meas_mask[i]:
+                continue
+            H_row = self._H[i : i + 1]
+            S = float(H_row @ self._P @ H_row.T) + meas_var
+            K = (self._P @ H_row.T) / S
+            innovation = float(meas[i, 0] - (H_row @ self._x))
+            self._x = self._x + (K * innovation)
+            self._P = (np.eye(self._STATE_DIM, dtype=np.float32) - (K @ H_row)) @ self._P
+
+        return self._emit(left_line, right_line, y_top=y_top, y_bottom=y_bottom)
+
+    def _predict(self) -> None:
+        self._x = self._F @ self._x
+        self._P = (self._F @ self._P @ self._F.T) + self._Q
+
+    def _emit(
+        self,
+        left_line: Line | None,
+        right_line: Line | None,
         *,
-        rise_alpha: float = _VP_EMA_RISE,
-        fall_alpha: float = _VP_EMA_FALL,
-    ) -> None:
-        self.rise_alpha = float(rise_alpha)
-        self.fall_alpha = float(fall_alpha)
-        self._state: tuple[float, float] | None = None
+        y_top: float | None = None,
+        y_bottom: float | None = None,
+    ) -> tuple[Line | None, Line | None]:
+        # Reuse last-known anchors when a side is missing in the current frame.
+        if y_top is None or y_bottom is None:
+            ref = left_line or right_line
+            if ref is not None:
+                y_top = float(ref[1])
+                y_bottom = float(ref[3])
+            else:
+                return None, None
 
-    def update(self, raw_vp: tuple[float, float], confidence: float) -> tuple[float, float]:
-        if self._state is None:
-            self._state = raw_vp
-            return raw_vp
-
-        gain = float(np.clip(confidence, 0.0, 1.0))
-        prev_x, prev_y = self._state
-        raw_x, raw_y = raw_vp
-
-        def _step(prev: float, raw: float) -> float:
-            alpha = self.rise_alpha if abs(raw - prev) > abs(prev) * 0.05 else self.fall_alpha
-            alpha *= 0.4 + (0.6 * gain)
-            return float((alpha * raw) + ((1.0 - alpha) * prev))
-
-        smoothed = (_step(prev_x, raw_x), _step(prev_y, raw_y))
-        self._state = smoothed
-        return smoothed
+        left_smoothed: Line = (
+            int(round(float(self._x[0, 0]))),
+            int(round(y_top)),
+            int(round(float(self._x[1, 0]))),
+            int(round(y_bottom)),
+        )
+        right_smoothed: Line = (
+            int(round(float(self._x[2, 0]))),
+            int(round(y_top)),
+            int(round(float(self._x[3, 0]))),
+            int(round(y_bottom)),
+        )
+        return left_smoothed, right_smoothed
 
     def reset(self) -> None:
-        self._state = None
+        self._initialized = False
+        self._x.fill(0.0)
+        self._P = np.eye(self._STATE_DIM, dtype=np.float32) * 100.0
+
+
+def apply_lane_kalman(roi: RoadROI, smoother: LaneKalman) -> RoadROI:
+    """Run the Kalman smoother on a RoadROI and return a smoothed copy."""
+
+    left_smoothed, right_smoothed = smoother.update(
+        roi.left_line,
+        roi.right_line,
+        roi.confidence,
+    )
+
+    if left_smoothed is None or right_smoothed is None:
+        return roi
+
+    height, width = roi.mask.shape[:2]
+    polygon = np.array(
+        [
+            [left_smoothed[0], left_smoothed[1]],
+            [right_smoothed[0], right_smoothed[1]],
+            [right_smoothed[2], right_smoothed[3]],
+            [left_smoothed[2], left_smoothed[3]],
+        ],
+        dtype=np.int32,
+    )
+    mask = _polygon_mask((height, width), polygon)
+    return RoadROI(
+        mask=mask,
+        polygon=polygon,
+        left_line=left_smoothed,
+        right_line=right_smoothed,
+        confidence=roi.confidence,
+        detected=roi.detected,
+    )

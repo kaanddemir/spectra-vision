@@ -1,7 +1,21 @@
-"""YOLOv8 object detection wrapper with M1 MPS / CPU device selection."""
+"""YOLOv8 object detection wrapper with M1 MPS / CPU device selection.
+
+Loading mirrors the lane (``lanenet.py``) and depth (``models.py``) pattern:
+
+- ``is_yolo_available()`` — fast file + import check, no model load.
+- ``get_detector()`` — returns the cached singleton, lazy-loads on first
+  call, raises ``RuntimeError`` if the load itself fails. The caller
+  (``_ensure_required_models()`` in ``analysis/video.py``) drives the
+  load eagerly at startup so model issues surface there rather than
+  mid-video.
+
+Device fallback (MPS → CUDA → CPU) and the ``model.to(device)`` retry are
+internal recoveries; they are not load failures.
+"""
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -35,6 +49,9 @@ CLASS_RISK_WEIGHT: dict[str, float] = {
 }
 
 
+_DEFAULT_YOLO_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "yolov8n.pt"
+
+
 @dataclass(frozen=True)
 class Detection:
     bbox: tuple[int, int, int, int]
@@ -42,8 +59,18 @@ class Detection:
     confidence: float
 
 
+def is_yolo_available() -> bool:
+    """Whether Ultralytics is importable and the YOLO weights are present."""
+
+    try:
+        import ultralytics  # noqa: F401
+    except ImportError:
+        return False
+    return _DEFAULT_YOLO_MODEL_PATH.is_file()
+
+
 class ObjectDetector:
-    """Lazy-loaded YOLOv8 detector. Returns [] if Ultralytics is unavailable."""
+    """YOLOv8 detector. Construction is cheap; load happens explicitly."""
 
     def __init__(
         self,
@@ -60,8 +87,6 @@ class ObjectDetector:
         self.image_size = int(image_size)
         self._device = device
         self._model = None
-        self._load_attempted = False
-        self._available = False
 
     def _resolve_device(self) -> str:
         if self._device:
@@ -77,47 +102,34 @@ class ObjectDetector:
             pass
         return "cpu"
 
-    def _try_load(self) -> None:
-        if self._load_attempted:
-            return
-        self._load_attempted = True
+    def _load(self) -> None:
+        """Load weights and place them on the best available device.
+
+        Lets ``ImportError`` and any YOLO file errors propagate so
+        ``get_detector()`` can convert them into a single ``RuntimeError``.
+        Device-level fallback (MPS/CUDA → CPU) is handled internally
+        because that is recovery, not failure.
+        """
+
+        from ultralytics import YOLO
+
+        local_models = Path(__file__).resolve().parents[2] / "models" / self.model_name
+        model_path = str(local_models) if local_models.exists() else self.model_name
+        self._model = YOLO(model_path)
+        self._device = self._resolve_device()
         try:
-            from ultralytics import YOLO
-
-            model_path = self.model_name
-            local_models = Path(__file__).resolve().parents[2] / "models" / self.model_name
-            if local_models.exists():
-                model_path = str(local_models)
-
-            self._model = YOLO(model_path)
-            self._device = self._resolve_device()
-            try:
-                self._model.to(self._device)
-            except Exception:
-                self._device = "cpu"
-                self._model.to("cpu")
-            self._available = True
-        except Exception as exc:
-            self._model = None
-            self._available = False
-            print(
-                "[ObjectDetector] YOLO unavailable — every frame will report SAFE. "
-                f"Install with `pip install -r requirements.txt`. ({exc})"
-            )
-
-    @property
-    def available(self) -> bool:
-        if not self._load_attempted:
-            self._try_load()
-        return self._available
+            self._model.to(self._device)
+        except Exception:
+            self._device = "cpu"
+            self._model.to("cpu")
 
     @property
     def device(self) -> str:
         return self._device or "cpu"
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
-        if not self.available or self._model is None:
-            return []
+        if self._model is None:
+            raise RuntimeError("YOLOv8 detector is not loaded.")
 
         try:
             results = self._model.predict(
@@ -129,8 +141,7 @@ class ObjectDetector:
                 verbose=False,
             )
         except Exception as exc:
-            print(f"[ObjectDetector] inference failed: {exc}")
-            return []
+            raise RuntimeError(f"YOLOv8 inference failed: {exc}") from exc
 
         if not results:
             return []
@@ -169,10 +180,32 @@ class ObjectDetector:
 
 
 _GLOBAL_DETECTOR: ObjectDetector | None = None
+_DETECTOR_LOCK = threading.Lock()
 
 
 def get_detector() -> ObjectDetector:
+    """Return the cached detector, loading it on first call.
+
+    Raises ``RuntimeError`` if Ultralytics fails to import or if model
+    weights cannot be loaded — matches the lane/depth ONNX patterns so
+    backend issues surface uniformly through ``_ensure_required_models``.
+    """
+
     global _GLOBAL_DETECTOR
-    if _GLOBAL_DETECTOR is None:
-        _GLOBAL_DETECTOR = ObjectDetector()
-    return _GLOBAL_DETECTOR
+    if _GLOBAL_DETECTOR is not None:
+        return _GLOBAL_DETECTOR
+
+    with _DETECTOR_LOCK:
+        if _GLOBAL_DETECTOR is not None:
+            return _GLOBAL_DETECTOR
+        instance = ObjectDetector()
+        try:
+            instance._load()
+        except Exception as exc:
+            raise RuntimeError(
+                f"YOLOv8 detector failed to load: {exc}. "
+                "Install Ultralytics (`pip install -r requirements.txt`) "
+                "and ensure models/yolov8n.pt exists."
+            ) from exc
+        _GLOBAL_DETECTOR = instance
+        return _GLOBAL_DETECTOR

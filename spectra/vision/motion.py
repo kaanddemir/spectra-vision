@@ -189,8 +189,7 @@ def compute_velocity(
     """Compute dense optical flow between two preprocessed frames.
 
     Uses DIS (classical, OpenCV) on grayscale, with RANSAC ego-motion
-    subtraction layered on top. The output shape matches the previous
-    NeuFlow-based implementation so the rest of the pipeline is unchanged.
+    subtraction layered on top.
     """
 
     if previous_frame is None:

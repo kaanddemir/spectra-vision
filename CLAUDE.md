@@ -35,19 +35,21 @@ The public routes remain:
 
 ## 3. Required Models and Runtime
 
-Before analysis starts, `_ensure_required_models()` in `spectra/analysis/video.py` verifies that the required ONNX model file is present.
+Before analysis starts, `_ensure_required_models()` in `spectra/analysis/video.py` verifies that the required vision backends can load.
 
 Required model files:
 
 - `models/depth_anything_v2_small.onnx`
+- `models/ufld_v2_culane_r18.onnx`
+- `models/yolov8n.pt`
 
-Optical flow is now computed classically (OpenCV DIS), so there is no flow model to install. If Depth Anything is missing, analysis fails before frame processing begins.
+Optical flow is now computed classically (OpenCV DIS), so there is no flow model to install. If Depth Anything, UFLDv2, YOLO weights, or their runtime dependencies cannot load, analysis fails before frame processing begins.
 
 Runtime notes:
 
 - Depth uses ONNX Runtime. The depth session prefers `CoreMLExecutionProvider` on macOS and falls back to `CPUExecutionProvider` on other platforms or when CoreML is unavailable.
 - Depth Anything input resolution defaults to `392` and can be overridden with the `SPECTRA_DEPTH_INPUT` environment variable.
-- YOLO is lazy-loaded in `spectra/vision/detection.py`; if Ultralytics or the detector model cannot be loaded, detections are empty and frames resolve to safe synthetic events.
+- YOLO runs through Ultralytics/PyTorch and prefers MPS, then CUDA, then CPU. Load or inference backend failures are hard errors; frames with no road participants remain empty results.
 
 ## 4. Video Frame Loop
 
@@ -93,10 +95,10 @@ The output is a `PreprocessedFrame`:
 
 Road geometry is computed in `spectra/vision/road.py`.
 
-There are two modes:
+There are two lane geometry paths:
 
-- Dynamic ROI: Canny edges and Hough lines estimate left and right lane boundaries.
-- Default ROI: if lane detection is weak, a fixed perspective polygon is used.
+- UFLDv2 ROI: the required lane model estimates the ego-lane boundaries.
+- Default ROI: if a scheduled lane frame is weak and no cached ROI exists, a fixed perspective polygon is used.
 
 The main output is a `LaneFrame`.
 

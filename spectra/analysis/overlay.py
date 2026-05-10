@@ -120,12 +120,25 @@ def annotate_frame(
     color = COLORS.get(primary_event.state, (220, 220, 220))
 
     # 1. Forward collision corridor. Use detected lane geometry when present;
-    # otherwise keep the historical fixed perspective corridor.
+    # otherwise keep the historical fixed perspective corridor. The corridor
+    # fill is risk-state coloured (subtle on SAFE), but the lane edges
+    # themselves are drawn in a fixed bright colour on top so the user can
+    # always see what the lane detector is producing — independent of
+    # whether the scene is calm or dangerous.
     cone_pts = _lane_corridor(width, height, lane)
     overlay = output.copy()
     cv2.fillPoly(overlay, [cone_pts], color)
-    cv2.addWeighted(overlay, 0.10, output, 0.90, 0, output)
-    cv2.polylines(output, [cone_pts], isClosed=False, color=color, thickness=1, lineType=cv2.LINE_AA)
+    cv2.addWeighted(overlay, 0.12, output, 0.88, 0, output)
+    cv2.polylines(output, [cone_pts], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+
+    if lane is not None and lane.detected and lane.left_line is not None and lane.right_line is not None:
+        # Bright cyan polyline traces the actual detected lane edges — this
+        # is what UFLDv2 committed for this frame. Drawing them explicitly lets
+        # you visually verify the detector without switching to the road tab.
+        line_color = (255, 220, 60)  # warm cyan/yellow, high contrast on tarmac
+        for line_endpoints in (lane.left_line, lane.right_line):
+            x1, y1, x2, y2 = line_endpoints
+            cv2.line(output, (int(x1), int(y1)), (int(x2), int(y2)), line_color, 3, cv2.LINE_AA)
 
     # 2. Per-object bboxes — paint SAFE first, then CAUTION/DANGER on top so
     # the worst object stays visually dominant when bboxes overlap.

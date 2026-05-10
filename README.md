@@ -10,7 +10,7 @@ The current pipeline is object-centric and does not use external narrative servi
 - YOLO-based road participant tracking
 - Road/lane-relative risk scoring
 - Required Depth Anything V2 ONNX depth estimation
-- Required NeuFlow ONNX dense optical flow with ego-motion compensation
+- Classical DIS dense optical flow with ego-motion compensation
 - Fused TTC from bbox expansion, radial flow, and depth delta
 - `SAFE`, `CAUTION`, and `DANGER` states
 - Timeline rows, lane metrics, event snapshots, depth view, motion view, and overlay view
@@ -102,7 +102,7 @@ spectra/
    - Produces enhanced grayscale and denoised RGB images
 
 4. `spectra/vision/motion.py`
-   - Uses required NeuFlow ONNX dense optical flow with ego-motion compensation
+   - Uses OpenCV DIS dense optical flow with ego-motion compensation
    - Produces motion magnitude, normalized motion, divergence, and RGB flow visualization
 
 5. `spectra/vision/depth.py`
@@ -129,7 +129,7 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 - Tracking: The same object is linked across frames with IoU-based tracking.
 - Road geometry: The road/lane corridor and vanishing point are estimated.
 - Depth: Depth Anything V2 ONNX produces a relative nearness map.
-- Motion: NeuFlow ONNX produces dense optical flow, with ego-motion compensation.
+- Motion: OpenCV DIS produces dense optical flow, with ego-motion compensation.
 - Risk: TTC, lane relationship, nearness, closing speed, and confidence are fused into a risk state.
 
 The backend returns timeline rows, the peak event, lane metrics, TTC components, and visual overlays to the frontend.
@@ -152,16 +152,17 @@ The public routes remain:
 - `POST /api/analyze`
 - `WS /ws/preview/{session_id}`
 
-### 3. Required Models
+### 3. Required Models and Runtime
 
-Before analysis starts, `_ensure_required_models()` in `spectra/analysis/video.py` verifies required ONNX models.
+Before analysis starts, `_ensure_required_models()` in `spectra/analysis/video.py` verifies that required vision backends can load.
 
-Required model files:
+Required local model files:
 
 - `models/depth_anything_v2_small.onnx`
-- `models/neuflow_v2.onnx`
+- `models/ufld_v2_culane_r18.onnx`
+- `models/yolov8n.pt`
 
-If either required model is missing, analysis fails before frame processing begins. YOLO is lazy-loaded in `spectra/vision/detection.py`; if Ultralytics or the detector model cannot be loaded, detections are empty and frames resolve to safe synthetic events.
+If Depth Anything, UFLDv2, YOLO weights, or their runtime dependencies cannot load, analysis fails before frame processing begins. Optical flow is computed classically with OpenCV DIS, so there is no flow model to install.
 
 ### 4. Video Frame Loop
 
@@ -210,10 +211,10 @@ The output is a `PreprocessedFrame`:
 
 Road geometry is computed in `spectra/vision/road.py`.
 
-There are two modes:
+There are two lane geometry paths:
 
-- Dynamic ROI: Canny edges and Hough lines estimate left and right lane boundaries.
-- Default ROI: if lane detection is weak, a fixed perspective polygon is used.
+- UFLDv2 ROI: the required lane model estimates the ego-lane boundaries.
+- Default ROI: if a scheduled lane frame is weak and no cached ROI exists, a fixed perspective polygon is used.
 
 The main output is a `LaneFrame`.
 
@@ -239,7 +240,7 @@ This keeps the same thresholds usable across different camera angles and image s
 
 Motion analysis is implemented in `spectra/vision/motion.py`.
 
-NeuFlow ONNX first produces dense optical flow between two frames. Raw flow contains both object motion and camera motion, so Spectra subtracts estimated ego-motion.
+OpenCV DIS produces dense optical flow between two grayscale frames. Raw flow contains both object motion and camera motion, so Spectra subtracts estimated ego-motion.
 
 Ego-motion compensation:
 
@@ -294,8 +295,6 @@ YOLO detections are filtered to road-relevant COCO classes:
 - bus
 - train
 - truck
-- traffic light
-- stop sign
 
 Each detection is stored as `Detection`:
 
@@ -303,7 +302,7 @@ Each detection is stored as `Detection`:
 - `class_name`: normalized class name
 - `confidence`: YOLO confidence
 
-Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals. Static objects such as traffic lights and stop signs receive lower risk weights.
+Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals.
 
 ### 10. Object Tracking
 

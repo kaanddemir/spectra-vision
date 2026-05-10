@@ -23,17 +23,18 @@ from .risk import (
     stabilized_event_state,
 )
 from ..vision.depth import DepthResult, estimate_frame_depth
-from ..vision.detection import get_detector
-from ..vision.models import is_depth_available, is_flow_available
+from ..vision.detection import get_detector, is_yolo_available
+from ..vision.lanenet import UFLDv2ONNX, get_lanenet_model, is_lanenet_available
+from ..vision.models import get_depth_model, is_depth_available
 from ..vision.motion import compute_velocity
 from ..vision.preprocessing import preprocess_frame
 from ..vision.road import (
-    VanishingPointSmoother,
+    LaneKalman,
     RoadROI,
+    apply_lane_kalman,
     build_lane_frame,
-    compute_vanishing_point,
     default_road_roi,
-    estimate_road_roi,
+    estimate_road_roi_from_lanes,
 )
 from .tracking import IoUTracker
 from .overlay import annotate_frame
@@ -99,9 +100,36 @@ class VideoLoader:
 
 
 def _ensure_required_models() -> None:
+    """Verify the hard-required vision backends are loadable.
+
+    Depth, YOLO and UFLDv2 are all required. Hough lane detection was
+    removed after benchmarking showed it traces the road's outer edges
+    instead of the ego corridor on real dashcam footage — a misleading
+    fallback is worse than a clear startup failure. Optical flow is
+    classical (DIS) so it always works.
+    """
+
     if not is_depth_available():
-        raise RuntimeError("Depth Anything ONNX model missing at models/depth_anything_v2_small.onnx")
-    # Optical flow is now classical (DIS) and always available — no model file.
+        raise RuntimeError(
+            "Depth Anything ONNX model missing at models/depth_anything_v2_small.onnx"
+        )
+    if not is_yolo_available():
+        raise RuntimeError(
+            "YOLOv8 detector unavailable. Install Ultralytics "
+            "(`pip install -r requirements.txt`) and ensure "
+            "models/yolov8n.pt exists."
+        )
+    if not is_lanenet_available():
+        raise RuntimeError(
+            "UFLDv2 ONNX model missing at models/ufld_v2_culane_r18.onnx. "
+            "See spectra/vision/lanenet.py for export instructions."
+        )
+    # Eagerly load each backend so any post-file-check failure (corrupt
+    # model, ONNX runtime mismatch, CoreML init crash) surfaces here
+    # instead of mid-video.
+    get_depth_model()
+    get_lanenet_model()
+    get_detector()
 
 
 def _to_rgb(image_bgr: np.ndarray) -> np.ndarray:
@@ -259,6 +287,16 @@ def _encode_preview_jpeg(annotated_bgr: np.ndarray, quality: int = 70) -> str | 
         return None
 
 
+def _detect_lanes(frame_bgr: np.ndarray, lanenet: UFLDv2ONNX) -> RoadROI:
+    """Run UFLDv2 once on a frame and convert its output to a RoadROI."""
+
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    lanes = lanenet.predict(rgb)
+    return estimate_road_roi_from_lanes(
+        lanes, width=frame_bgr.shape[1], height=frame_bgr.shape[0]
+    )
+
+
 def analyze_spatial_video(
     video_path: str | Path,
     *,
@@ -269,7 +307,6 @@ def analyze_spatial_video(
     detect_every: int = 3,
     lane_every: int = 5,
     flow_every: int = 1,
-    enable_road_roi: bool = False,
     start_sec: float = 0.0,
     end_sec: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -297,7 +334,8 @@ def analyze_spatial_video(
     performance_logs: list[str] = []
     expansion_smoother = ExpansionSmoother()
     depth_smoother = DepthDeltaSmoother()
-    vp_smoother = VanishingPointSmoother()
+    lane_kalman = LaneKalman()
+    lanenet = get_lanenet_model()
     stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=7)
     detector = get_detector()
     tracker = IoUTracker(iou_threshold=0.25, max_misses=5)
@@ -310,29 +348,19 @@ def analyze_spatial_video(
         frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
         t_preprocess = time.perf_counter()
 
-        # Lane detection with caching: only re-run Canny+Hough on scheduled
-        # frames; between detections the cached high-confidence result is reused.
+        # Lane detection runs on scheduled frames only; the most recent
+        # committed UFLDv2 detection is cached and reused on in-between frames.
+        # Kalman smooths endpoint jitter and coasts through brief misses.
         fi = video_frame.frame_index
-        if enable_road_roi:
-            if fi % max(lane_every, 1) == 0:
-                new_roi = estimate_road_roi(frame.bgr)
-                if new_roi.confidence >= 0.50:
-                    cached_road_roi = new_roi
-                road_roi = new_roi if new_roi.confidence >= 0.50 else (cached_road_roi or default_road_roi(frame.bgr.shape))
-            else:
-                road_roi = cached_road_roi or default_road_roi(frame.bgr.shape)
-        else:
-            road_roi = default_road_roi(frame.bgr.shape)
+        if fi % max(lane_every, 1) == 0:
+            new_roi = _detect_lanes(frame.bgr, lanenet)
+            if new_roi.detected:
+                cached_road_roi = new_roi
+        road_roi = cached_road_roi or default_road_roi(frame.bgr.shape)
+        road_roi = apply_lane_kalman(road_roi, lane_kalman)
 
         frame_h, frame_w = frame.gray.shape
-        raw_vp = compute_vanishing_point(road_roi, frame_w, frame_h)
-        smoothed_vp = vp_smoother.update(raw_vp, road_roi.confidence)
-        lane = build_lane_frame(
-            road_roi,
-            width=frame_w,
-            height=frame_h,
-            smoothed_vp=smoothed_vp,
-        )
+        lane = build_lane_frame(road_roi, width=frame_w, height=frame_h)
         t_lane = time.perf_counter()
 
         if previous_timestamp_sec is None:
@@ -379,7 +407,7 @@ def analyze_spatial_video(
             log_line = (
                 f"[FRAME {fi:4d}] "
                 f"preprocess={1000*(t_preprocess-t0):.0f}ms  "
-                f"lane={'skip' if (enable_road_roi and fi % max(lane_every,1) != 0) else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
+                f"lane={'skip' if fi % max(lane_every,1) != 0 else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
                 f"flow={'skip' if fi % max(flow_every,1) != 0 else f'{1000*(t_flow-t_lane):.0f}ms':>7}  "
                 f"depth={'skip' if not needs_depth else f'{1000*(t_depth-t_flow):.0f}ms':>7}  "
                 f"yolo={'skip' if not should_detect else f'{1000*(t_yolo-t_depth):.0f}ms':>7}"

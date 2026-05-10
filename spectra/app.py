@@ -265,7 +265,6 @@ async def analyze_endpoint(
                 detect_every=max(1, int(detect_every)),
                 lane_every=max(1, int(lane_every)),
                 flow_every=max(1, int(flow_every)),
-                enable_road_roi=True,
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
                 progress_callback=progress_callback if queue is not None else None,

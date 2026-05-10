@@ -1,7 +1,8 @@
-"""ONNX model wrappers for depth estimation.
+"""ONNX model wrappers for depth estimation, plus the shared CoreML
+provider builder used by every Spectra ONNX model (depth and UFLDv2).
 
-Optical flow is computed classically (DIS) in `motion.py` — there is no
-neural-flow ONNX model in this pipeline anymore.
+Optical flow is computed classically (OpenCV DIS) in ``motion.py``. YOLO
+runs through Ultralytics + PyTorch in ``detection.py``.
 """
 
 from __future__ import annotations
@@ -9,30 +10,43 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Optional
 
 import cv2
 import numpy as np
 
 
-_DEFAULT_DEPTH_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "depth_anything_v2_small.onnx"
+_MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
+_DEFAULT_DEPTH_MODEL_PATH = _MODELS_DIR / "depth_anything_v2_small.onnx"
 _DEPTH_MODEL_PATH = Path(os.environ.get("SPECTRA_DEPTH_MODEL", str(_DEFAULT_DEPTH_MODEL_PATH)))
 
 _INPUT_SIZE = int(os.environ.get("SPECTRA_DEPTH_INPUT", "256"))
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
+_COREML_CACHE_DIR = Path(
+    os.environ.get("SPECTRA_COREML_CACHE_DIR", str(_MODELS_DIR / ".coreml_cache"))
+)
+
 _depth_model_lock = threading.Lock()
-_depth_model_singleton: Optional["DepthAnythingONNX"] = None
+_depth_model_singleton: "DepthAnythingONNX" | None = None
 _depth_load_failed = False
+_depth_load_error: str | None = None
+
+_DEPTH_UNAVAILABLE_MESSAGE = (
+    "Depth Anything ONNX model unavailable. Install onnxruntime and ensure "
+    "models/depth_anything_v2_small.onnx exists."
+)
 
 
-def _build_providers() -> list:
-    """Prefer CoreML on Apple Silicon; fall back to CPU.
+def build_coreml_providers() -> list:
+    """Shared ONNX provider config for every Spectra ONNX model.
 
-    CoreML routes Depth Anything V2 small to ANE/GPU on M-series Macs, which
-    is several times faster than the CPU EP. If the runtime build does not
-    expose the CoreML EP, we silently degrade to CPU.
+    Prefers CoreML on Apple Silicon (routes the model to ANE/GPU) and falls
+    back to CPU when CoreML is unavailable. Uses ``MLProgram`` with a
+    persistent ``ModelCacheDirectory`` so the CoreML graph compile cost
+    (~2-5s for Depth Anything, similar for UFLDv2) is paid once and reused
+    across restarts. Different models share the cache dir — CoreML keys
+    cached graphs by hash so there is no collision.
     """
 
     try:
@@ -44,7 +58,19 @@ def _build_providers() -> list:
 
     providers: list = []
     if "CoreMLExecutionProvider" in available:
-        providers.append(("CoreMLExecutionProvider", {"MLComputeUnits": "ALL"}))
+        _COREML_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        providers.append(
+            (
+                "CoreMLExecutionProvider",
+                {
+                    "ModelFormat": "MLProgram",
+                    "MLComputeUnits": "ALL",
+                    "RequireStaticInputShapes": "1",
+                    "EnableOnSubgraphs": "0",
+                    "ModelCacheDirectory": str(_COREML_CACHE_DIR),
+                },
+            )
+        )
     providers.append("CPUExecutionProvider")
     return providers
 
@@ -59,8 +85,19 @@ class DepthAnythingONNX:
         sess_options.intra_op_num_threads = os.cpu_count() or 4
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        providers = _build_providers()
-        self.session = ort.InferenceSession(str(model_path), sess_options, providers=providers)
+        providers = build_coreml_providers()
+        try:
+            self.session = ort.InferenceSession(str(model_path), sess_options, providers=providers)
+        except Exception:
+            # CoreML init can throw for graphs that don't satisfy
+            # RequireStaticInputShapes; retry on CPU only.
+            if not any(
+                isinstance(p, tuple) and p[0] == "CoreMLExecutionProvider" for p in providers
+            ):
+                raise
+            self.session = ort.InferenceSession(
+                str(model_path), sess_options, providers=["CPUExecutionProvider"]
+            )
         self.input_name = self.session.get_inputs()[0].name
 
     def predict(self, rgb: np.ndarray) -> np.ndarray:
@@ -90,8 +127,6 @@ class DepthAnythingONNX:
 def is_depth_available() -> bool:
     """Whether the ONNX runtime and model file are usable."""
 
-    if _depth_load_failed:
-        return False
     try:
         import onnxruntime  # noqa: F401
     except ImportError:
@@ -99,30 +134,29 @@ def is_depth_available() -> bool:
     return _DEPTH_MODEL_PATH.is_file()
 
 
-def get_depth_model() -> Optional[DepthAnythingONNX]:
-    """Return a cached depth model instance, or None if unavailable."""
+def get_depth_model() -> DepthAnythingONNX:
+    """Return a cached depth model instance, or raise if unavailable."""
 
-    global _depth_model_singleton, _depth_load_failed
+    global _depth_model_singleton, _depth_load_failed, _depth_load_error
     if _depth_load_failed:
-        return None
+        raise RuntimeError(_depth_load_error or _DEPTH_UNAVAILABLE_MESSAGE)
     if _depth_model_singleton is not None:
         return _depth_model_singleton
 
     with _depth_model_lock:
+        if _depth_load_failed:
+            raise RuntimeError(_depth_load_error or _DEPTH_UNAVAILABLE_MESSAGE)
         if _depth_model_singleton is not None:
             return _depth_model_singleton
         if not is_depth_available():
             _depth_load_failed = True
-            return None
+            _depth_load_error = _DEPTH_UNAVAILABLE_MESSAGE
+            raise RuntimeError(_depth_load_error)
         try:
             _depth_model_singleton = DepthAnythingONNX(_DEPTH_MODEL_PATH)
-        except Exception:
+        except Exception as exc:
             _depth_load_failed = True
-            return None
+            _depth_load_error = f"Depth Anything ONNX model failed to load: {exc}"
+            raise RuntimeError(_depth_load_error) from exc
         return _depth_model_singleton
 
-
-def is_flow_available() -> bool:
-    """Optical flow is now a classical (DIS) algorithm and is always available."""
-
-    return True

@@ -48,8 +48,6 @@ def _calibrate_model_near_map(near_map: np.ndarray) -> np.ndarray:
 
 def _depth_from_model(rgb: np.ndarray) -> DepthResult:
     model = models.get_depth_model()
-    if model is None:
-        raise RuntimeError("Depth Anything ONNX model missing at models/depth_anything_v2_small.onnx")
     near_map = _calibrate_model_near_map(model.predict(rgb))
     depth_map = np.clip(near_map * 255.0, 0.0, 255.0).astype(np.uint8)
     return DepthResult(depth_map=depth_map, near_map=near_map.astype(np.float32))
