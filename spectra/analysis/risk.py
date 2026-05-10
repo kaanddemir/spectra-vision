@@ -490,6 +490,8 @@ def calculate_track_risk(
     depth_history: dict[int, tuple[float, float]],
     flow_dt_sec: float,
     depth_is_fresh: bool,
+    frame_index: int,
+    timestamp_sec: float,
 ) -> RiskEvent:
     """Build a RiskEvent for a single tracked object using fused TTC.
 
@@ -555,8 +557,8 @@ def calculate_track_risk(
     )
 
     return RiskEvent(
-        frame_index=track.frame_index,
-        timestamp_sec=track.timestamp_sec,
+        frame_index=frame_index,
+        timestamp_sec=timestamp_sec,
         state=state,
         ttc_sec=fused_ttc,
         direction=direction_from_lateral(lateral_v),
@@ -595,12 +597,7 @@ def stabilized_event_state(stabilizer: "StateStabilizer", event: RiskEvent) -> s
         stabilizer.counter = 0
         return "DANGER"
 
-    stabilized = stabilizer.process(event.state)
-    if _STATE_SCORE.get(stabilized, 0.0) > _STATE_SCORE.get(event.state, 0.0):
-        if event.state == "SAFE":
-            return stabilized
-        return event.state
-    return stabilized
+    return stabilizer.process(event.state)
 
 
 class StateStabilizer:
@@ -704,6 +701,8 @@ def build_object_events(
             depth_history=depth_smoother.state,
             flow_dt_sec=fields.flow_dt_sec,
             depth_is_fresh=fields.depth_is_fresh,
+            frame_index=frame_index,
+            timestamp_sec=timestamp_sec,
         )
         events.append(event)
 

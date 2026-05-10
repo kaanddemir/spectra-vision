@@ -256,6 +256,8 @@ class TestCalculateTrackRisk:
             depth_history={},
             flow_dt_sec=1.0 / 30.0,
             depth_is_fresh=True,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
         )
 
         assert event.state == "DANGER"
@@ -284,6 +286,8 @@ class TestCalculateTrackRisk:
             depth_history={},
             flow_dt_sec=1.0 / 30.0,
             depth_is_fresh=True,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
         )
 
         assert event.state == "SAFE"
@@ -307,6 +311,8 @@ class TestCalculateTrackRisk:
             depth_history=history,
             flow_dt_sec=1.0 / 30.0,
             depth_is_fresh=False,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
         )
 
         assert history == {1: (0.0, 0.2)}
@@ -329,6 +335,8 @@ class TestCalculateTrackRisk:
             depth_history={},
             flow_dt_sec=1.0 / 30.0,
             depth_is_fresh=True,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
         )
 
         assert event.state == "SAFE"
@@ -359,12 +367,12 @@ class TestStabilizer:
         assert is_imminent_danger(event)
         assert stabilized_event_state(stabilizer, event) == "DANGER"
 
-    def test_held_state_does_not_outrank_current_caution(self):
+    def test_danger_held_through_single_caution_frame(self):
         stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
         stabilizer.current_state = "DANGER"
         stabilizer.pending_state = "DANGER"
         event = make_event(state="CAUTION", ttc_sec=2.0)
-        assert stabilized_event_state(stabilizer, event) == "CAUTION"
+        assert stabilized_event_state(stabilizer, event) == "DANGER"
 
     def test_upgrade_requires_n_frames(self):
         stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
