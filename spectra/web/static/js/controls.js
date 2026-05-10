@@ -101,8 +101,65 @@ export function initializeSpectra() {
     return t === null ? null : Math.round(t * 100) / 100;
   };
   const timelineKey = (row) => {
+    const fi = num(row?.frameIndex, null);
+    if (fi !== null) return `f${fi}`;
     const t = roundedTimelineTime(row?.timeSec);
     return t === null ? "" : t.toFixed(2);
+  };
+
+  // Lift the primary object's fields onto the row so existing consumers
+  // (chart, banner, panel) can keep using flat ``row.ttcSec``/``row.lane``
+  // access. The backend now serialises the v2 schema, where these live
+  // inside ``objects[primaryObjectId]``; we resolve them once on entry.
+  const getPrimaryObject = (row) => {
+    if (!row || !Array.isArray(row.objects)) return null;
+    const id = row.primaryObjectId;
+    if (id === null || id === undefined) return null;
+    return row.objects.find((o) => o && o.objectId === id) || null;
+  };
+
+  const flattenObjectV2 = (obj) => {
+    if (!obj) return obj;
+    const conf = num(obj.confidence, null);
+    return {
+      ...obj,
+      riskState: obj.rawRiskState ?? obj.riskState,
+      confidencePct: conf === null ? null : Math.round(conf * 1000) / 10,
+    };
+  };
+
+  const flattenFrameV2 = (frame) => {
+    if (!frame) return frame;
+    const objs = Array.isArray(frame.objects) ? frame.objects.map(flattenObjectV2) : [];
+    const primary = objs.find((o) => o && o.objectId === frame.primaryObjectId) || null;
+    const ts = num(frame.timestampSec, null);
+    return {
+      ...frame,
+      objects: objs,
+      timeSec: ts === null ? null : Math.round(ts * 100) / 100,
+      riskState: frame.stabilizedRiskState ?? null,
+      objectId: frame.primaryObjectId ?? null,
+      objectType: primary?.objectType ?? null,
+      lane: frame.primaryLane ?? null,
+      ttcSec: primary?.ttcSec ?? null,
+      nearScore: primary?.nearScore ?? null,
+      closingSpeed: primary?.closingSpeed ?? null,
+      crossingRisk: primary?.crossingRisk ?? null,
+      lanePosition: primary?.lanePosition ?? null,
+      confidencePct: primary ? (num(primary.confidence, 0) * 100) : null,
+    };
+  };
+
+  const flattenEventV2 = (event, imagesByRef) => {
+    if (!event) return event;
+    const flat = flattenFrameV2(event);
+    const ref = event.imageRef;
+    const images = ref && imagesByRef && imagesByRef[ref] ? imagesByRef[ref] : null;
+    return {
+      ...flat,
+      riskScore: event.primaryRiskScore ?? null,
+      images: images || {},
+    };
   };
 
   const stateClass = (stateOrBand) => {
@@ -383,38 +440,44 @@ export function initializeSpectra() {
   function normalizePayload(response) {
     const payload = cleanResponsePayload(response);
     const metadata = payload?.metadata || {};
-    const peakEvent = payload?.peakEvent || null;
-    const rawImages = peakEvent?.images || {};
+    const imagesByRef = (payload?.images && typeof payload.images === "object") ? payload.images : {};
+    const peakEventRaw = payload?.peakEvent || null;
+    const peakEvent = peakEventRaw ? flattenEventV2(peakEventRaw, imagesByRef) : null;
+    const peakImages = peakEvent?.images || {};
 
     const eventKey = (ev) => `${ev?.frameIndex ?? ""}:${num(ev?.timestampSec, null) ?? ""}`;
     const events = [];
     const seenEvents = new Set();
     if (peakEvent?.frameIndex !== undefined) {
-      events.push({ ...peakEvent, images: rawImages });
+      events.push(peakEvent);
       seenEvents.add(eventKey(peakEvent));
     }
     if (Array.isArray(payload?.events)) {
-      payload.events.forEach((ev) => {
-        const key = eventKey(ev);
+      payload.events.forEach((evRaw) => {
+        const flat = flattenEventV2(evRaw, imagesByRef);
+        const key = eventKey(flat);
         if (seenEvents.has(key)) return;
-        events.push(sameEvent(ev, peakEvent) ? { ...ev, images: rawImages } : ev);
+        events.push(flat);
         seenEvents.add(key);
       });
     }
 
+    const frames = Array.isArray(payload?.frames) ? payload.frames.map(flattenFrameV2) : [];
+
     return {
       images: {
-        original: rawImages.original,
-        road: rawImages.road,
-        blend: rawImages.blend,
+        original: peakImages.original,
+        road: peakImages.road,
+        blend: peakImages.blend,
       },
+      imagesByRef,
       elapsedSec: num(metadata.elapsedSec, null),
       fps: num(metadata.fps, null),
       frameCount: num(metadata.frameCount, null),
       processedFrames: num(metadata.processedFrames, null),
       peakEvent,
       events,
-      timelineRows: Array.isArray(payload?.timelineRows) ? payload.timelineRows : [],
+      timelineRows: frames,
       sourceName: metadata.sourceName || fileInput.files[0]?.name || null,
     };
   }
@@ -1231,11 +1294,13 @@ export function initializeSpectra() {
 
     state.livePreviewActive = true;
 
-    if (msg.frame) {
-      showPreviewOverlay(msg.frame);
+    if (msg.frameImage) {
+      showPreviewOverlay(msg.frameImage);
     }
 
-    const ts = num(msg.timestampSec, 0);
+    const flatFrame = msg.frame ? flattenFrameV2(msg.frame) : null;
+    const flatFrames = Array.isArray(msg.frames) ? msg.frames.map(flattenFrameV2) : null;
+    const ts = num(flatFrame?.timestampSec, 0);
 
     const status = byId("ap-status");
     if (status && msg.progress !== undefined && msg.progress !== null) {
@@ -1243,8 +1308,10 @@ export function initializeSpectra() {
       status.textContent = `Processing… ${pct.toFixed(0)}%`;
     }
 
-    const eventsChanged = upsertLiveEventFromMessage(msg);
-    const rowsChanged = appendLiveTimelineRows(Array.isArray(msg.timelineRows) ? msg.timelineRows : msg.timelineRow);
+    const eventsChanged = flatFrame
+      ? upsertLiveEventFromFrame(flatFrame, msg.frameImage)
+      : false;
+    const rowsChanged = appendLiveTimelineRows(flatFrames || flatFrame);
     if (rowsChanged) {
       state.timelineRows = state.liveTimelineRows;
       if (state.uiMode === "live") {
@@ -1334,27 +1401,16 @@ export function initializeSpectra() {
     return changed;
   }
 
-  function upsertLiveEventFromMessage(msg) {
-    const sc = stateClass(msg?.riskState);
+  function upsertLiveEventFromFrame(frame, frameImage) {
+    const sc = stateClass(frame?.riskState);
     if (sc !== "danger" && sc !== "caution") return false;
-    const ts = num(msg.timestampSec, null);
+    const ts = num(frame.timestampSec, null);
     if (ts === null) return false;
 
     const candidate = {
-      frameIndex: msg.frameIndex,
-      timestampSec: ts,
-      riskState: String(msg.riskState || "").toUpperCase(),
-      lane: msg.lane,
-      ttcSec: msg.ttcSec,
-      objectId: msg.objectId,
-      objectType: msg.objectType,
-      nearScore: msg.nearScore,
-      closingSpeed: msg.closingSpeed,
-      crossingRisk: msg.crossingRisk,
-      lanePosition: msg.lanePosition,
-      confidencePct: msg.confidencePct,
-      objects: Array.isArray(msg.objects) ? msg.objects : [],
-      images: msg.frame ? { blend: msg.frame } : {},
+      ...frame,
+      riskState: String(frame.riskState || "").toUpperCase(),
+      images: frameImage ? { blend: frameImage } : {},
     };
 
     let replaceIndex = -1;

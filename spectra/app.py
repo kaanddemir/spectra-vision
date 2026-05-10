@@ -65,32 +65,19 @@ def _event_image_payload(event: dict[str, Any], fields: Iterable[tuple[str, str]
 def _serialize_event(
     event: dict[str, Any],
     *,
-    include_images: bool = True,
+    image_ref: str | None,
 ) -> dict[str, Any]:
-    payload = {
+    payload: dict[str, Any] = {
         "frameIndex": event.get("frame_index"),
         "timestampSec": event.get("timestamp_sec"),
-        "riskScore": event.get("risk_score"),
-        "riskState": event.get("risk_state"),
-        "lane": event.get("primary_lane"),
-        "ttcSec": event.get("estimated_ttc_sec"),
-        "nearScore": event.get("near_score"),
-        "closingSpeed": event.get("closing_speed"),
-        "crossingRisk": event.get("crossing_risk"),
-        "lanePosition": event.get("lane_position"),
-        "confidencePct": event.get("confidence_pct"),
-        "objectId": event.get("object_id"),
-        "objectType": event.get("object_type"),
+        "stabilizedRiskState": event.get("stabilized_risk_state"),
+        "primaryObjectId": event.get("primary_object_id"),
+        "primaryRiskScore": event.get("primary_risk_score"),
+        "primaryLane": event.get("primary_lane"),
         "objects": event.get("objects") or [],
     }
-
-    if include_images:
-        payload["images"] = _event_image_payload(event, (
-            ("original", "original_rgb"),
-            ("road", "road_rgb"),
-            ("blend", "overlay_rgb"),
-        ))
-
+    if image_ref is not None:
+        payload["imageRef"] = image_ref
     return payload
 
 
@@ -103,9 +90,44 @@ def _is_same_event(left: dict[str, Any] | None, right: dict[str, Any] | None) ->
     )
 
 
+_IMAGE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("original", "original_rgb"),
+    ("road", "road_rgb"),
+    ("blend", "overlay_rgb"),
+)
+
+
+def _pull_event_images(event: dict[str, Any], images: dict[str, dict[str, str]]) -> str | None:
+    """Move RGB images from the event payload into the shared images dict.
+
+    Returns the imageRef key, or None if the event has no images attached.
+    Frame index is unique per saved event (deduplicated upstream), so it's
+    a stable lookup key.
+    """
+
+    img_payload = _event_image_payload(event, _IMAGE_FIELDS)
+    if not img_payload:
+        return None
+    ref = f"f{event.get('frame_index')}"
+    images[ref] = img_payload
+    return ref
+
+
 def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name: str) -> dict[str, Any]:
     peak_event = result.get("peak_event")
+    images: dict[str, dict[str, str]] = {}
+
+    peak_ref = _pull_event_images(peak_event, images) if peak_event else None
+    other_events = [
+        event for event in (result.get("events") or []) if not _is_same_event(event, peak_event)
+    ]
+    serialized_events = [
+        _serialize_event(event, image_ref=_pull_event_images(event, images))
+        for event in other_events
+    ]
+
     payload: dict[str, Any] = {
+        "schemaVersion": 2,
         "metadata": {
             "sourceName": source_name,
             "fps": result.get("fps"),
@@ -113,13 +135,10 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
             "processedFrames": result.get("processed_frames"),
             "elapsedSec": round(elapsed_sec, 3),
         },
-        "timelineRows": result.get("timeline_rows") or [],
-        "peakEvent": None if peak_event is None else _serialize_event(peak_event),
-        "events": [
-            _serialize_event(event)
-            for event in (result.get("events") or [])
-            if not _is_same_event(event, peak_event)
-        ],
+        "frames": result.get("frames") or [],
+        "peakEvent": None if peak_event is None else _serialize_event(peak_event, image_ref=peak_ref),
+        "events": serialized_events,
+        "images": images,
     }
     return {"payload": payload}
 

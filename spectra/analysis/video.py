@@ -214,7 +214,7 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
     return {
         "objectId": event.object_id,
         "objectType": event.object_type,
-        "riskState": event.state,
+        "rawRiskState": event.state,
         "riskScore": _risk_score(event),
         "lane": event.lane,
         "ttcSec": event.ttc_sec,
@@ -222,7 +222,7 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
         "closingSpeed": event.closing_speed,
         "crossingRisk": event.crossing_risk,
         "lanePosition": event.lane_position,
-        "confidencePct": round(event.confidence * 100.0, 1),
+        "confidence": round(event.confidence, 4),
     }
 
 
@@ -230,23 +230,33 @@ def _event_payload_base(
     *,
     event: RiskEvent,
     all_events: list[RiskEvent],
+    primary_risk_score: float,
 ) -> dict[str, Any]:
-    """Build the metadata-only event payload. RGB views are attached later."""
+    """Build the metadata-only event payload. RGB views are attached later.
+
+    Client-facing fields use the v2 schema names (``stabilized_risk_state``,
+    ``primary_*``). The primary event's raw metrics (``ttc_sec``,
+    ``near_score``, ``closing_speed``) are kept on the payload too because
+    ``score_event_payload`` ranks saved events by them; ``_serialize_event``
+    drops these internal scratch fields before the JSON leaves the server.
+
+    ``primary_risk_score`` is computed from the **raw** primary event (before
+    hysteresis stabilization) so it stays consistent with the matching entry
+    in ``objects[]`` — i.e. ``payload.primary_risk_score`` always equals
+    ``payload.objects[primary_object_id].riskScore``. The state band is
+    decoupled in ``stabilized_risk_state``.
+    """
 
     return {
         "frame_index": event.frame_index,
         "timestamp_sec": event.timestamp_sec,
-        "risk_score": _risk_score(event),
-        "risk_state": event.state,
+        "stabilized_risk_state": event.state,
+        "primary_object_id": event.object_id,
+        "primary_risk_score": primary_risk_score,
         "primary_lane": event.lane,
-        "estimated_ttc_sec": event.ttc_sec,
-        "confidence_pct": round(event.confidence * 100.0, 1),
-        "object_type": event.object_type,
-        "object_id": event.object_id,
+        "ttc_sec": event.ttc_sec,
         "near_score": event.near_score,
         "closing_speed": event.closing_speed,
-        "crossing_risk": event.crossing_risk,
-        "lane_position": event.lane_position,
         "objects": [_object_metric(item) for item in all_events if item.object_id is not None],
     }
 
@@ -329,7 +339,7 @@ def analyze_spatial_video(
     cached_road_roi: RoadROI | None = None
     saved_events: list[dict[str, Any]] = []
     pending_renders: dict[int, _DeferredRender] = {}
-    timeline_rows: list[dict[str, Any]] = []
+    frames: list[dict[str, Any]] = []
     preview_rows_buffer: list[dict[str, Any]] = []
     performance_logs: list[str] = []
     expansion_smoother = ExpansionSmoother()
@@ -434,13 +444,23 @@ def analyze_spatial_video(
         # Note: TTC is preserved through SAFE stabilization so the timeline
         # chart stays continuous and the UI can still show a TTC reading
         # while the scene is calm.
+        # The primary's RAW risk score is captured before stabilization
+        # mutates the event, so it stays consistent with the entry in
+        # ``all_events`` (and therefore with ``objects[primaryObjectId]``).
+        # ``stabilized_risk_state`` carries the hysteresis-smoothed state
+        # band independently.
+        primary_risk_score = _risk_score(primary_event)
         stabilized_state = stabilized_event_state(stabilizer, primary_event)
         primary_event = replace(primary_event, state=stabilized_state)
 
         # Build the metadata-only payload first; heavy RGB views are deferred
         # so we can skip them entirely on frames that won't be saved or
         # previewed.
-        event_payload = _event_payload_base(event=primary_event, all_events=all_events)
+        event_payload = _event_payload_base(
+            event=primary_event,
+            all_events=all_events,
+            primary_risk_score=primary_risk_score,
+        )
         deferred = _DeferredRender(
             frame_bgr=frame.bgr,
             primary_event=primary_event,
@@ -474,24 +494,18 @@ def analyze_spatial_video(
         pending_renders = {pid: ref for pid, ref in pending_renders.items() if pid in live_ids}
 
         object_metrics = [_object_metric(ev) for ev in all_events if ev.object_id is not None]
-        timeline_row = {
+        frame_row = {
             "frameIndex": primary_event.frame_index,
-            "timeSec": round(primary_event.timestamp_sec, 2),
-            "riskState": primary_event.state,
-            "lane": primary_event.lane,
-            "ttcSec": primary_event.ttc_sec,
-            "objectId": primary_event.object_id,
-            "objectType": primary_event.object_type,
-            "nearScore": primary_event.near_score,
-            "closingSpeed": primary_event.closing_speed,
-            "crossingRisk": primary_event.crossing_risk,
-            "lanePosition": primary_event.lane_position,
-            "confidencePct": round(primary_event.confidence * 100.0, 1),
+            "timestampSec": float(primary_event.timestamp_sec),
+            "stabilizedRiskState": primary_event.state,
+            "primaryObjectId": primary_event.object_id,
+            "primaryRiskScore": primary_risk_score,
+            "primaryLane": primary_event.lane,
             "objects": object_metrics,
         }
-        timeline_rows.append(timeline_row)
+        frames.append(frame_row)
         if progress_callback is not None:
-            preview_rows_buffer.append(timeline_row)
+            preview_rows_buffer.append(frame_row)
         processed_frames += 1
 
         is_first_frame = (processed_frames == 1)
@@ -503,50 +517,26 @@ def analyze_spatial_video(
                 progress_callback(
                     {
                         "type": "preview",
-                        "frameIndex": int(primary_event.frame_index),
-                        "timestampSec": float(primary_event.timestamp_sec),
                         "progress": progress_pct,
-                        "riskState": primary_event.state,
-                        "ttcSec": None if primary_event.ttc_sec is None else float(primary_event.ttc_sec),
-                        "lane": primary_event.lane,
-                        "objectId": primary_event.object_id,
-                        "objectType": primary_event.object_type,
-                        "nearScore": float(primary_event.near_score),
-                        "closingSpeed": float(primary_event.closing_speed),
-                        "crossingRisk": float(primary_event.crossing_risk),
-                        "lanePosition": float(primary_event.lane_position),
-                        "confidencePct": float(primary_event.confidence * 100.0),
-                        "frame": preview_uri,
-                        "objects": object_metrics,
-                        "timelineRow": timeline_row,
-                        "timelineRows": list(preview_rows_buffer),
+                        "frameImage": preview_uri,
+                        "frame": frame_row,
+                        "frames": list(preview_rows_buffer),
                     }
                 )
             except Exception:
                 pass
             preview_rows_buffer.clear()
 
-    if progress_callback is not None and preview_rows_buffer and timeline_rows:
-        final_row = timeline_rows[-1]
+    if progress_callback is not None and preview_rows_buffer and frames:
+        final_row = frames[-1]
         try:
             progress_callback(
                 {
                     "type": "preview",
-                    "frameIndex": int(final_row["frameIndex"]),
-                    "timestampSec": float(final_row["timeSec"]),
                     "progress": 100.0,
-                    "riskState": final_row["riskState"],
-                    "ttcSec": None if final_row["ttcSec"] is None else float(final_row["ttcSec"]),
-                    "lane": final_row["lane"],
-                    "objectId": final_row["objectId"],
-                    "objectType": final_row["objectType"],
-                    "nearScore": float(final_row["nearScore"]),
-                    "closingSpeed": float(final_row["closingSpeed"]),
-                    "crossingRisk": float(final_row["crossingRisk"]),
-                    "lanePosition": float(final_row["lanePosition"]),
-                    "confidencePct": float(final_row["confidencePct"]),
-                    "timelineRow": final_row,
-                    "timelineRows": list(preview_rows_buffer),
+                    "frameImage": None,
+                    "frame": final_row,
+                    "frames": list(preview_rows_buffer),
                 }
             )
         except Exception:
@@ -566,7 +556,7 @@ def analyze_spatial_video(
         "fps": loader.fps,
         "frame_count": loader.frame_count,
         "processed_frames": processed_frames,
-        "timeline_rows": timeline_rows,
+        "frames": frames,
         "events": saved_events,
         "peak_event": peak_event,
         "performance_logs": performance_logs,
@@ -575,8 +565,8 @@ def analyze_spatial_video(
 
 def score_event_payload(payload: dict[str, Any]) -> float:
     return score_raw(
-        state=str(payload.get("risk_state") or "").upper(),
-        ttc_sec=payload.get("estimated_ttc_sec"),
+        state=str(payload.get("stabilized_risk_state") or "").upper(),
+        ttc_sec=payload.get("ttc_sec"),
         near_score=float(payload.get("near_score") or 0.0),
         closing_speed=float(payload.get("closing_speed") or 0.0),
     )

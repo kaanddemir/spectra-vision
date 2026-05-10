@@ -18,86 +18,230 @@ def test_compute_velocity_runs_without_neural_flow_model():
     assert result.magnitude_norm.shape == previous.gray.shape
 
 
-def test_serialized_result_uses_lane_contract_only():
+def test_serialized_result_uses_v2_schema():
+    """``_serialize_result`` must emit the v2 schema:
+       - ``schemaVersion: 2``
+       - ``frames`` (renamed from ``timelineRows``)
+       - top-level ``primary*`` pointers + ``stabilizedRiskState`` only;
+         per-object metrics live in ``objects[]``
+       - per-object ``rawRiskState`` (not ``riskState``) and ``confidence``
+         (0..1, not ``confidencePct`` 0..100)
+       - ``imageRef`` on events + separate ``images`` dict
+    """
+
+    objects = [{
+        "objectId": 7,
+        "objectType": "car",
+        "rawRiskState": "CAUTION",
+        "riskScore": 0.42,
+        "lane": "center",
+        "ttcSec": 2.2,
+        "nearScore": 0.4,
+        "closingSpeed": 0.3,
+        "crossingRisk": 0.2,
+        "lanePosition": 0.0,
+        "confidence": 0.67,
+    }]
     event = {
         "frame_index": 1,
         "timestamp_sec": 0.1,
-        "risk_score": 0.5,
-        "risk_band": "medium",
-        "risk_state": "CAUTION",
+        "stabilized_risk_state": "CAUTION",
+        "primary_object_id": 7,
+        "primary_risk_score": 0.42,
         "primary_lane": "center",
-        "estimated_ttc_sec": 2.2,
-        "uncertainty_pct": 10.0,
-        "heuristic_summary": "CAUTION in the center lane",
-        "reasons": ["test"],
-        "lane_metrics": [{"lane": "center", "score": 0.5}],
-        "objects": [{
-            "objectId": 7,
-            "objectType": "car",
-            "ttcSec": 2.2,
-            "riskState": "CAUTION",
-            "lanePosition": 0.0,
-            "crossingRisk": 0.2,
-            "confidencePct": 67.0,
-        }],
-        "object_type": "car",
-        "approach": "approaching",
-        "bbox": [1, 2, 3, 4],
-        "object_id": 7,
+        "ttc_sec": 2.2,
         "near_score": 0.4,
         "closing_speed": 0.3,
-        "velocity_magnitude": 0.2,
-        "expansion_rate": 0.1,
-        "crossing_risk": 0.2,
-        "lane_position": 0.0,
-        "ttc_components": [],
+        "objects": objects,
+        # RGB attached fields are absent — exercises the no-image path
+    }
+    frame_row = {
+        "frameIndex": 1,
+        "timestampSec": 0.1,
+        "stabilizedRiskState": "CAUTION",
+        "primaryObjectId": 7,
+        "primaryRiskScore": 0.42,
+        "primaryLane": "center",
+        "objects": objects,
     }
     result = {
-        "summary": event["heuristic_summary"],
-        "media_type": "video",
         "fps": 30.0,
         "frame_count": 3,
         "processed_frames": 3,
-        "sampled_frames": 3,
-        "timeline_rows": [{
-            "frameIndex": 1,
-            "timeSec": 0.1,
-            "riskState": "CAUTION",
-            "lane": "center",
-            "ttcSec": 2.2,
-            "objectId": 7,
-            "objectType": "car",
-            "nearScore": 0.4,
-            "closingSpeed": 0.3,
-            "crossingRisk": 0.2,
-            "lanePosition": 0.0,
-            "confidencePct": 67.0,
-            "objects": event["objects"],
-        }],
+        "frames": [frame_row],
         "events": [event],
         "peak_event": event,
     }
 
     payload = _serialize_result(result, elapsed_sec=0.01, source_name="sample.mp4")["payload"]
+
+    # Schema version + top-level shape
+    assert payload["schemaVersion"] == 2
+    assert "frames" in payload and "timelineRows" not in payload
+    assert "images" in payload and isinstance(payload["images"], dict)
+
+    # Frame row shape — primary pointers, no redundant per-object fields
+    row = payload["frames"][0]
+    assert row["frameIndex"] == 1
+    assert row["timestampSec"] == 0.1
+    assert row["stabilizedRiskState"] == "CAUTION"
+    assert row["primaryObjectId"] == 7
+    assert row["primaryRiskScore"] == 0.42
+    assert row["primaryLane"] == "center"
+    assert row["objects"] == objects
+    # v1 redundant top-level fields must be gone
+    for legacy_key in ("ttcSec", "nearScore", "closingSpeed", "crossingRisk", "lanePosition", "confidencePct", "objectId", "objectType", "lane", "riskState", "timeSec"):
+        assert legacy_key not in row, f"v1 field {legacy_key!r} leaked into frame row"
+
+    # peakEvent shape
     peak = payload["peakEvent"]
+    assert peak["frameIndex"] == 1
+    assert peak["stabilizedRiskState"] == "CAUTION"
+    assert peak["primaryObjectId"] == 7
+    assert peak["primaryRiskScore"] == 0.42
+    assert peak["primaryLane"] == "center"
+    assert peak["objects"] == objects
+    # v1 keys gone from event too
+    for legacy_key in ("riskState", "riskScore", "lane", "ttcSec", "objectId", "objectType", "nearScore", "closingSpeed", "crossingRisk", "lanePosition", "confidencePct"):
+        assert legacy_key not in peak, f"v1 field {legacy_key!r} leaked into peakEvent"
+    # Image attachment: event had no RGB → no imageRef
+    assert "imageRef" not in peak
+    assert "images" not in peak
 
-    assert peak["lane"] == "center"
-    assert peak["objects"] == event["objects"]
-    row = payload["timelineRows"][0]
-    assert row["objectId"] == 7
-    assert row["objectType"] == "car"
-    assert row["lanePosition"] == 0.0
-    assert row["crossingRisk"] == 0.2
-    assert row["confidencePct"] == 67.0
-    assert row["objects"] == event["objects"]
+    # Per-object schema
+    obj = peak["objects"][0]
+    assert obj["rawRiskState"] == "CAUTION"
+    assert obj["confidence"] == 0.67
+    assert "riskState" not in obj or obj["riskState"] == obj["rawRiskState"]  # objects[].riskState removed
+    assert "confidencePct" not in obj
+
+    # Legacy regression guards (kept from v1 era)
     legacy_lane_key = "zo" + "ne"
-    legacy_metrics_key = legacy_lane_key + "Metrics"
-    legacy_scores_key = legacy_lane_key + "Scores"
-    legacy_image_key = "segment" + "ation"
-
     assert legacy_lane_key not in peak
-    assert legacy_metrics_key not in peak
+    assert (legacy_lane_key + "Metrics") not in peak
     assert "detections" not in peak
-    assert legacy_image_key not in peak.get("images", {})
     assert "laneScores" not in row
-    assert legacy_scores_key not in payload["timelineRows"][0]
+
+
+def test_serialized_result_separates_images_via_imageref():
+    """Events that carry RGB views must emit ``imageRef`` and the images
+    must land in the top-level ``images`` dict, not inline."""
+
+    def _stub_rgb():
+        return np.zeros((4, 4, 3), dtype=np.uint8)
+
+    objects = [{
+        "objectId": 1,
+        "objectType": "car",
+        "rawRiskState": "DANGER",
+        "riskScore": 0.9,
+        "lane": "left",
+        "ttcSec": 0.8,
+        "nearScore": 0.7,
+        "closingSpeed": 0.8,
+        "crossingRisk": 0.9,
+        "lanePosition": -0.5,
+        "confidence": 0.95,
+    }]
+    peak = {
+        "frame_index": 42,
+        "timestamp_sec": 1.4,
+        "stabilized_risk_state": "DANGER",
+        "primary_object_id": 1,
+        "primary_risk_score": 0.9,
+        "primary_lane": "left",
+        "ttc_sec": 0.8,
+        "near_score": 0.7,
+        "closing_speed": 0.8,
+        "objects": objects,
+        "original_rgb": _stub_rgb(),
+        "road_rgb": _stub_rgb(),
+        "overlay_rgb": _stub_rgb(),
+    }
+    result = {
+        "fps": 30.0,
+        "frame_count": 1,
+        "processed_frames": 1,
+        "frames": [],
+        "events": [peak],
+        "peak_event": peak,
+    }
+
+    payload = _serialize_result(result, elapsed_sec=0.0, source_name="x.mp4")["payload"]
+    assert payload["peakEvent"]["imageRef"] == "f42"
+    assert "f42" in payload["images"]
+    assert set(payload["images"]["f42"].keys()) == {"original", "road", "blend"}
+    # Same event in events[] is filtered by _is_same_event (peak vs events dedup)
+    assert payload["events"] == []
+
+
+def test_primary_risk_score_matches_objects_entry():
+    """Pointer invariant: ``primaryRiskScore`` must equal the matching
+    ``objects[primaryObjectId].riskScore`` even when the stabilized state
+    differs from the primary's raw state. The score is computed from the
+    raw primary event so hysteresis lag never leaks into the value.
+    """
+
+    objects = [{
+        "objectId": 4,
+        "objectType": "car",
+        "rawRiskState": "CAUTION",
+        "riskScore": 0.558,  # raw classifier output
+        "lane": "left",
+        "ttcSec": 0.87,
+        "nearScore": 0.704,
+        "closingSpeed": 0.055,
+        "crossingRisk": 0.5,
+        "lanePosition": -1.4,
+        "confidence": 0.54,
+    }]
+    # Hysteresis hasn't upgraded yet, so the FRAME's stabilized state is SAFE
+    # while the primary object's RAW state is CAUTION. Without the fix,
+    # primary_risk_score would be ~0.188 (computed from stabilized=SAFE)
+    # and disagree with objects[0].riskScore == 0.558.
+    frame_row = {
+        "frameIndex": 213,
+        "timestampSec": 7.1,
+        "stabilizedRiskState": "SAFE",
+        "primaryObjectId": 4,
+        "primaryRiskScore": 0.558,  # MUST equal objects[0].riskScore
+        "primaryLane": "left",
+        "objects": objects,
+    }
+    event = {
+        "frame_index": 213,
+        "timestamp_sec": 7.1,
+        "stabilized_risk_state": "SAFE",
+        "primary_object_id": 4,
+        "primary_risk_score": 0.558,
+        "primary_lane": "left",
+        "ttc_sec": 0.87,
+        "near_score": 0.704,
+        "closing_speed": 0.055,
+        "objects": objects,
+    }
+    result = {
+        "fps": 30.0,
+        "frame_count": 1,
+        "processed_frames": 1,
+        "frames": [frame_row],
+        "events": [event],
+        "peak_event": event,
+    }
+
+    payload = _serialize_result(result, elapsed_sec=0.0, source_name="x.mp4")["payload"]
+
+    # Frame-level invariant
+    row = payload["frames"][0]
+    primary_obj = next(o for o in row["objects"] if o["objectId"] == row["primaryObjectId"])
+    assert row["primaryRiskScore"] == primary_obj["riskScore"], (
+        f"primaryRiskScore {row['primaryRiskScore']} != objects[primary].riskScore {primary_obj['riskScore']}"
+    )
+    # Stabilized state can still differ from object's raw state
+    assert row["stabilizedRiskState"] == "SAFE"
+    assert primary_obj["rawRiskState"] == "CAUTION"
+
+    # Same invariant for peakEvent
+    peak = payload["peakEvent"]
+    peak_primary = next(o for o in peak["objects"] if o["objectId"] == peak["primaryObjectId"])
+    assert peak["primaryRiskScore"] == peak_primary["riskScore"]
