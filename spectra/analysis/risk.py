@@ -71,7 +71,7 @@ class SpatialFields:
 # UI from showing nonsense values.
 _TTC_MIN_EXPANSION_RATE = 0.01  # per-second; below this we treat as "stable"
 _TTC_FLOOR_SEC = 0.15
-_TTC_MAX_REPORTED_SEC = 30.0
+_TTC_MAX_REPORTED_SEC = 15.0
 
 # State thresholds. Tuned for highway/urban dashcam: 1 s gives a driver one
 # reaction-time before impact, 3 s is roughly the recommended following gap.
