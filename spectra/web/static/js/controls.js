@@ -139,7 +139,7 @@ export function initializeSpectra() {
       riskState: frame.stabilizedRiskState ?? null,
       objectId: frame.primaryObjectId ?? null,
       objectType: primary?.objectType ?? null,
-      lane: frame.primaryLane ?? null,
+      lane: primary ? (frame.primaryLane ?? null) : null,
       ttcSec: primary?.ttcSec ?? null,
       nearScore: primary?.nearScore ?? null,
       closingSpeed: primary?.closingSpeed ?? null,
@@ -535,7 +535,8 @@ export function initializeSpectra() {
   }
 
   function applyRiskBannerState({ source, timeTag }) {
-    const riskState = source?.riskState || null;
+    const hasObject = source?.objectId !== null && source?.objectId !== undefined;
+    const riskState = hasObject ? (source?.riskState || null) : null;
     const sc = stateClass(riskState);
     const banner = byId("risk-banner");
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
