@@ -23,7 +23,12 @@ from spectra.analysis.risk import (
 )
 from spectra.analysis.tracking import IoUTracker, Track, TrackSample
 from spectra.vision.detection import Detection
-from spectra.vision.road import LaneFrame, lane_position
+from spectra.vision.road import (
+    LaneFrame,
+    filter_relevant_detections,
+    lane_corridor_relevance,
+    lane_position,
+)
 
 
 def make_lane(detected=True):
@@ -90,6 +95,62 @@ class TestLaneGeometry:
 
         assert lower == pytest.approx(0.667, abs=0.02)
         assert upper == pytest.approx(2.0, abs=0.02)
+
+    def test_detection_filter_keeps_near_ego_lane_vehicle(self):
+        lane = make_lane()
+        detections = [
+            Detection(bbox=(130, 145, 170, 199), class_name="car", confidence=0.9),
+        ]
+
+        assert filter_relevant_detections(detections, lane) == detections
+
+    def test_detection_filter_keeps_close_partial_cut_in_vehicle(self):
+        lane = make_lane()
+        detections = [
+            Detection(bbox=(0, 130, 70, 199), class_name="car", confidence=0.9),
+        ]
+
+        assert filter_relevant_detections(detections, lane) == detections
+        assert lane_corridor_relevance(detections[0].bbox, lane) >= 0.7
+
+    def test_detection_filter_keeps_distant_ego_corridor_vehicle(self):
+        lane = make_lane()
+        detections = [
+            Detection(bbox=(145, 88, 155, 110), class_name="car", confidence=0.8),
+        ]
+
+        assert filter_relevant_detections(detections, lane) == detections
+
+    def test_detection_filter_keeps_distant_watch_band_vehicle(self):
+        lane = make_lane()
+        detections = [
+            Detection(bbox=(95, 88, 115, 110), class_name="car", confidence=0.8),
+        ]
+
+        assert filter_relevant_detections(detections, lane) == detections
+
+    def test_detection_filter_rejects_distant_outer_lane_vehicle(self):
+        lane = make_lane()
+        detections = [
+            Detection(bbox=(20, 88, 42, 110), class_name="car", confidence=0.9),
+        ]
+
+        assert filter_relevant_detections(detections, lane) == []
+
+    def test_detection_filter_keeps_static_side_lane_vehicle_out_of_tracker(self):
+        lane = make_lane()
+        tracker = IoUTracker()
+        detections = [
+            Detection(bbox=(260, 130, 290, 190), class_name="car", confidence=0.9),
+        ]
+
+        tracks = tracker.update(
+            filter_relevant_detections(detections, lane),
+            frame_index=0,
+            timestamp_sec=0.0,
+        )
+
+        assert tracks == []
 
 
 class TestDirectionFromLateral:

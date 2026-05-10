@@ -35,6 +35,7 @@ from ..vision.road import (
     build_lane_frame,
     default_road_roi,
     estimate_road_roi_from_lanes,
+    filter_relevant_detections,
 )
 from .tracking import IoUTracker
 from .overlay import annotate_frame
@@ -403,7 +404,7 @@ def analyze_spatial_video(
         # propagates existing tracks so IDs and TTC history stay continuous.
         should_detect = (fi % max(detect_every, 1) == 0)
         if should_detect:
-            detections = detector.detect(frame.bgr)
+            detections = filter_relevant_detections(detector.detect(frame.bgr), lane)
             active_tracks = tracker.update(
                 detections,
                 frame_index=fi,

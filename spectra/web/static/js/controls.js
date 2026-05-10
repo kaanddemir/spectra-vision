@@ -674,7 +674,7 @@ export function initializeSpectra() {
     const source = panelSource();
     const isSummary = state.uiMode === "summary";
     const sourceTime = isSummary ? eventTimestamp(source) : num(source?.timeSec, null);
-    const timeLabel = isSummary ? "Summary" : "Live";
+    const timeLabel = isSummary ? "Peak" : "Live";
 
     byId("risk-panel-title").textContent = isSummary ? "Peak Risk" : "Current Risk";
     byId("objects-panel-title").textContent = isSummary ? "Detected Objects" : "Active Objects";

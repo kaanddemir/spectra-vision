@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from .detection import Detection
+
 
 Line = tuple[int, int, int, int]
 
@@ -199,16 +201,133 @@ def lane_corridor_relevance(
     bbox: tuple[int, int, int, int],
     lane: LaneFrame,
 ) -> float:
-    """How much of the bbox bottom edge sits inside the ego lane."""
+    """How much of the bbox footprint is relevant to the ego lane."""
 
     pos = lane_position(bbox, lane)
     proximity = float(np.exp(-(pos * pos) / 0.50))
 
-    _, y1, _, y2 = bbox
+    x1, y1, x2, y2 = bbox
     bottom_y = float(y2)
     vertical_weight = float(np.clip((bottom_y - 0.30 * lane.height) / max(0.70 * lane.height, 1.0), 0.0, 1.0))
+    relevance = (0.20 + (0.80 * proximity)) * (0.40 + (0.60 * vertical_weight))
 
-    return float(np.clip((0.20 + (0.80 * proximity)) * (0.40 + (0.60 * vertical_weight)), 0.0, 1.0))
+    bbox_h = max(1.0, float(y2 - y1))
+    bottom_frac = bottom_y / max(1.0, float(lane.height))
+    height_frac = bbox_h / max(1.0, float(lane.height))
+    overlap_px, lane_width = _bbox_lane_overlap_px(bbox, lane, margin_ratio=0.08)
+    close_intrusion = bottom_frac >= 0.72 or height_frac >= 0.18
+    if close_intrusion and overlap_px >= max(lane_width * 0.07, lane.width * 0.025):
+        relevance = max(relevance, 0.72)
+    elif overlap_px >= max(lane_width * 0.12, lane.width * 0.045):
+        relevance = max(relevance, 0.55)
+
+    return float(np.clip(relevance, 0.0, 1.0))
+
+
+def _bbox_lane_overlap_px(
+    bbox: tuple[int, int, int, int],
+    lane: LaneFrame,
+    *,
+    margin_ratio: float,
+) -> tuple[float, float]:
+    x1, _, x2, y2 = bbox
+    left_x, right_x = lane_edges_at_y(lane, y2)
+    lane_width = max(1.0, right_x - left_x)
+    margin = lane_width * float(margin_ratio)
+    overlap = max(0.0, min(float(x2), right_x + margin) - max(float(x1), left_x - margin))
+    return float(overlap), float(lane_width)
+
+
+def _bbox_lane_overlap(
+    bbox: tuple[int, int, int, int],
+    lane: LaneFrame,
+    *,
+    margin_ratio: float,
+) -> float:
+    """Fraction of bbox width overlapping the lane corridor at bbox bottom."""
+
+    x1, _, x2, y2 = bbox
+    bbox_width = max(1.0, float(x2 - x1))
+    overlap, _ = _bbox_lane_overlap_px(bbox, lane, margin_ratio=margin_ratio)
+    return float(np.clip(overlap / bbox_width, 0.0, 1.0))
+
+
+def detection_corridor_score(detection: Detection, lane: LaneFrame) -> float:
+    """Score whether a YOLO detection is worth tracking for ego-lane risk.
+
+    YOLO still runs on the full frame. This score gates only the downstream
+    tracker/risk pool so distant vehicles in the ego corridor remain visible,
+    while far side-lane/background detections never receive IDs or overlay
+    boxes.
+    """
+
+    x1, y1, x2, y2 = detection.bbox
+    if x2 <= x1 or y2 <= y1 or lane.width <= 0 or lane.height <= 0:
+        return 0.0
+
+    bbox_h = float(y2 - y1)
+    bbox_cx = (float(x1) + float(x2)) / 2.0
+    bottom_y = float(y2)
+    height = max(1.0, float(lane.height))
+    width = max(1.0, float(lane.width))
+
+    pos = lane_position(detection.bbox, lane)
+    bottom_frac = bottom_y / height
+    height_frac = bbox_h / height
+    is_far = bottom_frac < 0.68 and height_frac < 0.16
+    near_or_large = bottom_frac >= 0.76 or height_frac >= 0.20
+
+    center_score = float(np.exp(-(pos * pos) / 0.72))
+    overlap_score = _bbox_lane_overlap(
+        detection.bbox,
+        lane,
+        margin_ratio=0.20 if near_or_large else 0.10,
+    )
+    overlap_px, lane_width = _bbox_lane_overlap_px(
+        detection.bbox,
+        lane,
+        margin_ratio=0.08 if near_or_large else 0.04,
+    )
+    confidence_score = float(np.clip((detection.confidence - 0.20) / 0.55, 0.0, 1.0))
+    score = (0.58 * center_score) + (0.30 * overlap_score) + (0.12 * confidence_score)
+
+    # Far, tiny detections need a wider "watch" band than near vehicles.
+    # Lane lines converge near the horizon, so a strict lane-position gate
+    # makes legitimate early vehicles appear only after they get close.
+    if is_far:
+        lane_center, lane_width = lane_center_width_at_y(lane, bottom_y)
+        vp_x, _ = lane.vanishing_point
+        far_center = abs(bbox_cx - lane_center) <= max(lane_width * 1.65, width * 0.14)
+        vp_aligned = abs(bbox_cx - float(vp_x)) <= max(lane_width * 2.20, width * 0.20)
+        edge_noise = bbox_cx < width * 0.08 or bbox_cx > width * 0.92
+        if abs(pos) > 2.10 or edge_noise or not (far_center or vp_aligned):
+            return 0.0
+        score = max(score, 0.44)
+
+    # Nearby side-lane objects must at least touch the expanded ego corridor.
+    # This keeps cut-in candidates, but drops static adjacent-lane traffic.
+    if near_or_large and abs(pos) > 0.95:
+        intrudes_lane = overlap_px >= max(lane_width * 0.07, width * 0.025)
+        if not intrudes_lane and (abs(pos) > 1.24 or overlap_score < 0.18):
+            return 0.0
+        score = max(score, 0.58 if intrudes_lane else 0.52)
+
+    return float(np.clip(score, 0.0, 1.0))
+
+
+def filter_relevant_detections(
+    detections: list[Detection],
+    lane: LaneFrame,
+    *,
+    min_score: float = 0.34,
+) -> list[Detection]:
+    """Keep only YOLO detections relevant to the ego-lane risk pipeline."""
+
+    return [
+        detection
+        for detection in detections
+        if detection_corridor_score(detection, lane) >= float(min_score)
+    ]
 
 
 def _fit_polyline_to_y_range(
