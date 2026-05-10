@@ -349,6 +349,7 @@ def analyze_spatial_video(
                 detections,
                 frame_index=fi,
                 timestamp_sec=video_frame.timestamp_sec,
+                frame_shape=frame.bgr.shape,
             )
         else:
             active_tracks = tracker.propagate()

@@ -310,11 +310,11 @@ def detection_corridor_score(detection: Detection, lane: LaneFrame) -> float:
     if is_far:
         lane_center, lane_width = lane_center_width_at_y(lane, bottom_y)
         vp_x, _ = lane.vanishing_point
-        watch_gain = 1.0 + ((1.0 - lane_trust) * 0.55)
-        far_center = abs(bbox_cx - lane_center) <= max(lane_width * 1.65 * watch_gain, width * 0.14)
-        vp_aligned = abs(bbox_cx - float(vp_x)) <= max(lane_width * 2.20 * watch_gain, width * 0.20)
+        watch_gain = 1.0 + ((1.0 - lane_trust) * 0.65)
+        far_center = abs(bbox_cx - lane_center) <= max(lane_width * 1.85 * watch_gain, width * 0.16)
+        vp_aligned = abs(bbox_cx - float(vp_x)) <= max(lane_width * 2.45 * watch_gain, width * 0.22)
         edge_noise = bbox_cx < width * 0.08 or bbox_cx > width * 0.92
-        max_far_pos = 2.10 + ((1.0 - lane_trust) * 0.70)
+        max_far_pos = 2.55 + ((1.0 - lane_trust) * 0.80)
         if abs(pos) > max_far_pos or edge_noise or not (far_center or vp_aligned):
             return 0.0
         score = max(score, 0.44)
@@ -334,7 +334,7 @@ def filter_relevant_detections(
     detections: list[Detection],
     lane: LaneFrame,
     *,
-    min_score: float = 0.34,
+    min_score: float = 0.30,
 ) -> list[Detection]:
     """Keep only YOLO detections relevant to the ego-lane risk pipeline."""
 

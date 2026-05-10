@@ -153,38 +153,62 @@ def _draw_lane_overlay(
     cv2.addWeighted(darkened, 0.52, output, 0.48, 0, output)
 
     if detected:
-        fill_color = (105, 190, 180)
+        fill_color = (
+            int(0.55 * state_color[0] + 0.45 * 120),
+            int(0.55 * state_color[1] + 0.45 * 190),
+            int(0.55 * state_color[2] + 0.45 * 185),
+        )
     else:
         fill_color = (90, 112, 112)
 
     left_bottom, left_top, right_top, right_bottom = [tuple(map(int, p)) for p in corridor]
+    inner_bottom_ratio = 0.18
+    inner_top_ratio = 0.30
     for idx, t0 in enumerate(np.linspace(0.0, 0.82, 5)):
         t1 = min(1.0, t0 + 0.24)
-        lb = (
+        outer_lb = (
             int(round(left_bottom[0] + (left_top[0] - left_bottom[0]) * t0)),
             int(round(left_bottom[1] + (left_top[1] - left_bottom[1]) * t0)),
         )
-        rb = (
+        outer_rb = (
             int(round(right_bottom[0] + (right_top[0] - right_bottom[0]) * t0)),
             int(round(right_bottom[1] + (right_top[1] - right_bottom[1]) * t0)),
         )
-        lt = (
+        outer_lt = (
             int(round(left_bottom[0] + (left_top[0] - left_bottom[0]) * t1)),
             int(round(left_bottom[1] + (left_top[1] - left_bottom[1]) * t1)),
         )
-        rt = (
+        outer_rt = (
             int(round(right_bottom[0] + (right_top[0] - right_bottom[0]) * t1)),
             int(round(right_bottom[1] + (right_top[1] - right_bottom[1]) * t1)),
+        )
+        inset0 = inner_bottom_ratio + ((inner_top_ratio - inner_bottom_ratio) * t0)
+        inset1 = inner_bottom_ratio + ((inner_top_ratio - inner_bottom_ratio) * t1)
+        lb = (
+            int(round(outer_lb[0] + (outer_rb[0] - outer_lb[0]) * inset0)),
+            outer_lb[1],
+        )
+        rb = (
+            int(round(outer_rb[0] + (outer_lb[0] - outer_rb[0]) * inset0)),
+            outer_rb[1],
+        )
+        lt = (
+            int(round(outer_lt[0] + (outer_rt[0] - outer_lt[0]) * inset1)),
+            outer_lt[1],
+        )
+        rt = (
+            int(round(outer_rt[0] + (outer_lt[0] - outer_rt[0]) * inset1)),
+            outer_rt[1],
         )
         band = np.array([lb, lt, rt, rb], dtype=np.int32)
         band_overlay = output.copy()
         cv2.fillPoly(band_overlay, [band], fill_color)
-        base_alpha = 0.14 if detected else 0.07
-        alpha = max(0.025, base_alpha * (1.0 - (idx * 0.17)) * (0.65 + (0.35 * confidence)))
+        base_alpha = 0.24 if detected else 0.11
+        alpha = max(0.035, base_alpha * (1.0 - (idx * 0.17)) * (0.62 + (0.38 * confidence)))
         cv2.addWeighted(band_overlay, alpha, output, 1.0 - alpha, 0, output)
 
-    edge_color = (205, 226, 218) if detected else (115, 130, 128)
-    edge_shadow = (44, 70, 68)
+    edge_color = (214, 228, 222) if detected else (115, 130, 128)
+    edge_shadow = (42, 64, 62)
     edge_thickness = 1 if confidence < 0.80 else 2
     if confidence >= 0.55:
         cv2.line(output, left_bottom, left_top, edge_shadow, edge_thickness + 1, cv2.LINE_AA)

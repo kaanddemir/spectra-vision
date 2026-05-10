@@ -29,6 +29,8 @@ class Track:
     frame_index: int
     timestamp_sec: float
     age: int = 0
+    hits: int = 1
+    confirmed: bool = False
     misses: int = 0
     history: Deque[TrackSample] = field(default_factory=lambda: deque(maxlen=12))
 
@@ -71,11 +73,28 @@ class IoUTracker:
         *,
         iou_threshold: float = 0.25,
         max_misses: int = 5,
+        confirm_hits: int = 2,
+        fast_confirm_confidence: float = 0.70,
+        fast_confirm_height_ratio: float = 0.18,
     ) -> None:
         self.iou_threshold = float(iou_threshold)
         self.max_misses = int(max_misses)
+        self.confirm_hits = int(confirm_hits)
+        self.fast_confirm_confidence = float(fast_confirm_confidence)
+        self.fast_confirm_height_ratio = float(fast_confirm_height_ratio)
         self._next_id = 1
         self._tracks: dict[int, Track] = {}
+
+    def _is_fast_confirm(self, det: Detection, frame_height: int | None) -> bool:
+        if frame_height is None or frame_height <= 0:
+            return False
+        _, y1, _, y2 = det.bbox
+        height_ratio = max(0.0, float(y2 - y1)) / float(frame_height)
+        return det.confidence >= self.fast_confirm_confidence and height_ratio >= self.fast_confirm_height_ratio
+
+    @staticmethod
+    def _visible(tracks: list[Track]) -> list[Track]:
+        return [track for track in tracks if track.confirmed]
 
     def update(
         self,
@@ -83,7 +102,9 @@ class IoUTracker:
         *,
         frame_index: int,
         timestamp_sec: float,
+        frame_shape: tuple[int, int] | tuple[int, int, int] | None = None,
     ) -> list[Track]:
+        frame_height = int(frame_shape[0]) if frame_shape is not None and len(frame_shape) >= 1 else None
         active_tracks = list(self._tracks.values())
         unmatched_dets = list(range(len(detections)))
         matched_track_ids: set[int] = set()
@@ -118,6 +139,9 @@ class IoUTracker:
             track.frame_index = frame_index
             track.timestamp_sec = timestamp_sec
             track.age += 1
+            track.hits += 1
+            if track.hits >= self.confirm_hits or self._is_fast_confirm(det, frame_height):
+                track.confirmed = True
             track.misses = 0
             matched_track_ids.add(track_id)
             used_dets.add(det_idx)
@@ -136,6 +160,8 @@ class IoUTracker:
                 frame_index=frame_index,
                 timestamp_sec=timestamp_sec,
                 age=1,
+                hits=1,
+                confirmed=self._is_fast_confirm(det, frame_height),
                 misses=0,
             )
             new_track_ids.add(track_id)
@@ -150,7 +176,7 @@ class IoUTracker:
             if track.misses > self.max_misses:
                 del self._tracks[track_id]
 
-        return [self._tracks[tid] for tid in updated_ids]
+        return self._visible([self._tracks[tid] for tid in updated_ids])
 
     def propagate(self) -> list[Track]:
         """Return all surviving tracks without consuming a detection frame.
@@ -159,7 +185,7 @@ class IoUTracker:
         returned as-is so risk estimation continues; miss counters are not
         incremented because we chose not to look, not because objects vanished.
         """
-        return list(self._tracks.values())
+        return self._visible(list(self._tracks.values()))
 
     def reset(self) -> None:
         self._tracks.clear()

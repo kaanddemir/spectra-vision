@@ -48,6 +48,16 @@ CLASS_RISK_WEIGHT: dict[str, float] = {
     "train": 0.90,
 }
 
+CLASS_MIN_CONFIDENCE: dict[str, float] = {
+    "person": 0.35,
+    "bicycle": 0.35,
+    "motorcycle": 0.35,
+    "car": 0.40,
+    "bus": 0.40,
+    "train": 0.40,
+    "truck": 0.40,
+}
+
 
 _DEFAULT_YOLO_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "yolov8n.pt"
 
@@ -76,7 +86,7 @@ class ObjectDetector:
         self,
         *,
         model_name: str = "yolov8n.pt",
-        confidence: float = 0.30,
+        confidence: float = 0.35,
         iou: float = 0.45,
         image_size: int = 640,
         device: Optional[str] = None,
@@ -162,6 +172,9 @@ class ObjectDetector:
             class_name = names.get(int(c), str(c)) if isinstance(names, dict) else names[int(c)]
             if class_name not in RELEVANT_CLASSES:
                 continue
+            normalized_class = RELEVANT_CLASSES[class_name]
+            if float(p) < CLASS_MIN_CONFIDENCE.get(normalized_class, self.confidence):
+                continue
             x1 = max(0, int(round(float(box[0]))))
             y1 = max(0, int(round(float(box[1]))))
             x2 = min(width, int(round(float(box[2]))))
@@ -171,7 +184,7 @@ class ObjectDetector:
             detections.append(
                 Detection(
                     bbox=(x1, y1, x2, y2),
-                    class_name=RELEVANT_CLASSES[class_name],
+                    class_name=normalized_class,
                     confidence=float(p),
                 )
             )

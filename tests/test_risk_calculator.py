@@ -157,6 +157,14 @@ class TestLaneGeometry:
 
         assert filter_relevant_detections(detections, lane) == detections
 
+    def test_detection_filter_keeps_distant_outer_watch_vehicle(self):
+        lane = make_lane()
+        detections = [
+            Detection(bbox=(55, 88, 75, 110), class_name="car", confidence=0.8),
+        ]
+
+        assert filter_relevant_detections(detections, lane) == detections
+
     def test_detection_filter_expands_watch_band_when_lane_confidence_is_low(self):
         lane = make_lane()
         low_conf_lane = LaneFrame(
@@ -500,37 +508,60 @@ class TestScoring:
         assert score_event(danger) > score_event(safe)
 
 class TestIoUTracker:
-    def test_assigns_new_ids_to_unmatched_detections(self):
+    def test_pending_tracks_are_hidden_on_first_detection(self):
         tracker = IoUTracker()
         dets = [
-            Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9),
-            Detection(bbox=(100, 100, 150, 150), class_name="car", confidence=0.9),
+            Detection(bbox=(0, 0, 20, 20), class_name="car", confidence=0.6),
         ]
         tracks = tracker.update(dets, frame_index=0, timestamp_sec=0.0)
-        assert len({t.track_id for t in tracks}) == 2
 
-    def test_links_overlapping_detections_across_frames(self):
+        assert tracks == []
+
+    def test_links_and_confirms_overlapping_detections_across_frames(self):
         tracker = IoUTracker(iou_threshold=0.2)
-        first = [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9)]
+        first = [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.6)]
         tracks_t0 = tracker.update(first, frame_index=0, timestamp_sec=0.0)
-        second = [Detection(bbox=(5, 5, 55, 55), class_name="car", confidence=0.9)]
+        second = [Detection(bbox=(5, 5, 55, 55), class_name="car", confidence=0.6)]
         tracks_t1 = tracker.update(second, frame_index=1, timestamp_sec=0.1)
 
-        assert tracks_t0[0].track_id == tracks_t1[0].track_id
+        assert tracks_t0 == []
+        assert tracks_t1[0].track_id == 1
+        assert tracks_t1[0].confirmed
         assert len(tracks_t1[0].history) == 1
+
+    def test_fast_confirms_large_high_confidence_detection(self):
+        tracker = IoUTracker()
+        tracks = tracker.update(
+            [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9)],
+            frame_index=0,
+            timestamp_sec=0.0,
+            frame_shape=(200, 300, 3),
+        )
+
+        assert len(tracks) == 1
+        assert tracks[0].confirmed
+
+    def test_pending_false_positive_does_not_propagate(self):
+        tracker = IoUTracker()
+        tracker.update(
+            [Detection(bbox=(0, 0, 20, 20), class_name="car", confidence=0.6)],
+            frame_index=0,
+            timestamp_sec=0.0,
+        )
+
+        assert tracker.propagate() == []
 
     def test_does_not_link_across_classes(self):
         tracker = IoUTracker(iou_threshold=0.2)
         tracker.update(
-            [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9)],
+            [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.6)],
             frame_index=0,
             timestamp_sec=0.0,
         )
         tracks = tracker.update(
-            [Detection(bbox=(0, 0, 50, 50), class_name="person", confidence=0.9)],
+            [Detection(bbox=(0, 0, 50, 50), class_name="person", confidence=0.6)],
             frame_index=1,
             timestamp_sec=0.1,
         )
 
-        assert tracks[0].class_name == "person"
-        assert len(tracks[0].history) == 0
+        assert tracks == []

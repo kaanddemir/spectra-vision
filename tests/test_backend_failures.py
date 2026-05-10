@@ -20,6 +20,47 @@ def _reset_lanenet_singleton(monkeypatch):
     monkeypatch.setattr(lanenet, "_lanenet_load_error", None)
 
 
+class _FakeTensor:
+    def __init__(self, value):
+        self.value = np.asarray(value)
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.value
+
+
+class _FakeBoxes:
+    def __init__(self, xyxy, cls, conf):
+        self.xyxy = _FakeTensor(xyxy)
+        self.cls = _FakeTensor(cls)
+        self.conf = _FakeTensor(conf)
+
+    def __len__(self):
+        return len(self.conf.value)
+
+
+class _FakeYoloResult:
+    names = {2: "car", 7: "truck"}
+
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+
+class _FakeYoloModel:
+    names = {2: "car", 7: "truck"}
+
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+    def predict(self, **kwargs):
+        return [_FakeYoloResult(self.boxes)]
+
+
 def test_get_depth_model_raises_and_caches_load_failure(monkeypatch):
     _reset_depth_singleton(monkeypatch)
 
@@ -99,6 +140,40 @@ def test_yolo_empty_results_remain_empty_detections():
     detector._device = "cpu"
 
     assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
+
+
+def test_vehicle_detection_below_class_confidence_gate_is_filtered():
+    detector = ObjectDetector()
+    detector._model = _FakeYoloModel(
+        _FakeBoxes(
+            xyxy=[[4, 5, 24, 25]],
+            cls=[2],
+            conf=[0.35],
+        )
+    )
+    detector._device = "cpu"
+
+    detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
+
+    assert detections == []
+
+
+def test_vehicle_detection_above_class_confidence_gate_is_kept():
+    detector = ObjectDetector()
+    detector._model = _FakeYoloModel(
+        _FakeBoxes(
+            xyxy=[[4, 5, 24, 25]],
+            cls=[7],
+            conf=[0.45],
+        )
+    )
+    detector._device = "cpu"
+
+    detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
+
+    assert len(detections) == 1
+    assert detections[0].class_name == "truck"
+    assert detections[0].confidence == pytest.approx(0.45)
 
 
 def test_yolo_unloaded_detector_raises_runtime_error():
