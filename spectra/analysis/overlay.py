@@ -149,32 +149,51 @@ def _draw_lane_overlay(
     outside_mask = np.ones((height, width), dtype=np.uint8)
     cv2.fillPoly(outside_mask, [corridor], 0)
     darkened = output.copy()
-    darkened[outside_mask.astype(bool)] = (darkened[outside_mask.astype(bool)] * 0.90).astype(np.uint8)
-    cv2.addWeighted(darkened, 0.65, output, 0.35, 0, output)
+    darkened[outside_mask.astype(bool)] = (darkened[outside_mask.astype(bool)] * 0.94).astype(np.uint8)
+    cv2.addWeighted(darkened, 0.52, output, 0.48, 0, output)
 
-    fill_alpha = 0.07 + (0.06 * confidence)
     if detected:
-        fill_color = (
-            int(0.65 * state_color[0] + 0.35 * 110),
-            int(0.65 * state_color[1] + 0.35 * 230),
-            int(0.65 * state_color[2] + 0.35 * 220),
-        )
+        fill_color = (105, 190, 180)
     else:
-        fill_color = (95, 125, 125)
-        fill_alpha = 0.05
+        fill_color = (90, 112, 112)
 
-    overlay = output.copy()
-    cv2.fillPoly(overlay, [corridor], fill_color)
-    cv2.addWeighted(overlay, fill_alpha, output, 1.0 - fill_alpha, 0, output)
-
-    edge_color = (165, 235, 225) if detected else (120, 135, 135)
-    edge_thickness = 2 if confidence >= 0.65 else 1
     left_bottom, left_top, right_top, right_bottom = [tuple(map(int, p)) for p in corridor]
+    for idx, t0 in enumerate(np.linspace(0.0, 0.82, 5)):
+        t1 = min(1.0, t0 + 0.24)
+        lb = (
+            int(round(left_bottom[0] + (left_top[0] - left_bottom[0]) * t0)),
+            int(round(left_bottom[1] + (left_top[1] - left_bottom[1]) * t0)),
+        )
+        rb = (
+            int(round(right_bottom[0] + (right_top[0] - right_bottom[0]) * t0)),
+            int(round(right_bottom[1] + (right_top[1] - right_bottom[1]) * t0)),
+        )
+        lt = (
+            int(round(left_bottom[0] + (left_top[0] - left_bottom[0]) * t1)),
+            int(round(left_bottom[1] + (left_top[1] - left_bottom[1]) * t1)),
+        )
+        rt = (
+            int(round(right_bottom[0] + (right_top[0] - right_bottom[0]) * t1)),
+            int(round(right_bottom[1] + (right_top[1] - right_bottom[1]) * t1)),
+        )
+        band = np.array([lb, lt, rt, rb], dtype=np.int32)
+        band_overlay = output.copy()
+        cv2.fillPoly(band_overlay, [band], fill_color)
+        base_alpha = 0.14 if detected else 0.07
+        alpha = max(0.025, base_alpha * (1.0 - (idx * 0.17)) * (0.65 + (0.35 * confidence)))
+        cv2.addWeighted(band_overlay, alpha, output, 1.0 - alpha, 0, output)
+
+    edge_color = (205, 226, 218) if detected else (115, 130, 128)
+    edge_shadow = (44, 70, 68)
+    edge_thickness = 1 if confidence < 0.80 else 2
     if confidence >= 0.55:
+        cv2.line(output, left_bottom, left_top, edge_shadow, edge_thickness + 1, cv2.LINE_AA)
+        cv2.line(output, right_top, right_bottom, edge_shadow, edge_thickness + 1, cv2.LINE_AA)
         cv2.line(output, left_bottom, left_top, edge_color, edge_thickness, cv2.LINE_AA)
         cv2.line(output, right_top, right_bottom, edge_color, edge_thickness, cv2.LINE_AA)
-        cv2.polylines(output, [corridor], isClosed=True, color=(60, 110, 105), thickness=1, lineType=cv2.LINE_AA)
     else:
+        _draw_dashed_line(output, left_bottom, left_top, edge_shadow, thickness=edge_thickness + 1)
+        _draw_dashed_line(output, right_top, right_bottom, edge_shadow, thickness=edge_thickness + 1)
         _draw_dashed_line(output, left_bottom, left_top, edge_color, thickness=edge_thickness)
         _draw_dashed_line(output, right_top, right_bottom, edge_color, thickness=edge_thickness)
 
