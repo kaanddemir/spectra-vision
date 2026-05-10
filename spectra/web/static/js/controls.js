@@ -31,7 +31,6 @@ export function initializeSpectra() {
     timelineRows: [],
     events: [],
     syncFollowVideo: true,
-    activeMainView: "video",
     previewWs: null,
     previewSessionId: null,
     livePreviewActive: false,
@@ -296,19 +295,11 @@ export function initializeSpectra() {
       previewVideo.hidden = true;
       previewVideo.removeAttribute("src");
       previewFrame.classList.remove("has-media", "is-playing");
-      
-      // Also clear overlays
-      ["road"].forEach(name => {
-        const img = byId(`visual-${name}-main`);
-        if (img) { img.hidden = true; img.removeAttribute("src"); }
-      });
-      
       timeCurrent.textContent = "00:00";
       timeTotal.textContent = "00:00";
       seekBar.value = 0;
       seekBar.style.setProperty("--fill", "0%");
       hidePreviewOverlay();
-      updateMapIndicators();
       refreshEmptyStates(true);
       return;
     }
@@ -316,82 +307,22 @@ export function initializeSpectra() {
     previewVideo.hidden = false;
     previewFrame.classList.add("has-media");
     // Hide all empty-state labels so the center play button becomes visible
-    ["empty-video", "empty-road"].forEach(id => {
+    ["empty-video"].forEach(id => {
       const el = byId(id);
       if (el) el.hidden = true;
     });
   }
 
-  function setMiniMedia(name, source) {
-    const image = byId(`visual-${name}`);
-    const frame = byId(`frame-${name}`);
-    const mainImage = byId(`visual-${name}-main`);
-    
-    const resolved = mediaSrc(source);
-    
-    // Update Mini version if it exists
-    if (image && frame) {
-      if (!resolved) {
-        image.hidden = true;
-        image.removeAttribute("src");
-        frame.classList.remove("has-media");
-      } else {
-        image.src = resolved;
-        image.hidden = false;
-        frame.classList.add("has-media");
-      }
-    }
-
-    // Update Main version if it exists
-    if (mainImage) {
-      if (!resolved) {
-        mainImage.hidden = true;
-        mainImage.removeAttribute("src");
-      } else {
-        mainImage.src = resolved;
-      }
-    }
-    refreshEmptyStates();
-  }
-
   function refreshEmptyStates(switchingView) {
     const vEmpty = byId("empty-video");
-    const rEmpty = byId("empty-road");
-    if (!vEmpty || !rEmpty) return;
-
-    const mode = state.activeMainView || "video";
+    if (!vEmpty) return;
     const hasVideo = !!(previewVideo.src && previewVideo.src !== location.href);
 
-    // Always hide all empty labels first
-    vEmpty.hidden = rEmpty.hidden = true;
-
-    if (mode === "video") {
-      if (!hasVideo) {
-        vEmpty.hidden = false;
-      }
-      if (switchingView) {
-        previewVideo.hidden = !hasVideo;
-        previewBlend.hidden = !(hasVideo && previewBlend.src);
-      }
-    } else if (mode === "road") {
-      const img = byId("visual-road-main");
-      const hasSrc = img && img.getAttribute("src");
-      if (!hasSrc) rEmpty.hidden = false;
-      else img.hidden = false;
-      if (switchingView) {
-        // Hide video in road mode as requested
-        previewVideo.hidden = true;
-        previewBlend.hidden = true;
-      }
+    vEmpty.hidden = hasVideo;
+    if (switchingView) {
+      previewVideo.hidden = !hasVideo;
+      previewBlend.hidden = !(hasVideo && previewBlend.src);
     }
-  }
-
-  function updateMapIndicators() {
-    const roadIndicator = byId("road-indicator");
-    const mode = state.activeMainView || "video";
-    const hasRoadMap = !!byId("visual-road-main")?.getAttribute("src");
-
-    if (roadIndicator) roadIndicator.hidden = mode !== "road" || !hasRoadMap;
   }
 
   function clearPreviewOverlayTimer() {
@@ -422,7 +353,6 @@ export function initializeSpectra() {
     const resultImages = state.currentResult?.images || {};
     return {
       original: eventImages.original || resultImages.original,
-      road: eventImages.road || resultImages.road,
       blend: eventImages.blend || resultImages.blend,
     };
   }
@@ -467,7 +397,6 @@ export function initializeSpectra() {
     return {
       images: {
         original: peakImages.original,
-        road: peakImages.road,
         blend: peakImages.blend,
       },
       imagesByRef,
@@ -892,10 +821,6 @@ export function initializeSpectra() {
 
     const blendImage = imageSetForEvent(ev).blend;
     if (blendImage) {
-      if (state.activeMainView !== "video") {
-        const videoBtn = document.querySelector(".side-bar-btn[data-view='video']");
-        if (videoBtn) videoBtn.click();
-      }
       showPreviewOverlay(blendImage, 5000);
     }
   }
@@ -1146,7 +1071,7 @@ export function initializeSpectra() {
     }
   }
 
-  function applyTimelineStateAt(timeSec, { updateImages = true, switchMode = true } = {}) {
+  function applyTimelineStateAt(timeSec, { switchMode = true } = {}) {
     const t = num(timeSec, 0);
     updateChartCursor(t);
     updateVideoTimeControls(t);
@@ -1165,9 +1090,6 @@ export function initializeSpectra() {
     if (switchMode) setUiMode("live", { timeSec: t });
     else renderRiskPanel();
 
-    if (updateImages && state.activeMainView !== "video") {
-      updateMainImageFromTime(t, state.activeMainView);
-    }
   }
 
 
@@ -1195,32 +1117,6 @@ export function initializeSpectra() {
     applyTimelineStateAt(t);
   }
 
-  function updateMainImageFromTime(timeSec, viewMode) {
-    if (!viewMode || viewMode === "video") return;
-    const events = state.events || [];
-    if (!events.length) return;
-
-    let bestEvent = null;
-    let minDiff = Infinity;
-    for (const ev of events) {
-      const diff = Math.abs(ev.timestampSec - timeSec);
-      if (diff < minDiff) {
-        minDiff = diff;
-        bestEvent = ev;
-      }
-    }
-
-    const imageSource = bestEvent?.images?.[viewMode] || state.currentResult?.images?.[viewMode];
-    if (imageSource) {
-      const mainImg = byId(`visual-${viewMode}-main`);
-      if (mainImg) {
-        const src = mediaSrc(imageSource);
-        if (mainImg.src !== src) mainImg.src = src;
-        mainImg.hidden = false;
-      }
-    }
-  }
-
   // ─── full render ─────────────────────────────────────────
   function renderResult(payload) {
     const result = normalizePayload(payload);
@@ -1229,8 +1125,6 @@ export function initializeSpectra() {
     state.timelineRows = result.timelineRows || [];
     state.events = result.events || [];
     state.selectedSummaryEvent = null;
-
-    setMiniMedia("road", result.images.road);
 
     hidePreviewOverlay();
 
@@ -1247,7 +1141,6 @@ export function initializeSpectra() {
       state.currentTimelineRow = null;
     }
     setUiMode("summary");
-    updateMapIndicators();
   }
 
   function renderEmptyState() {
@@ -1258,7 +1151,6 @@ export function initializeSpectra() {
     state.liveEvents = [];
     state.selectedSummaryEvent = null;
     state.currentTimelineRow = null;
-    setMiniMedia("road", "");
     hidePreviewOverlay();
     renderStatRow(null);
     setUiMode("live");
@@ -1266,7 +1158,6 @@ export function initializeSpectra() {
     renderRiskTimeline({ timelineRows: [] });
 
     updateChartCursor(0);
-    updateMapIndicators();
     const fMin = byId("frames-min"), fMax = byId("frames-max");
     if (fMin) fMin.disabled = true;
     if (fMax) fMax.disabled = true;
@@ -1543,13 +1434,6 @@ export function initializeSpectra() {
     renderEmptyState();
     const file = fileInput.files[0];
     setSelectedFile(file);
-    
-    // Auto switch to video mode on upload
-    state.activeMainView = "video";
-    document.querySelectorAll(".side-bar-btn[data-view]").forEach(b => {
-      b.classList.toggle("is-active", b.dataset.view === "video");
-    });
-    updateMapIndicators();
 
     if (!file) { setPreviewMedia(""); state.sourceMeta = null; return; }
     state.previewUrl = URL.createObjectURL(file);
@@ -1917,42 +1801,9 @@ export function initializeSpectra() {
             panel.hidden = !panel.hidden;
             btn.classList.toggle("is-active", !panel.hidden);
           }
-        } else if (viewMode) {
-          const isActive = btn.classList.contains("is-active");
-
-          // Reset all view buttons and overlays
-          document.querySelectorAll(".side-bar-btn[data-view]").forEach(b => b.classList.remove("is-active"));
-          const mainRoad = byId("visual-road-main");
-          if (mainRoad) mainRoad.hidden = true;
-
-          if (viewMode === "video" || isActive) {
-            // Switch to video (or toggle off active mode = back to video)
-            const videoBtn = document.querySelector(".side-bar-btn[data-view='video']");
-            if (videoBtn) videoBtn.classList.add("is-active");
-            state.activeMainView = "video";
-          } else {
-            btn.classList.add("is-active");
-            state.activeMainView = viewMode;
-            // Stop video playback when in analysis modes
-            if (previewVideo && !previewVideo.paused) {
-              previewVideo.pause();
-            }
-          }
-
-          // Center play button and player bar only in original video mode
-          const centerBtn = byId("center-play-btn");
-          const playerBar = document.querySelector(".preview-bar");
-          const isVideoMode = (state.activeMainView === "video");
-
-          if (centerBtn) {
-            centerBtn.classList.toggle("force-hide", !isVideoMode);
-          }
-          if (playerBar) {
-            playerBar.classList.toggle("force-hide", !isVideoMode);
-          }
-
+        } else if (viewMode === "video") {
+          btn.classList.add("is-active");
           refreshEmptyStates(true);
-          updateMapIndicators();
         }
       });
     });

@@ -182,7 +182,7 @@ For each frame:
 10. Risk is computed for every active track.
 11. The highest-risk event is selected.
 12. State transitions are stabilized with hysteresis.
-13. Overlay, depth view, motion view, and road view images are generated.
+13. Original and risk-overlay images are generated for saved events.
 14. A timeline row and event payload are produced.
 
 ### 5. Preprocessing
@@ -479,9 +479,6 @@ For each frame, `spectra/analysis/video.py` produces:
 - `lane_metrics`: scores per lane/object bucket
 - `ttc_components`: expansion, flow, and depth TTC details
 - `original_rgb`: original frame
-- `depth_rgb`: depth heatmap
-- `road_rgb`: road/lane overlay
-- `motion_rgb`: optical-flow visualization
 - `overlay_rgb`: frame with boxes, lane lines, and risk text
 
 Saved events are deduplicated within a 1-second window. If a stronger event appears in the same window, it replaces the previous saved event.

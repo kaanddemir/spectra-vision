@@ -200,7 +200,6 @@
             <img id="visual-blend" class="preview-overlay" alt="Risk overlay" hidden>
 
             <figcaption class="preview-empty" id="empty-video">No video uploaded</figcaption>
-            <figcaption class="preview-empty" id="empty-road" hidden>No road tracking available</figcaption>
 
             <!-- Center play button -->
             <button class="center-play-btn" id="center-play-btn" type="button" aria-label="Play">
@@ -222,11 +221,6 @@
                     <use href="#icon-car"></use>
                   </svg>
                 </button>
-                <button class="side-bar-btn" data-view="road" title="Road Tracking View">
-                  <svg>
-                    <use href="#icon-lane"></use>
-                  </svg>
-                </button>
               </div>
               <div class="side-bar-panels">
                 <div class="side-bar-panel" id="side-panel-info" hidden>
@@ -238,9 +232,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- Extra Main Overlays -->
-            <img id="visual-road-main" class="preview-overlay main-mode-overlay" alt="Road tracking main" hidden>
 
             <!-- Player bar overlay -->
             <div class="preview-bar">
@@ -262,17 +253,6 @@
                   <use href="#icon-expand"></use>
                 </svg>
               </button>
-            </div>
-
-            <div class="map-indicator map-indicator-road" id="road-indicator" hidden>
-              <div class="map-indicator-head">
-                <span>Road Tracking</span>
-              </div>
-              <div class="legend-list">
-                <span><i class="dot lane"></i>Lane Marking</span>
-                <span><i class="dot roi"></i>Road ROI</span>
-                <span><i class="dot trace"></i>Predicted Path</span>
-              </div>
             </div>
           </figure>
 

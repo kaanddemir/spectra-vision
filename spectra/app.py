@@ -92,7 +92,6 @@ def _is_same_event(left: dict[str, Any] | None, right: dict[str, Any] | None) ->
 
 _IMAGE_FIELDS: tuple[tuple[str, str], ...] = (
     ("original", "original_rgb"),
-    ("road", "road_rgb"),
     ("blend", "overlay_rgb"),
 )
 

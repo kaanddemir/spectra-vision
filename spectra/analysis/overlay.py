@@ -133,8 +133,7 @@ def annotate_frame(
 
     if lane is not None and lane.detected and lane.left_line is not None and lane.right_line is not None:
         # Bright cyan polyline traces the actual detected lane edges — this
-        # is what UFLDv2 committed for this frame. Drawing them explicitly lets
-        # you visually verify the detector without switching to the road tab.
+        # is what UFLDv2 committed for this frame.
         line_color = (255, 220, 60)  # warm cyan/yellow, high contrast on tarmac
         for line_endpoints in (lane.left_line, lane.right_line):
             x1, y1, x2, y2 = line_endpoints

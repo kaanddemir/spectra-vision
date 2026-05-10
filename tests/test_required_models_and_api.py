@@ -155,7 +155,6 @@ def test_serialized_result_separates_images_via_imageref():
         "closing_speed": 0.8,
         "objects": objects,
         "original_rgb": _stub_rgb(),
-        "road_rgb": _stub_rgb(),
         "overlay_rgb": _stub_rgb(),
     }
     result = {
@@ -170,7 +169,7 @@ def test_serialized_result_separates_images_via_imageref():
     payload = _serialize_result(result, elapsed_sec=0.0, source_name="x.mp4")["payload"]
     assert payload["peakEvent"]["imageRef"] == "f42"
     assert "f42" in payload["images"]
-    assert set(payload["images"]["f42"].keys()) == {"original", "road", "blend"}
+    assert set(payload["images"]["f42"].keys()) == {"original", "blend"}
     # Same event in events[] is filtered by _is_same_event (peak vs events dedup)
     assert payload["events"] == []
 

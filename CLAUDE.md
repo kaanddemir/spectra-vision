@@ -377,12 +377,9 @@ For each frame, `spectra/analysis/video.py` produces:
 For events that are kept in the saved-events list, the following RGB views are attached:
 
 - `original_rgb`: original frame
-- `depth_rgb`: depth heatmap
-- `road_rgb`: road/lane overlay
-- `motion_rgb`: optical-flow visualization
 - `overlay_rgb`: frame with boxes, lane lines, and risk text
 
-Heavy RGB rendering is deferred. Every frame produces a metadata-only event payload first; the per-frame rendering inputs (frame BGR, flow, depth, lane, road ROI) are stashed in a `_DeferredRender` reference. After the frame's score is compared against the saved-events top-N (and the per-second deduplication window), only events that survive the cut have their RGB views materialized. Frames that never make the saved list pay no rendering cost. Preview ticks render the annotated frame on demand for the JPEG sent over the WebSocket.
+Heavy RGB rendering is deferred. Every frame produces a metadata-only event payload first; the per-frame rendering inputs (frame BGR, tracked objects, and lane geometry) are stashed in a `_DeferredRender` reference. After the frame's score is compared against the saved-events top-N (and the per-second deduplication window), only events that survive the cut have their RGB views materialized. Frames that never make the saved list pay no rendering cost. Preview ticks render the annotated frame on demand for the JPEG sent over the WebSocket.
 
 Saved events are deduplicated within a 1-second window. If a stronger event appears in the same window, it replaces the previous saved event.
 

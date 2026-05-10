@@ -188,29 +188,6 @@
   gap: 10px;
 }
 
-.legend-list {
-  display: grid;
-  gap: 8px;
-}
-.legend-list span {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-soft); /* Softened color */
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.dot {
-  width: 14px; height: 3px; display: inline-block;
-  border-radius: 4px;
-}
-.dot.lane   { background: #ffffff; border: 1px solid rgba(255,255,255,0.4); }
-.dot.roi    { background: #288cb4; }
-.dot.trace  { background: #22c55e; }
-.dot.detect { background: linear-gradient(90deg, #fde047 0 50%, var(--red) 50% 100%); }
-.dot.path   { background: var(--red); }
-
 /* ─── Preview bar (overlay inside frame) ─────────────────── */
 .preview-bar {
   position: absolute;
@@ -369,60 +346,6 @@
 }
 .bar-btn:active { transform: scale(0.96); }
 .bar-btn svg { width: 13px; height: 13px; }
-
-/* ─── Road tracking indicator ────────────────────────────── */
-.map-indicator {
-  position: absolute;
-  top: 12px;
-  right: 54px;
-  z-index: 8;
-  display: grid;
-  gap: 5px;
-  padding: 7px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(8, 8, 10, 0.84);
-  backdrop-filter: blur(12px);
-  width: 170px;
-  opacity: 0;
-  transform: translateY(5px);
-  transition: opacity 180ms ease-out, transform 180ms ease-out;
-  pointer-events: none;
-}
-.map-indicator[hidden] { display: none; }
-.preview-frame:hover .map-indicator:not([hidden]) {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.map-indicator-head,
-.map-indicator-scale {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-}
-.map-indicator-head span {
-  color: var(--text-soft);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-.map-indicator-head strong {
-  color: var(--text);
-  font-size: 10px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-}
-.map-indicator-scale {
-  color: var(--muted);
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 
 /* ─── Mini grid ──────────────────────────────────────────── */
 .mini-grid {

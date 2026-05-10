@@ -137,64 +137,6 @@ def _to_rgb(image_bgr: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
 
-def _road_tracking_rgb(frame_bgr: np.ndarray, road_roi: RoadROI | None = None) -> np.ndarray:
-    """Generate an ADAS-style road tracking overlay from the active ROI."""
-
-    road_roi = road_roi or default_road_roi(frame_bgr.shape)
-    output = frame_bgr.copy()
-    h, w = output.shape[:2]
-    overlay = output.copy()
-
-    pts = road_roi.polygon.astype(np.int32)
-    cv2.fillPoly(overlay, [pts], (180, 140, 40))
-    cv2.addWeighted(overlay, 0.25, output, 0.75, 0, output)
-    cv2.polylines(output, [pts], True, (180, 180, 120), 1, cv2.LINE_AA)
-
-    for line in (road_roi.left_line, road_roi.right_line):
-        if line is None:
-            continue
-        x1, y1, x2, y2 = line
-        cv2.line(output, (x1, y1), (x2, y2), (255, 255, 255), 2, cv2.LINE_AA)
-    
-    path_pts = []
-    left_line = road_roi.left_line
-    right_line = road_roi.right_line
-    for i in range(10):
-        t = i / 9.0
-        curr_y = int(h * (0.60 + t * 0.39))
-        if left_line is not None and right_line is not None:
-            lx = _line_x_at_y(left_line, curr_y)
-            rx = _line_x_at_y(right_line, curr_y)
-            curr_x = int((lx + rx) / 2)
-        else:
-            curr_x = int(w * 0.5)
-        path_pts.append([curr_x, curr_y])
-    
-    path_pts = np.array(path_pts, np.int32)
-    cv2.polylines(output, [path_pts], False, (0, 255, 0), 2, cv2.LINE_AA)
-
-    for i in range(1, 4):
-        dist_y = int(h * (0.60 + i * 0.10))
-        if left_line is not None and right_line is not None:
-            x_start = _line_x_at_y(left_line, dist_y)
-            x_end = _line_x_at_y(right_line, dist_y)
-        else:
-            width_at_y = int(w * (0.16 + i * 0.20))
-            x_start = int(w * 0.5 - width_at_y / 2)
-            x_end = int(w * 0.5 + width_at_y / 2)
-        cv2.line(output, (x_start, dist_y), (x_end, dist_y), (200, 200, 200), 1, cv2.LINE_AA)
-
-    return _to_rgb(output)
-
-
-def _line_x_at_y(line: tuple[int, int, int, int], y: int) -> int:
-    x1, y1, x2, y2 = line
-    if y2 == y1:
-        return int((x1 + x2) / 2)
-    t = (y - y1) / float(y2 - y1)
-    return int(round(x1 + ((x2 - x1) * t)))
-
-
 def _risk_score(event: RiskEvent) -> float:
     state_floor = {
         "SAFE": 0.06,
@@ -270,7 +212,6 @@ class _DeferredRender:
     primary_event: RiskEvent
     all_events: list[RiskEvent]
     lane: Any
-    road_roi: RoadROI | None
 
 
 def _attach_render(payload: dict[str, Any], render: "_DeferredRender") -> dict[str, Any]:
@@ -280,7 +221,6 @@ def _attach_render(payload: dict[str, Any], render: "_DeferredRender") -> dict[s
         render.frame_bgr, render.primary_event, render.all_events, lane=render.lane
     )
     payload["original_rgb"] = _to_rgb(render.frame_bgr)
-    payload["road_rgb"] = _road_tracking_rgb(render.frame_bgr, render.road_roi)
     payload["overlay_rgb"] = _to_rgb(annotated)
     return payload
 
@@ -467,7 +407,6 @@ def analyze_spatial_video(
             primary_event=primary_event,
             all_events=all_events,
             lane=lane,
-            road_roi=road_roi,
         )
 
         # Deduplicate events within 1.0 second window
