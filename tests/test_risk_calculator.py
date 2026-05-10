@@ -21,10 +21,12 @@ from spectra.analysis.risk import (
     ttc_from_expansion,
     ttc_from_flow,
 )
+from spectra.analysis.overlay import annotate_frame
 from spectra.analysis.tracking import IoUTracker, Track, TrackSample
 from spectra.vision.detection import Detection
 from spectra.vision.road import (
     LaneFrame,
+    estimate_road_roi_from_lanes,
     filter_relevant_detections,
     lane_corridor_relevance,
     lane_position,
@@ -88,6 +90,32 @@ def make_track(track_id, bbox, t, history=None):
 
 
 class TestLaneGeometry:
+    def test_lane_roi_confidence_high_for_plausible_inner_lanes(self):
+        lanes = [
+            np.empty((0, 2), dtype=np.float32),
+            np.array([[120, 116], [100, 150], [60, 199]], dtype=np.float32),
+            np.array([[180, 116], [205, 150], [240, 199]], dtype=np.float32),
+            np.empty((0, 2), dtype=np.float32),
+        ]
+
+        roi = estimate_road_roi_from_lanes(lanes, width=300, height=200)
+
+        assert roi.detected
+        assert roi.confidence > 0.75
+
+    def test_lane_roi_rejects_implausibly_wide_lane(self):
+        lanes = [
+            np.empty((0, 2), dtype=np.float32),
+            np.array([[5, 116], [2, 150], [0, 199]], dtype=np.float32),
+            np.array([[295, 116], [298, 150], [299, 199]], dtype=np.float32),
+            np.empty((0, 2), dtype=np.float32),
+        ]
+
+        roi = estimate_road_roi_from_lanes(lanes, width=300, height=200)
+
+        assert not roi.detected
+        assert roi.confidence == pytest.approx(0.25)
+
     def test_lane_position_uses_bbox_bottom_y(self):
         lane = make_lane()
         lower = lane_position((200, 160, 220, 199), lane)
@@ -129,6 +157,17 @@ class TestLaneGeometry:
 
         assert filter_relevant_detections(detections, lane) == detections
 
+    def test_detection_filter_expands_watch_band_when_lane_confidence_is_low(self):
+        lane = make_lane()
+        low_conf_lane = LaneFrame(
+            **{**lane.__dict__, "confidence": 0.25, "detected": False}
+        )
+        detections = [
+            Detection(bbox=(55, 88, 75, 110), class_name="car", confidence=0.8),
+        ]
+
+        assert filter_relevant_detections(detections, low_conf_lane) == detections
+
     def test_detection_filter_rejects_distant_outer_lane_vehicle(self):
         lane = make_lane()
         detections = [
@@ -151,6 +190,18 @@ class TestLaneGeometry:
         )
 
         assert tracks == []
+
+    def test_overlay_handles_detected_and_low_confidence_lanes(self):
+        frame = np.zeros((200, 300, 3), dtype=np.uint8)
+        event = make_event(state="SAFE")
+
+        detected = annotate_frame(frame, event, [event], lane=make_lane())
+        low_conf = annotate_frame(frame, event, [event], lane=make_lane(detected=False))
+
+        assert detected.shape == frame.shape
+        assert low_conf.shape == frame.shape
+        assert detected.dtype == np.uint8
+        assert low_conf.dtype == np.uint8
 
 
 class TestDirectionFromLateral:

@@ -221,6 +221,12 @@ def lane_corridor_relevance(
     elif overlap_px >= max(lane_width * 0.12, lane.width * 0.045):
         relevance = max(relevance, 0.55)
 
+    lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
+    if lane_trust < 1.0:
+        overlap_relevance = float(np.clip(overlap_px / max(lane_width * 0.30, 1.0), 0.0, 1.0))
+        conservative_relevance = max(0.35 * relevance, overlap_relevance)
+        relevance = (lane_trust * relevance) + ((1.0 - lane_trust) * conservative_relevance)
+
     return float(np.clip(relevance, 0.0, 1.0))
 
 
@@ -289,7 +295,14 @@ def detection_corridor_score(detection: Detection, lane: LaneFrame) -> float:
         margin_ratio=0.08 if near_or_large else 0.04,
     )
     confidence_score = float(np.clip((detection.confidence - 0.20) / 0.55, 0.0, 1.0))
+    lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
     score = (0.58 * center_score) + (0.30 * overlap_score) + (0.12 * confidence_score)
+    if lane_trust < 1.0:
+        watch_score = max(
+            score,
+            (0.34 * center_score) + (0.36 * overlap_score) + (0.30 * confidence_score),
+        )
+        score = (lane_trust * score) + ((1.0 - lane_trust) * watch_score)
 
     # Far, tiny detections need a wider "watch" band than near vehicles.
     # Lane lines converge near the horizon, so a strict lane-position gate
@@ -297,10 +310,12 @@ def detection_corridor_score(detection: Detection, lane: LaneFrame) -> float:
     if is_far:
         lane_center, lane_width = lane_center_width_at_y(lane, bottom_y)
         vp_x, _ = lane.vanishing_point
-        far_center = abs(bbox_cx - lane_center) <= max(lane_width * 1.65, width * 0.14)
-        vp_aligned = abs(bbox_cx - float(vp_x)) <= max(lane_width * 2.20, width * 0.20)
+        watch_gain = 1.0 + ((1.0 - lane_trust) * 0.55)
+        far_center = abs(bbox_cx - lane_center) <= max(lane_width * 1.65 * watch_gain, width * 0.14)
+        vp_aligned = abs(bbox_cx - float(vp_x)) <= max(lane_width * 2.20 * watch_gain, width * 0.20)
         edge_noise = bbox_cx < width * 0.08 or bbox_cx > width * 0.92
-        if abs(pos) > 2.10 or edge_noise or not (far_center or vp_aligned):
+        max_far_pos = 2.10 + ((1.0 - lane_trust) * 0.70)
+        if abs(pos) > max_far_pos or edge_noise or not (far_center or vp_aligned):
             return 0.0
         score = max(score, 0.44)
 
@@ -348,6 +363,69 @@ def _fit_polyline_to_y_range(
     x_top = int(np.clip((slope * y_top) + intercept, 0, width - 1))
     x_bottom = int(np.clip((slope * y_bottom) + intercept, 0, width - 1))
     return (x_top, y_top, x_bottom, y_bottom)
+
+
+def _lane_geometry_confidence(
+    left_line: Line,
+    right_line: Line,
+    *,
+    width: int,
+    height: int,
+) -> float:
+    lx_top, _, lx_bottom, _ = left_line
+    rx_top, _, rx_bottom, _ = right_line
+    bottom_width = float(rx_bottom - lx_bottom)
+    top_width = float(rx_top - lx_top)
+    if bottom_width <= 0.0 or top_width <= 0.0:
+        return 0.0
+
+    bottom_ratio = bottom_width / max(float(width), 1.0)
+    if bottom_ratio < 0.12 or bottom_ratio > 0.92:
+        return 0.0
+
+    confidence = 0.94
+    if bottom_ratio < 0.18:
+        confidence -= 0.28
+    elif bottom_ratio > 0.72:
+        confidence -= min(0.34, (bottom_ratio - 0.72) / 0.20 * 0.34)
+
+    center_shift = abs(((lx_bottom + rx_bottom) / 2.0) - (width / 2.0)) / max(float(width), 1.0)
+    if center_shift > 0.42:
+        return 0.0
+    if center_shift > 0.18:
+        confidence -= min(0.35, (center_shift - 0.18) / 0.24 * 0.35)
+
+    width_ratio = top_width / bottom_width
+    if width_ratio > 1.10 or width_ratio < 0.02:
+        return 0.0
+    if width_ratio > 0.72:
+        confidence -= min(0.30, (width_ratio - 0.72) / 0.38 * 0.30)
+
+    left_spread = float(lx_top - lx_bottom)
+    right_spread = float(rx_bottom - rx_top)
+    if left_spread < -width * 0.05 or right_spread < -width * 0.05:
+        confidence -= 0.28
+    elif left_spread < width * 0.02 or right_spread < width * 0.02:
+        confidence -= 0.16
+
+    vp_x, vp_y = compute_vanishing_point(
+        RoadROI(
+            mask=np.zeros((height, width), dtype=bool),
+            polygon=np.empty((0, 2), dtype=np.int32),
+            left_line=left_line,
+            right_line=right_line,
+            confidence=1.0,
+            detected=True,
+        ),
+        width,
+        height,
+    )
+    if vp_x < -width * 0.25 or vp_x > width * 1.25 or vp_y > height * 0.88:
+        confidence -= 0.24
+    if vp_y < height * 0.20:
+        confidence -= 0.12
+
+    return float(np.clip(confidence, 0.0, 0.94))
 
 
 def estimate_road_roi_from_lanes(
@@ -413,8 +491,9 @@ def estimate_road_roi_from_lanes(
         dtype=np.int32,
     )
     mask = _polygon_mask((height, width), polygon)
-    # Both inner lines from UFLDv2 are treated as a strong signal.
-    confidence = 0.75 if detected_count == 1 else 0.92
+    confidence = _lane_geometry_confidence(left_line, right_line, width=width, height=height)
+    if confidence <= 0.05:
+        return default_road_roi((height, width))
     return RoadROI(
         mask=mask,
         polygon=polygon,

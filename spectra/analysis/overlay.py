@@ -109,6 +109,76 @@ def _lane_corridor(width: int, height: int, lane: LaneFrame | None) -> np.ndarra
     )
 
 
+def _draw_dashed_line(
+    output: np.ndarray,
+    p1: tuple[int, int],
+    p2: tuple[int, int],
+    color: tuple[int, int, int],
+    *,
+    thickness: int,
+    dash_px: int = 14,
+    gap_px: int = 9,
+) -> None:
+    x1, y1 = p1
+    x2, y2 = p2
+    length = float(np.hypot(x2 - x1, y2 - y1))
+    if length <= 1.0:
+        return
+    step = dash_px + gap_px
+    for start in np.arange(0.0, length, step):
+        end = min(start + dash_px, length)
+        t0 = start / length
+        t1 = end / length
+        a = (int(round(x1 + (x2 - x1) * t0)), int(round(y1 + (y2 - y1) * t0)))
+        b = (int(round(x1 + (x2 - x1) * t1)), int(round(y1 + (y2 - y1) * t1)))
+        cv2.line(output, a, b, color, thickness, cv2.LINE_AA)
+
+
+def _draw_lane_overlay(
+    output: np.ndarray,
+    lane: LaneFrame | None,
+    state_color: tuple[int, int, int],
+) -> None:
+    height, width = output.shape[:2]
+    corridor = _lane_corridor(width, height, lane)
+    confidence = float(np.clip(lane.confidence if lane is not None else 0.25, 0.0, 1.0))
+    detected = bool(lane is not None and lane.detected and confidence >= 0.35)
+
+    # Slightly separate non-ego-lane space without making the video feel like
+    # a debug mask. The lane itself stays readable but unobtrusive.
+    outside_mask = np.ones((height, width), dtype=np.uint8)
+    cv2.fillPoly(outside_mask, [corridor], 0)
+    darkened = output.copy()
+    darkened[outside_mask.astype(bool)] = (darkened[outside_mask.astype(bool)] * 0.90).astype(np.uint8)
+    cv2.addWeighted(darkened, 0.65, output, 0.35, 0, output)
+
+    fill_alpha = 0.07 + (0.06 * confidence)
+    if detected:
+        fill_color = (
+            int(0.65 * state_color[0] + 0.35 * 110),
+            int(0.65 * state_color[1] + 0.35 * 230),
+            int(0.65 * state_color[2] + 0.35 * 220),
+        )
+    else:
+        fill_color = (95, 125, 125)
+        fill_alpha = 0.05
+
+    overlay = output.copy()
+    cv2.fillPoly(overlay, [corridor], fill_color)
+    cv2.addWeighted(overlay, fill_alpha, output, 1.0 - fill_alpha, 0, output)
+
+    edge_color = (165, 235, 225) if detected else (120, 135, 135)
+    edge_thickness = 2 if confidence >= 0.65 else 1
+    left_bottom, left_top, right_top, right_bottom = [tuple(map(int, p)) for p in corridor]
+    if confidence >= 0.55:
+        cv2.line(output, left_bottom, left_top, edge_color, edge_thickness, cv2.LINE_AA)
+        cv2.line(output, right_top, right_bottom, edge_color, edge_thickness, cv2.LINE_AA)
+        cv2.polylines(output, [corridor], isClosed=True, color=(60, 110, 105), thickness=1, lineType=cv2.LINE_AA)
+    else:
+        _draw_dashed_line(output, left_bottom, left_top, edge_color, thickness=edge_thickness)
+        _draw_dashed_line(output, right_top, right_bottom, edge_color, thickness=edge_thickness)
+
+
 def annotate_frame(
     frame_bgr: np.ndarray,
     primary_event: RiskEvent,
@@ -119,25 +189,9 @@ def annotate_frame(
     height, width = output.shape[:2]
     color = COLORS.get(primary_event.state, (220, 220, 220))
 
-    # 1. Forward collision corridor. Use detected lane geometry when present;
-    # otherwise keep the historical fixed perspective corridor. The corridor
-    # fill is risk-state coloured (subtle on SAFE), but the lane edges
-    # themselves are drawn in a fixed bright colour on top so the user can
-    # always see what the lane detector is producing — independent of
-    # whether the scene is calm or dangerous.
-    cone_pts = _lane_corridor(width, height, lane)
-    overlay = output.copy()
-    cv2.fillPoly(overlay, [cone_pts], color)
-    cv2.addWeighted(overlay, 0.12, output, 0.88, 0, output)
-    cv2.polylines(output, [cone_pts], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
-
-    if lane is not None and lane.detected and lane.left_line is not None and lane.right_line is not None:
-        # Bright cyan polyline traces the actual detected lane edges — this
-        # is what UFLDv2 committed for this frame.
-        line_color = (255, 220, 60)  # warm cyan/yellow, high contrast on tarmac
-        for line_endpoints in (lane.left_line, lane.right_line):
-            x1, y1, x2, y2 = line_endpoints
-            cv2.line(output, (int(x1), int(y1)), (int(x2), int(y2)), line_color, 3, cv2.LINE_AA)
+    # 1. Forward collision corridor. This is presentation only; risk uses the
+    # same lane geometry upstream and adjusts trust via lane confidence.
+    _draw_lane_overlay(output, lane, color)
 
     # 2. Per-object bboxes — paint SAFE first, then CAUTION/DANGER on top so
     # the worst object stays visually dominant when bboxes overlap.

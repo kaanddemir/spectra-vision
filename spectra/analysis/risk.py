@@ -85,6 +85,7 @@ _EXPANSION_EMA_FALL = 0.30
 # Maximum lateral velocity in lane-units per second that we still treat as
 # real path-cross. Above this is bbox jitter or detection swap.
 _LATERAL_MAX_LANE_PER_SEC = 4.0
+_LANE_TRUST_FLOOR = 0.45
 
 
 def lane_bucket_from_position(pos: float) -> str:
@@ -347,6 +348,9 @@ def lane_crossing_risk(
     # (|pos|=1 in our half-lane convention).
     margin = max(0.0, abs(predicted_pos) - 0.6)
     predicted_relevance = float(np.exp(-(margin * margin) / 0.25))
+    lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
+    if lane_trust < 1.0:
+        predicted_relevance *= lane_trust
     return float(np.clip(max(base, predicted_relevance), 0.0, 1.0))
 
 
@@ -399,11 +403,12 @@ def classify_state(
     expansion_rate: float,
     lane_pos: float,
     confidence: float,
+    lane_confidence: float = 1.0,
 ) -> str:
     if confidence < 0.20:
         return "SAFE"
 
-    in_ego_lane = abs(lane_pos) < 0.7
+    in_ego_lane = abs(lane_pos) < 0.7 and lane_confidence >= _LANE_TRUST_FLOOR
 
     if fused_ttc is not None:
         if fused_ttc < _DANGER_TTC_SEC and (in_ego_lane or crossing >= 0.55):
@@ -554,6 +559,7 @@ def calculate_track_risk(
         expansion_rate=expansion_rate,
         lane_pos=pos,
         confidence=detection_confidence,
+        lane_confidence=lane.confidence,
     )
 
     return RiskEvent(
