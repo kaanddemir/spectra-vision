@@ -56,6 +56,10 @@
       <path d="M6 6l12 12" />
       <path d="M18 6 6 18" />
     </symbol>
+    <symbol id="icon-reset" viewBox="0 0 24 24">
+      <path d="M4 7v5h5" />
+      <path d="M5.5 12A7 7 0 1 0 8 6.7L4 11" />
+    </symbol>
     <symbol id="icon-expand" viewBox="0 0 24 24">
       <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4" />
     </symbol>
@@ -133,7 +137,11 @@
     <input type="hidden" name="mode" value="video">
     <input type="hidden" name="max_processed_frames" value="180">
     <input type="hidden" name="max_saved_events" value="20">
+    <input type="hidden" name="resize_max_side" value="512">
     <input type="hidden" name="depth_every" value="10">
+    <input type="hidden" name="detect_every" value="3">
+    <input type="hidden" name="lane_every" value="5">
+    <input type="hidden" name="flow_every" value="1">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
   </form>
@@ -213,12 +221,6 @@
                 <button class="side-bar-btn" data-toggle="side-panel-info" title="Video Info">
                   <svg>
                     <use href="#icon-info"></use>
-                  </svg>
-                </button>
-                <div class="side-bar-sep"></div>
-                <button class="side-bar-btn is-active" data-view="video" title="Original Video">
-                  <svg>
-                    <use href="#icon-car"></use>
                   </svg>
                 </button>
               </div>
@@ -542,43 +544,6 @@
 
         <div class="drawer-section">
           <div class="drawer-section-header">
-            <h3>Fine-tuning</h3>
-            <span class="info-tip">
-              <svg>
-                <use href="#icon-info"></use>
-              </svg>
-              <div class="tooltip-content">
-                Adjust frame count and sampling rate.
-              </div>
-            </span>
-          </div>
-          <label class="drawer-row">
-            <span>Max Processed Frames</span>
-            <div class="input-with-shortcuts">
-              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1"
-                placeholder="Auto" disabled>
-              <div class="input-shortcuts">
-                <button type="button" class="shortcut-btn" id="frames-min" disabled>MIN</button>
-                <button type="button" class="shortcut-btn" id="frames-max" disabled>MAX</button>
-              </div>
-            </div>
-          </label>
-
-          <label class="drawer-row">
-            <span>Depth Sampling</span>
-            <div class="segmented-control" data-param="depth_every">
-              <button type="button" class="segmented-btn" data-value="1">1x</button>
-              <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn" data-value="3">3x</button>
-              <button type="button" class="segmented-btn" data-value="5">5x</button>
-              <button type="button" class="segmented-btn active" data-value="10">10x</button>
-            </div>
-          </label>
-
-        </div>
-
-        <div class="drawer-section">
-          <div class="drawer-section-header">
             <h3>Temporal Window</h3>
             <span class="info-tip">
               <svg>
@@ -590,6 +555,24 @@
             </span>
           </div>
           <label class="drawer-row">
+            <span>Analysis Scope</span>
+            <div class="segmented-control" id="analysis-window-mode">
+              <button type="button" class="segmented-btn active" data-window-mode="frames">Frames</button>
+              <button type="button" class="segmented-btn" data-window-mode="time">Time</button>
+            </div>
+          </label>
+          <label class="drawer-row">
+            <span>Max Processed Frames</span>
+            <div class="input-with-shortcuts">
+              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1"
+                placeholder="Auto" disabled>
+              <div class="input-shortcuts">
+                <button type="button" class="shortcut-btn" id="frames-min" disabled>MIN</button>
+                <button type="button" class="shortcut-btn" id="frames-max" disabled>MAX</button>
+              </div>
+            </div>
+          </label>
+          <label class="drawer-row">
             <span>Start Time (s)</span>
             <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" placeholder="0.0"
               disabled>
@@ -597,6 +580,83 @@
           <label class="drawer-row">
             <span>End Time (s)</span>
             <input id="end-time-input" data-param="end_sec" type="number" min="0" step="0.5" placeholder="Max" disabled>
+          </label>
+        </div>
+
+        <div class="drawer-section">
+          <div class="drawer-section-header">
+            <h3>Advanced Sampling</h3>
+            <div class="drawer-header-actions">
+              <button id="reset-advanced-sampling" class="drawer-icon-btn" type="button" title="Reset advanced sampling"
+                aria-label="Reset advanced sampling">
+                <svg>
+                  <use href="#icon-reset"></use>
+                </svg>
+              </button>
+              <span class="info-tip">
+                <svg>
+                  <use href="#icon-info"></use>
+                </svg>
+                <div class="tooltip-content">
+                  Tune detector, lane, and motion intervals. Lower values are more responsive; higher values are faster.
+                </div>
+              </span>
+            </div>
+          </div>
+          <label class="drawer-row">
+            <span>Depth Sampling</span>
+            <div class="segmented-control" data-param="depth_every">
+              <button type="button" class="segmented-btn" data-value="1">1x</button>
+              <button type="button" class="segmented-btn" data-value="2">2x</button>
+              <button type="button" class="segmented-btn" data-value="3">3x</button>
+              <button type="button" class="segmented-btn" data-value="5">5x</button>
+              <button type="button" class="segmented-btn active" data-value="10">10x</button>
+            </div>
+          </label>
+          <label class="drawer-row">
+            <span>YOLO Detection</span>
+            <div class="segmented-control" data-param="detect_every">
+              <button type="button" class="segmented-btn" data-value="1">1x</button>
+              <button type="button" class="segmented-btn" data-value="2">2x</button>
+              <button type="button" class="segmented-btn active" data-value="3">3x</button>
+              <button type="button" class="segmented-btn" data-value="5">5x</button>
+              <button type="button" class="segmented-btn" data-value="10">10x</button>
+            </div>
+          </label>
+          <label class="drawer-row">
+            <span>Lane Detection</span>
+            <div class="segmented-control" data-param="lane_every">
+              <button type="button" class="segmented-btn" data-value="1">1x</button>
+              <button type="button" class="segmented-btn" data-value="2">2x</button>
+              <button type="button" class="segmented-btn" data-value="3">3x</button>
+              <button type="button" class="segmented-btn active" data-value="5">5x</button>
+              <button type="button" class="segmented-btn" data-value="10">10x</button>
+            </div>
+          </label>
+          <label class="drawer-row">
+            <span>Optical Flow</span>
+            <div class="segmented-control" data-param="flow_every">
+              <button type="button" class="segmented-btn active" data-value="1">1x</button>
+              <button type="button" class="segmented-btn" data-value="2">2x</button>
+              <button type="button" class="segmented-btn" data-value="3">3x</button>
+              <button type="button" class="segmented-btn" data-value="5">5x</button>
+              <button type="button" class="segmented-btn" data-value="10">10x</button>
+            </div>
+          </label>
+          <label class="drawer-row">
+            <span>Saved Events</span>
+            <input id="max-saved-events-input" data-param="max_saved_events" type="number" min="1" max="50" step="1"
+              value="20">
+          </label>
+          <label class="drawer-row">
+            <span>Analysis Resolution</span>
+            <div class="segmented-control" data-param="resize_max_side">
+              <button type="button" class="segmented-btn" data-value="256">256</button>
+              <button type="button" class="segmented-btn" data-value="384">384</button>
+              <button type="button" class="segmented-btn active" data-value="512">512</button>
+              <button type="button" class="segmented-btn" data-value="768">768</button>
+              <button type="button" class="segmented-btn" data-value="1024">1024</button>
+            </div>
           </label>
         </div>
 
@@ -793,13 +853,18 @@
                 </tr>
                 <tr>
                   <td><span class="module-name">Optical Flow</span></td>
-                  <td><span class="freq-badge freq-every">Every frame</span></td>
-                  <td class="skip-cell">—</td>
+                  <td><span class="freq-badge freq-every">Default: every frame</span></td>
+                  <td class="skip-cell">Previous flow reused</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">YOLO Detection</span></td>
-                  <td><span class="freq-badge freq-periodic">Every 3rd frame</span></td>
+                  <td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td>
                   <td class="skip-cell">Tracker propagates existing IDs</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Detection Filtering</span></td>
+                  <td><span class="freq-badge freq-periodic">On YOLO frames</span></td>
+                  <td class="skip-cell">Non-relevant objects ignored</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">Tracking</span></td>
@@ -808,12 +873,12 @@
                 </tr>
                 <tr>
                   <td><span class="module-name">Lane Detection</span></td>
-                  <td><span class="freq-badge freq-periodic">Every 5th frame</span></td>
-                  <td class="skip-cell">Last high-confidence ROI reused</td>
+                  <td><span class="freq-badge freq-periodic">Default: every 5th frame</span></td>
+                  <td class="skip-cell">Last ROI reused and smoothed</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">Depth Estimation</span></td>
-                  <td><span class="freq-badge freq-slow">Every 10th frame</span></td>
+                  <td><span class="freq-badge freq-slow">Default: every 10th frame</span></td>
                   <td class="skip-cell">Previous depth map retained</td>
                 </tr>
                 <tr>
@@ -830,6 +895,11 @@
                   <td><span class="module-name">Timeline Row</span></td>
                   <td><span class="freq-badge freq-every">Every frame</span></td>
                   <td class="skip-cell">—</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Event Selection</span></td>
+                  <td><span class="freq-badge freq-every">Every frame</span></td>
+                  <td class="skip-cell">Top risk events kept</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">Render Images</span></td>

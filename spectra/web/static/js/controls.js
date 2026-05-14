@@ -37,6 +37,7 @@ export function initializeSpectra() {
     liveTimelineRows: [],
     liveEvents: [],
     uiMode: "live",
+    analysisWindowMode: "frames",
     selectedSummaryEvent: null,
     currentTimelineRow: null,
     suppressVideoSyncCount: 0,
@@ -469,6 +470,7 @@ export function initializeSpectra() {
       endInp.placeholder = previewVideo.duration.toFixed(1);
       endInp.disabled = false;
     }
+    applyAnalysisWindowMode();
 
     renderTimeline(null);
   }
@@ -504,6 +506,22 @@ export function initializeSpectra() {
   function objectTtcLabel(value) {
     const n = num(value, null);
     return n === null ? "-" : `${n.toFixed(1)}s`;
+  }
+
+  function focusSummaryFrame(source) {
+    if (state.uiMode !== "summary") return;
+    const ts = eventTimestamp(source);
+    if (ts === null) return;
+    state.suppressVideoSyncCount = 2;
+    seekPreviewVideo(ts);
+    updateChartCursor(ts);
+    updateVideoTimeControls(ts);
+    setActiveEventIndex(nearestEventIndexAt(ts));
+
+    const blendImage = imageSetForEvent(source).blend;
+    if (blendImage) {
+      showPreviewOverlay(blendImage, 5000);
+    }
   }
 
   function stateLabel(value) {
@@ -587,6 +605,7 @@ export function initializeSpectra() {
           button.className = `detection-row is-${sClass} ${isSelected ? 'is-selected' : ''}`;
           button.onclick = () => {
             state.selectedObjectId = isSelected ? null : item.objectId;
+            focusSummaryFrame(source);
             renderRiskPanel();
           };
           button.innerHTML = `
@@ -1327,6 +1346,15 @@ export function initializeSpectra() {
   function buildFormData() {
     const fd = new FormData(form);
     fd.set("mode", "video");
+    if (state.analysisWindowMode === "time") {
+      fd.set("max_processed_frames", "2000");
+      fd.set("start_sec", String(num(fd.get("start_sec"), 0)));
+      fd.set("end_sec", String(num(fd.get("end_sec"), 0)));
+    } else {
+      fd.set("max_processed_frames", String(num(fd.get("max_processed_frames"), 180)));
+      fd.set("start_sec", "0");
+      fd.set("end_sec", "0");
+    }
 
     return fd;
   }
@@ -1464,6 +1492,7 @@ export function initializeSpectra() {
     const startInp = byId("start-time-input"), endInp = byId("end-time-input");
     if (startInp) { startInp.value = ""; startInp.max = ""; startInp.disabled = true; }
     if (endInp) { endInp.value = ""; endInp.max = ""; endInp.disabled = true; }
+    applyAnalysisWindowMode();
   }
 
   // ─── settings drawer ─────────────────────────────────────
@@ -1500,6 +1529,7 @@ export function initializeSpectra() {
   function setupSegmentedControls() {
     document.querySelectorAll(".segmented-control").forEach(ctrl => {
       const param = ctrl.dataset.param;
+      if (!param) return;
       ctrl.querySelectorAll(".segmented-btn").forEach(btn => {
         btn.addEventListener("click", () => {
           const val = btn.dataset.value;
@@ -1511,6 +1541,73 @@ export function initializeSpectra() {
         });
       });
     });
+  }
+
+  function applyAnalysisWindowMode() {
+    const mode = state.analysisWindowMode === "time" ? "time" : "frames";
+    const hasSource = !!state.sourceMeta?.durationSec;
+
+    document.querySelectorAll("[data-window-mode]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.windowMode === mode);
+    });
+
+    const framesInput = byId("max-frames-input");
+    const startInp = byId("start-time-input");
+    const endInp = byId("end-time-input");
+    const framesMin = byId("frames-min");
+    const framesMax = byId("frames-max");
+
+    if (framesInput) framesInput.disabled = !hasSource || mode !== "frames";
+    if (framesMin) framesMin.disabled = !hasSource || mode !== "frames";
+    if (framesMax) framesMax.disabled = !hasSource || mode !== "frames";
+    if (startInp) startInp.disabled = !hasSource || mode !== "time";
+    if (endInp) endInp.disabled = !hasSource || mode !== "time";
+  }
+
+  function setupAnalysisWindowMode() {
+    document.querySelectorAll("[data-window-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.analysisWindowMode = btn.dataset.windowMode === "time" ? "time" : "frames";
+        applyAnalysisWindowMode();
+      });
+    });
+    applyAnalysisWindowMode();
+  }
+
+  function setupMaxSavedEventsClamp() {
+    const input = byId("max-saved-events-input");
+    if (!input) return;
+    input.addEventListener("input", () => {
+      const value = num(input.value, null);
+      if (value !== null && value > 50) {
+        input.value = "50";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  }
+
+  function setSegmentedValue(param, value) {
+    const control = document.querySelector(`.segmented-control[data-param="${param}"]`);
+    const hidden = formField(param);
+    if (hidden) hidden.value = String(value);
+    if (!control) return;
+    control.querySelectorAll(".segmented-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.value === String(value));
+    });
+  }
+
+  function resetAdvancedSampling() {
+    setSegmentedValue("depth_every", 10);
+    setSegmentedValue("detect_every", 3);
+    setSegmentedValue("lane_every", 5);
+    setSegmentedValue("flow_every", 1);
+    setSegmentedValue("resize_max_side", 512);
+
+    const savedEvents = byId("max-saved-events-input");
+    if (savedEvents) {
+      savedEvents.value = "20";
+      savedEvents.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }
 
   function setRangeFill(input) {
@@ -1743,6 +1840,7 @@ export function initializeSpectra() {
 
     byId("open-settings")?.addEventListener("click", openDrawer);
     byId("open-help")?.addEventListener("click", openHelpModal);
+    byId("reset-advanced-sampling")?.addEventListener("click", resetAdvancedSampling);
     byId("view-json-btn")?.addEventListener("click", openJsonView);
     byId("download-json-btn")?.addEventListener("click", downloadJson);
     byId("copy-json-btn")?.addEventListener("click", copyJson);
@@ -1790,6 +1888,8 @@ export function initializeSpectra() {
 
     setupPreviewControls();
     setupSegmentedControls();
+    setupAnalysisWindowMode();
+    setupMaxSavedEventsClamp();
 
     document.querySelectorAll(".side-bar-btn").forEach((btn) => {
       btn.addEventListener("click", () => {

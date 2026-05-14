@@ -13,7 +13,7 @@ The current pipeline is object-centric and does not use external narrative servi
 - Classical DIS dense optical flow with ego-motion compensation
 - Fused TTC from bbox expansion, radial flow, and depth delta
 - `SAFE`, `CAUTION`, and `DANGER` states
-- Timeline rows, lane metrics, event snapshots, depth view, motion view, and overlay view
+- Timeline rows, per-object metrics, event snapshots, live preview, and overlay imagery
 
 ## Requirements
 
@@ -98,8 +98,7 @@ spectra/
 3. `spectra/vision/preprocessing.py`
    - Resizes frames
    - Converts BGR frames to RGB and grayscale
-   - Applies denoising and CLAHE enhancement
-   - Produces enhanced grayscale and denoised RGB images
+   - Keeps compatibility aliases for enhanced grayscale and denoised RGB without running heavy denoise/CLAHE
 
 4. `spectra/vision/motion.py`
    - Uses OpenCV DIS dense optical flow with ego-motion compensation
@@ -115,7 +114,7 @@ spectra/
     - Calculates lane position, crossing risk, fused TTC, confidence, and risk state
 
 7. `spectra/analysis/overlay.py`
-    - Draws lane corridor, object boxes, TTC components, and summary text onto frames
+    - Draws lane corridor, object boxes, state/TTC, and compact risk-factor bars onto frames
 
 ## How the Algorithm Works
 
@@ -132,7 +131,7 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 - Motion: OpenCV DIS produces dense optical flow, with ego-motion compensation.
 - Risk: TTC, lane relationship, nearness, closing speed, and confidence are fused into a risk state.
 
-The backend returns timeline rows, the peak event, lane metrics, TTC components, and visual overlays to the frontend.
+The backend returns timeline rows, the peak event, per-object risk metrics, and deferred visual overlays to the frontend.
 
 ### 2. Main Entry Point
 
@@ -171,19 +170,19 @@ The main frame loop lives in `spectra/analysis/video.py`.
 For each frame:
 
 1. `VideoLoader` reads the frame with OpenCV.
-2. `spectra/vision/preprocessing.py` resizes and enhances the frame.
-3. RGB, grayscale, CLAHE-enhanced grayscale, and denoised RGB variants are created.
-4. `spectra/vision/road.py` estimates the road corridor.
-5. The vanishing point is computed and smoothed with EMA.
-6. Optical flow is computed between the previous and current frames.
-7. A cheap motion score decides whether depth should be refreshed early.
-8. YOLO detects road participants.
-9. The IoU tracker links detections to existing tracks.
-10. Risk is computed for every active track.
-11. The highest-risk event is selected.
-12. State transitions are stabilized with hysteresis.
-13. Original and risk-overlay images are generated for saved events.
-14. A timeline row and event payload are produced.
+2. `spectra/vision/preprocessing.py` resizes the frame and produces RGB and grayscale views.
+3. UFLDv2 estimates the ego-lane corridor on the configured lane interval; cached lane geometry is reused between runs and smoothed with Kalman coasting.
+4. DIS optical flow is computed on the configured flow interval; skipped frames reuse the previous flow.
+5. A cheap motion score decides whether depth should be refreshed early.
+6. Depth Anything V2 estimates a relative nearness map when scheduled or motion-triggered.
+7. YOLO detects road participants on the configured detection interval.
+8. Detections are filtered by ego-lane relevance before tracking.
+9. The IoU tracker links detections to existing tracks or propagates tracks on skipped detection frames.
+10. Risk is computed for every active track and the primary object is selected.
+11. State transitions are stabilized with hysteresis.
+12. A metadata-only event payload and timeline row are produced for every processed frame.
+13. Saved events are deduplicated, ranked, and trimmed to `max_saved_events`.
+14. Heavy RGB render outputs are generated only for saved events and on-demand previews.
 
 ### 5. Preprocessing
 
@@ -196,16 +195,14 @@ Steps:
 - Resize the image while preserving aspect ratio according to `resize_max_side`.
 - Convert BGR to RGB.
 - Create a grayscale image.
-- Denoise the grayscale image.
-- Improve contrast using CLAHE.
-- Reapply the enhanced luminance channel through LAB color space.
+- Skip heavy denoising and CLAHE; Depth Anything V2 and DIS flow operate reliably on the resized frame, and avoiding denoise keeps CPU cost lower.
 
 The output is a `PreprocessedFrame`:
 
 - `bgr`: frame used by OpenCV drawing and detection
 - `gray`: grayscale frame
-- `enhanced_gray`: contrast-enhanced grayscale frame
-- `denoised_rgb`: cleaned RGB frame used by the ONNX models
+- `enhanced_gray`: alias of `gray` for compatibility
+- `denoised_rgb`: alias of plain RGB for compatibility and depth input
 
 ### 6. Road and Lane Geometry
 
@@ -473,13 +470,11 @@ If there are no active tracks, Spectra emits a synthetic `SAFE` event. This keep
 
 For each frame, `spectra/analysis/video.py` produces:
 
-- `timeline_rows`: frame-level risk history
-- `events`: saved high-risk moments
-- `peak_event`: highest-risk event in the analysis
-- `lane_metrics`: scores per lane/object bucket
-- `ttc_components`: expansion, flow, and depth TTC details
-- `original_rgb`: original frame
-- `overlay_rgb`: frame with boxes, lane lines, and risk text
+- `frames`: frame-level risk history for the timeline
+- `events`: saved high-risk moments after deduplication and top-N trimming
+- `peak_event`: highest-risk saved event in the analysis
+- `objects`: per-frame object metrics, including TTC, lane, risk score, proximity, approach, crossing, and confidence
+- `images`: shared image payloads referenced by saved events
 
 Saved events are deduplicated within a 1-second window. If a stronger event appears in the same window, it replaces the previous saved event.
 
@@ -492,10 +487,10 @@ It draws:
 - Ego lane corridor
 - Object bounding boxes
 - Risk-state colors
-- TTC components
+- State and fused TTC
 - Object class
 - Lane position
-- Summary risk text
+- Compact proximity, approach, crossing, and confidence bars
 
 This overlay is used for live preview and saved event imagery.
 
@@ -507,9 +502,11 @@ Frontend responsibilities:
 
 - File selection and upload
 - WebSocket preview listening
+- Analysis settings for frame/time scope, sampling intervals, saved-event count, and processing resolution
 - Timeline and event strip rendering
 - Risk banner updates
-- Depth, road, motion, and overlay views
+- Active/detected object list with per-object TTC and risk factors
+- Summary object clicks seek the preview back to that peak frame
 - Telemetry JSON export
 
 Risk scores and risk states are determined by the backend. The frontend presents them in an understandable interface.
@@ -524,15 +521,16 @@ The algorithm runs in this order:
 4. Compute optical flow and subtract camera motion.
 5. Run depth estimation when needed.
 6. Detect traffic participants with YOLO.
-7. Track objects across frames.
-8. Estimate expansion, flow, and depth TTC for each object.
-9. Fuse TTC components with weighted median.
-10. Compute ego-lane relationship and crossing risk.
-11. Compute closing speed, confidence, and near score.
-12. Classify the object as `SAFE`, `CAUTION`, or `DANGER`.
-13. Stabilize state transitions.
-14. Select the most critical event.
-15. Send timeline, event payload, and visual outputs to the frontend.
+7. Filter detections by ego-lane relevance.
+8. Track objects across frames.
+9. Estimate expansion, flow, and depth TTC for each object.
+10. Fuse TTC components with weighted median.
+11. Compute ego-lane relationship and crossing risk.
+12. Compute closing speed, confidence, and near score.
+13. Classify the object as `SAFE`, `CAUTION`, or `DANGER`.
+14. Stabilize state transitions.
+15. Select and deduplicate top risk events.
+16. Send timeline, event payload, and saved-event visual outputs to the frontend.
 
 The core design is to avoid relying on a single visual cue. Spectra combines three independent approach signals with lane relevance before declaring risk.
 
@@ -558,6 +556,11 @@ Form fields:
 - `max_saved_events`: number of top events to keep
 - `resize_max_side`: max frame side before processing
 - `depth_every`: depth sampling interval
+- `detect_every`: YOLO detection interval
+- `lane_every`: UFLDv2 lane detection interval
+- `flow_every`: DIS optical-flow interval
+- `start_sec`: optional analysis start time in seconds
+- `end_sec`: optional analysis end time in seconds
 
 Supported video extensions:
 

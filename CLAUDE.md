@@ -13,7 +13,7 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 - Motion: Classical DIS optical flow (OpenCV) with ego-motion compensation. There is no neural-flow ONNX dependency anymore — DIS is fast on CPU and accurate enough for bbox-level TTC and divergence signals.
 - Risk: TTC, lane relationship, nearness, closing speed, and confidence are fused into a risk state.
 
-The backend returns timeline rows, the peak event, lane metrics, TTC components, and visual overlays to the frontend.
+The backend returns timeline rows, the peak event, per-object risk metrics, and deferred visual overlays to the frontend.
 
 ## 2. Main Entry Point
 
@@ -59,16 +59,18 @@ For each frame:
 
 1. `VideoLoader` reads the frame with OpenCV.
 2. `spectra/vision/preprocessing.py` resizes the frame and produces RGB and grayscale views.
-3. `spectra/vision/road.py` estimates the road corridor.
-4. The vanishing point is computed and smoothed with EMA.
-5. DIS optical flow is computed between the previous and current grayscale frames; ego-motion is then subtracted.
-6. A cheap motion score decides whether depth should be refreshed early.
-7. YOLO detects road participants.
-8. The IoU tracker links detections to existing tracks.
-9. Risk is computed for every active track.
-10. The highest-risk event is selected.
+3. UFLDv2 estimates the ego-lane corridor on the configured lane interval; cached lane geometry is reused between runs and smoothed with Kalman coasting.
+4. DIS optical flow is computed on the configured flow interval; skipped frames reuse the previous flow.
+5. A cheap motion score decides whether depth should be refreshed early.
+6. Depth Anything V2 estimates a relative nearness map when scheduled or motion-triggered.
+7. YOLO detects road participants on the configured detection interval.
+8. Detections are filtered by ego-lane relevance before tracking.
+9. The IoU tracker links detections to existing tracks or propagates tracks on skipped detection frames.
+10. Risk is computed for every active track and the primary object is selected.
 11. State transitions are stabilized with hysteresis.
-12. A metadata-only event payload and a timeline row are produced; heavy RGB visualisations (overlay, depth, motion, road) are deferred (see section 18).
+12. A metadata-only event payload and a timeline row are produced.
+13. Saved events are deduplicated, ranked, and trimmed to `max_saved_events`.
+14. Heavy RGB visualisations are generated only for saved events and on-demand previews (see section 18).
 
 ## 5. Preprocessing
 
@@ -368,11 +370,11 @@ If there are no active tracks, Spectra emits a synthetic `SAFE` event. This keep
 
 For each frame, `spectra/analysis/video.py` produces:
 
-- `timeline_rows`: frame-level risk history
-- `events`: saved high-risk moments
-- `peak_event`: highest-risk event in the analysis
-- `lane_metrics`: scores per lane/object bucket
-- `ttc_components`: expansion, flow, and depth TTC details
+- `frames`: frame-level risk history for the timeline
+- `events`: saved high-risk moments after deduplication and top-N trimming
+- `peak_event`: highest-risk saved event in the analysis
+- `objects`: per-frame object metrics, including TTC, lane, risk score, proximity, approach, crossing, and confidence
+- `images`: shared image payloads referenced by saved events
 
 For events that are kept in the saved-events list, the following RGB views are attached:
 
@@ -396,7 +398,7 @@ It draws:
   - an object · lane subtitle (e.g. `CAR · Same Lane`)
   - four stacked progress bars for `Prox`, `Appr`, `Cross`, and `Conf`
 
-The card has a fixed footprint (≤220 px wide, ~116 px tall) so it does not overflow narrow previews. The four bars mirror the right-side "Tracked Objects" panel one-for-one (`closing_speed` drives both the panel `Approach` bar and the overlay `Appr` bar, and so on), so the HUD reads the same way as the dashboard. The per-component TTC breakdown (`Exp / Flow / Depth`) is no longer drawn on the frame; it is still emitted in the event payload for the dashboard to render.
+The card has a fixed footprint (≤220 px wide, ~116 px tall) so it does not overflow narrow previews. The four bars mirror the right-side object panel one-for-one (`closing_speed` drives both the panel `Approach` bar and the overlay `Appr` bar, and so on), so the HUD reads the same way as the dashboard. The per-component TTC breakdown (`Exp / Flow / Depth`) is no longer drawn on the frame; the UI uses the fused TTC plus object-level risk factors instead.
 
 This overlay is used for live preview and saved event imagery.
 
@@ -408,11 +410,11 @@ Frontend responsibilities:
 
 - File selection and upload
 - WebSocket preview listening
+- Analysis settings for frame/time scope, sampling intervals, saved-event count, and processing resolution
 - Timeline and event strip rendering
 - Risk banner updates (alert state, TTC, lane)
-- "Tracked Objects" panel: list of active tracks with type and TTC, with a detail pane that shows ID / Type / TTC / Lane and four signal bars (Proximity, Approach, Crossing, Confidence)
+- "Active/Detected Objects" panel: list of objects with type and TTC, with a detail pane that shows ID / Type / TTC / Lane and four signal bars (Proximity, Approach, Crossing, Confidence). In summary mode, object clicks keep the preview on that peak frame.
 - "Temporal Analysis" chart: a single red TTC line with a light EMA applied to suppress single-frame jitter, two dashed threshold guides at 3.0s (CAUTION) and 1.0s (DANGER), and a legend strip below explaining the bands. The chart shows TTC for SAFE rows too; only the in-chart category labels were removed because the legend below already names the bands.
-- Depth, road, motion, and overlay views
 - Telemetry JSON export
 
 Risk scores and risk states are determined by the backend. The frontend presents them in an understandable interface.
@@ -427,14 +429,15 @@ The algorithm runs in this order:
 4. Compute DIS optical flow and subtract ego-motion.
 5. Run depth estimation when needed (CoreML on Apple Silicon).
 6. Detect traffic participants with YOLO.
-7. Track objects across frames.
-8. Estimate expansion, flow, and depth TTC for each object.
-9. Fuse TTC components with weighted median.
-10. Compute ego-lane relationship and crossing risk.
-11. Compute closing speed, confidence, and near score.
-12. Classify the object as `SAFE`, `CAUTION`, or `DANGER`.
-13. Stabilize state transitions (TTC is preserved through SAFE).
-14. Select the most critical event.
-15. Send timeline, event metadata, and (for saved events) visual outputs to the frontend.
+7. Filter detections by ego-lane relevance.
+8. Track objects across frames.
+9. Estimate expansion, flow, and depth TTC for each object.
+10. Fuse TTC components with weighted median.
+11. Compute ego-lane relationship and crossing risk.
+12. Compute closing speed, confidence, and near score.
+13. Classify the object as `SAFE`, `CAUTION`, or `DANGER`.
+14. Stabilize state transitions (TTC is preserved through SAFE).
+15. Select and deduplicate top risk events.
+16. Send timeline, event metadata, and saved-event visual outputs to the frontend.
 
 The core design is to avoid relying on a single visual cue. Spectra combines three independent approach signals with lane relevance before declaring risk.

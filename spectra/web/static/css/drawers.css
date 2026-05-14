@@ -103,6 +103,40 @@
   margin-bottom: 4px;
 }
 
+.drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--panel-hi);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease, transform 160ms ease;
+}
+
+.drawer-icon-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.drawer-icon-btn:active {
+  transform: scale(0.96);
+}
+
+.drawer-icon-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
 .drawer-section h3 {
   margin: 0;
   font-size: 10px;
@@ -413,4 +447,3 @@
   0%   { transform: translateX(-260%); }
   100% { transform: translateX(640%); }
 }
-
