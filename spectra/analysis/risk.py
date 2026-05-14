@@ -528,12 +528,14 @@ def calculate_track_risk(
     lateral_v = lane_lateral_velocity(track, lane)
 
     class_weight = CLASS_RISK_WEIGHT.get(track.class_name, 1.0)
+    # Approach = "is this object getting closer over time": bbox scale growth
+    # plus radial flow. Lane geometry (crossing) belongs to its own bar; mixing
+    # it here gave parallel adjacent traffic a phantom approach floor.
     closing_speed = float(
         np.clip(
             class_weight * (
-                (0.50 * float(np.clip(expansion_rate / 0.6, 0.0, 1.0)))
-                + (0.30 * crossing)
-                + (0.20 * velocity_magnitude)
+                (0.65 * float(np.clip(expansion_rate / 0.6, 0.0, 1.0)))
+                + (0.35 * velocity_magnitude)
             ),
             0.0,
             1.0,
@@ -541,12 +543,12 @@ def calculate_track_risk(
     )
 
     detection_confidence = float(np.clip(track.confidence, 0.0, 1.0))
+    # Confidence = "how trustworthy is this measurement": YOLO detection
+    # confidence weighted by lane geometry trust. Crossing/expansion are
+    # risk-relevance signals, not trust signals, so they no longer feed in.
     fused_confidence = float(
         np.clip(
-            (0.45 * detection_confidence)
-            + (0.30 * crossing)
-            + (0.15 * float(np.clip(expansion_rate / 0.6, 0.0, 1.0)))
-            + (0.10 * lane.confidence),
+            (0.70 * detection_confidence) + (0.30 * lane.confidence),
             0.0,
             1.0,
         )

@@ -216,10 +216,14 @@ def lane_corridor_relevance(
     height_frac = bbox_h / max(1.0, float(lane.height))
     overlap_px, lane_width = _bbox_lane_overlap_px(bbox, lane, margin_ratio=0.08)
     close_intrusion = bottom_frac >= 0.72 or height_frac >= 0.18
-    if close_intrusion and overlap_px >= max(lane_width * 0.07, lane.width * 0.025):
-        relevance = max(relevance, 0.72)
-    elif overlap_px >= max(lane_width * 0.12, lane.width * 0.045):
-        relevance = max(relevance, 0.55)
+    # Proportional intrusion floor: a bbox that genuinely occupies the corridor
+    # raises relevance toward 1.0; a barely-clipping side-lane object stays
+    # near the natural proximity*vertical score. Replaces the previous flat
+    # 0.72/0.55 floors that gave any near object a fixed high crossing risk.
+    overlap_ratio = float(np.clip(overlap_px / max(lane_width, 1.0), 0.0, 1.0))
+    size_weight = 1.0 if close_intrusion else 0.75
+    intrusion_floor = size_weight * (0.15 + 0.65 * overlap_ratio)
+    relevance = max(relevance, intrusion_floor)
 
     lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
     if lane_trust < 1.0:
