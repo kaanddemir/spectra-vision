@@ -383,7 +383,7 @@ def _lane_geometry_confidence(
     if bottom_ratio < 0.12 or bottom_ratio > 0.92:
         return 0.0
 
-    confidence = 0.94
+    confidence = 0.97
     if bottom_ratio < 0.18:
         confidence -= 0.28
     elif bottom_ratio > 0.72:
@@ -393,7 +393,7 @@ def _lane_geometry_confidence(
     if center_shift > 0.42:
         return 0.0
     if center_shift > 0.18:
-        confidence -= min(0.35, (center_shift - 0.18) / 0.24 * 0.35)
+        confidence -= min(0.22, (center_shift - 0.18) / 0.24 * 0.22)
 
     width_ratio = top_width / bottom_width
     if width_ratio > 1.10 or width_ratio < 0.02:
@@ -425,7 +425,7 @@ def _lane_geometry_confidence(
     if vp_y < height * 0.20:
         confidence -= 0.12
 
-    return float(np.clip(confidence, 0.0, 0.94))
+    return float(np.clip(confidence, 0.0, 0.97))
 
 
 def estimate_road_roi_from_lanes(
@@ -522,6 +522,8 @@ class LaneKalman:
         self._initialized = False
         self._x = np.zeros((self._STATE_DIM, 1), dtype=np.float32)
         self._P = np.eye(self._STATE_DIM, dtype=np.float32) * 100.0
+        self._last_y_top: float | None = None
+        self._last_y_bottom: float | None = None
 
         F = np.eye(self._STATE_DIM, dtype=np.float32)
         for i in range(4):
@@ -581,13 +583,15 @@ class LaneKalman:
                 if meas_mask[i]:
                     self._x[i, 0] = meas[i, 0]
             self._initialized = True
+            self._last_y_top = y_top
+            self._last_y_bottom = y_bottom
             return self._emit(left_line, right_line, y_top=y_top, y_bottom=y_bottom)
 
         self._predict()
 
         # Per-component Kalman update — confidence raises measurement
         # variance so low-confidence frames bend the state less.
-        gain = float(np.clip(confidence, 0.05, 1.0))
+        gain = float(np.clip(confidence, 0.25, 1.0))
         meas_var = self._meas_var_hi / max(gain, 0.1)
         for i in range(self._MEAS_DIM):
             if not meas_mask[i]:
@@ -599,7 +603,22 @@ class LaneKalman:
             self._x = self._x + (K * innovation)
             self._P = (np.eye(self._STATE_DIM, dtype=np.float32) - (K @ H_row)) @ self._P
 
+        self._last_y_top = y_top
+        self._last_y_bottom = y_bottom
         return self._emit(left_line, right_line, y_top=y_top, y_bottom=y_bottom)
+
+    def coast(self) -> tuple[Line | None, Line | None]:
+        """Advance the filter one step without a measurement.
+
+        Used between scheduled lane frames: re-feeding the same cached
+        measurement every frame artificially shrinks innovation and inflates
+        filter confidence. Predict-only avoids that drift.
+        """
+
+        if not self._initialized or self._last_y_top is None or self._last_y_bottom is None:
+            return None, None
+        self._predict()
+        return self._emit(None, None, y_top=self._last_y_top, y_bottom=self._last_y_bottom)
 
     def _predict(self) -> None:
         self._x = self._F @ self._x
@@ -640,16 +659,28 @@ class LaneKalman:
         self._initialized = False
         self._x.fill(0.0)
         self._P = np.eye(self._STATE_DIM, dtype=np.float32) * 100.0
+        self._last_y_top = None
+        self._last_y_bottom = None
 
 
-def apply_lane_kalman(roi: RoadROI, smoother: LaneKalman) -> RoadROI:
-    """Run the Kalman smoother on a RoadROI and return a smoothed copy."""
+def apply_lane_kalman(
+    roi: RoadROI, smoother: LaneKalman, *, predict_only: bool = False
+) -> RoadROI:
+    """Run the Kalman smoother on a RoadROI and return a smoothed copy.
 
-    left_smoothed, right_smoothed = smoother.update(
-        roi.left_line,
-        roi.right_line,
-        roi.confidence,
-    )
+    When ``predict_only`` is True the smoother is advanced without ingesting
+    ``roi`` as a measurement — used between scheduled lane frames so we don't
+    re-feed the same cached measurement every frame.
+    """
+
+    if predict_only:
+        left_smoothed, right_smoothed = smoother.coast()
+    else:
+        left_smoothed, right_smoothed = smoother.update(
+            roi.left_line,
+            roi.right_line,
+            roi.confidence,
+        )
 
     if left_smoothed is None or right_smoothed is None:
         return roi

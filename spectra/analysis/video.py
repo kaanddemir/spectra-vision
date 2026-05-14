@@ -399,6 +399,29 @@ def _detect_lanes(frame_bgr: np.ndarray, lanenet: UFLDv2ONNX) -> RoadROI:
     )
 
 
+def _endpoint_drift_px(a: RoadROI, b: RoadROI) -> float:
+    """Max absolute x-distance between matching lane endpoints, in pixels.
+
+    Returns 0.0 when either side lacks valid lines. Used to detect when a
+    fresh UFLDv2 measurement disagrees so strongly with the Kalman prior
+    that the filter has locked onto stale geometry and should be reset.
+    """
+
+    if not (a.detected and b.detected):
+        return 0.0
+    if a.left_line is None or a.right_line is None:
+        return 0.0
+    if b.left_line is None or b.right_line is None:
+        return 0.0
+    diffs = (
+        abs(a.left_line[0] - b.left_line[0]),
+        abs(a.left_line[2] - b.left_line[2]),
+        abs(a.right_line[0] - b.right_line[0]),
+        abs(a.right_line[2] - b.right_line[2]),
+    )
+    return float(max(diffs))
+
+
 def analyze_spatial_video(
     video_path: str | Path,
     *,
@@ -410,6 +433,8 @@ def analyze_spatial_video(
     detect_every: int = 3,
     lane_every: int = 5,
     flow_every: int = 1,
+    lane_reset_after_misses: int = 4,
+    lane_drift_reset_px_ratio: float = 0.12,
     start_sec: float = 0.0,
     end_sec: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -430,6 +455,7 @@ def analyze_spatial_video(
     last_depth: DepthResult | None = None
     last_flow = None
     cached_road_roi: RoadROI | None = None
+    lane_miss_streak = 0
     saved_events: list[dict[str, Any]] = []
     pending_renders: dict[int, _DeferredRender] = {}
     frames: list[dict[str, Any]] = []
@@ -465,14 +491,35 @@ def analyze_spatial_video(
         # Lane detection runs on scheduled frames only; the most recent
         # committed UFLDv2 detection is cached and reused on in-between frames.
         # Kalman smooths endpoint jitter and coasts through brief misses.
+        # The synthetic default ROI is never fed to the Kalman — it would
+        # initialize the filter on fake geometry and lock the corridor for
+        # the rest of the video.
         fi = video_frame.frame_index
         did_lane = fi % max(lane_every, 1) == 0
+        frame_w = frame.bgr.shape[1]
         if did_lane:
             new_roi = _detect_lanes(frame.bgr, lanenet)
             if new_roi.detected:
-                cached_road_roi = new_roi
-        road_roi = cached_road_roi or default_road_roi(frame.bgr.shape)
-        road_roi = apply_lane_kalman(road_roi, lane_kalman)
+                smoothed = apply_lane_kalman(new_roi, lane_kalman)
+                if _endpoint_drift_px(new_roi, smoothed) > lane_drift_reset_px_ratio * frame_w:
+                    lane_kalman.reset()
+                    smoothed = apply_lane_kalman(new_roi, lane_kalman)
+                cached_road_roi = smoothed
+                lane_miss_streak = 0
+            else:
+                lane_miss_streak += 1
+                if lane_miss_streak >= lane_reset_after_misses:
+                    cached_road_roi = None
+                    lane_kalman.reset()
+                    lane_miss_streak = 0
+
+        if cached_road_roi is not None:
+            if did_lane:
+                road_roi = cached_road_roi
+            else:
+                road_roi = apply_lane_kalman(cached_road_roi, lane_kalman, predict_only=True)
+        else:
+            road_roi = default_road_roi(frame.bgr.shape)
 
         frame_h, frame_w = frame.gray.shape
         lane = build_lane_frame(road_roi, width=frame_w, height=frame_h)
