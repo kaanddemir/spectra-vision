@@ -150,8 +150,10 @@
   position: relative;
   cursor: help;
   color: var(--muted);
-  display: flex;
-  align-items: center;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
   transition: color 200ms ease;
 }
 .info-tip:hover {
