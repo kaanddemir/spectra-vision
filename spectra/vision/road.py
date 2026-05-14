@@ -343,24 +343,34 @@ def detection_corridor_score(
         watch_gain = 1.0 + ((1.0 - lane_trust) * 0.65)
         far_center = abs(bbox_cx - lane_center) <= max(lane_width * 1.85 * watch_gain, width * 0.16)
         vp_aligned = abs(bbox_cx - float(vp_x)) <= max(lane_width * 2.45 * watch_gain, width * 0.22)
-        edge_noise = bbox_cx < width * 0.08 or bbox_cx > width * 0.92
-        max_far_pos = 2.55 + ((1.0 - lane_trust) * 0.80)
-        if abs(pos) > max_far_pos or edge_noise or not (far_center or vp_aligned):
+        edge_noise = bbox_cx < width * 0.04 or bbox_cx > width * 0.96
+        max_far_pos = 3.0 + ((1.0 - lane_trust) * 0.80)
+        # YOLO-confidence escape: a confident far detection (cars/trucks the
+        # network is sure about) is admitted even when neither far_center nor
+        # vp_aligned holds — those gates rely on lane geometry which can be
+        # off near the horizon.
+        confident_far = detection.confidence >= 0.55 and not edge_noise and abs(pos) <= max_far_pos
+        if (abs(pos) > max_far_pos or edge_noise or not (far_center or vp_aligned)) and not confident_far:
             return 0.0
-        score = max(score, 0.44)
+        score = max(score, 0.42 if confident_far and not (far_center or vp_aligned) else 0.44)
 
     # Nearby side-lane objects must at least touch the expanded ego corridor.
     # This keeps cut-in candidates, but drops static adjacent-lane traffic.
     if near_or_large and abs(pos) > 0.95:
         intrudes_lane = overlap_px >= max(lane_width * 0.07, width * 0.025)
         if not intrudes_lane and (abs(pos) > 1.24 or overlap_score < 0.18):
-            # Depth-gated cut-in admit: a physically close side-lane vehicle
-            # within ~2 lane widths is admitted with a barely-passing score
-            # so the tracker can build history before it intrudes.
-            if near_map is not None and abs(pos) <= 2.0:
-                bbox_nearness = _bbox_median_nearness(near_map, detection.bbox)
-                if bbox_nearness >= 0.55:
-                    return 0.32
+            # Multi-signal admit. Lane geometry alone is unstable, so a
+            # near/large detection is also accepted when EITHER (a) depth says
+            # the bbox is physically close to the camera, OR (b) YOLO is very
+            # confident it's a real road participant. Either path keeps the
+            # tracker fed with cut-in candidates without flooding it.
+            if abs(pos) <= 2.8:
+                if near_map is not None:
+                    bbox_nearness = _bbox_median_nearness(near_map, detection.bbox)
+                    if bbox_nearness >= 0.45:
+                        return 0.33
+                if detection.confidence >= 0.65:
+                    return 0.33
             return 0.0
         score = max(score, 0.58 if intrudes_lane else 0.52)
 
