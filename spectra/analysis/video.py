@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -47,6 +48,143 @@ class VideoFrame:
     frame_index: int
     timestamp_sec: float
     bgr: np.ndarray
+
+
+_PERFORMANCE_STAGES = ("preprocess", "lane", "flow", "depth", "yolo")
+
+
+def _empty_performance_stats() -> dict[str, dict[str, list[float]]]:
+    return {stage: {"active": [], "frame": []} for stage in _PERFORMANCE_STAGES}
+
+
+def _record_stage(
+    stats: dict[str, dict[str, list[float]]],
+    stage: str,
+    elapsed_sec: float,
+    *,
+    active: bool = True,
+) -> None:
+    elapsed_ms = max(0.0, elapsed_sec * 1000.0)
+    stats[stage]["frame"].append(elapsed_ms)
+    if active:
+        stats[stage]["active"].append(elapsed_ms)
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, math.ceil((percentile / 100.0) * len(ordered)) - 1))
+    return ordered[idx]
+
+
+def _sample_summary(values: list[float]) -> dict[str, float | int | None]:
+    if not values:
+        return {"count": 0, "avg_ms": None, "p95_ms": None, "max_ms": None}
+    return {
+        "count": len(values),
+        "avg_ms": sum(values) / len(values),
+        "p95_ms": _percentile(values, 95.0),
+        "max_ms": max(values),
+    }
+
+
+def _build_performance_summary(
+    stats: dict[str, dict[str, list[float]]],
+    *,
+    processed_frames: int,
+    elapsed_sec: float,
+    lane_every: int,
+    flow_every: int,
+    depth_every: int,
+    adaptive_depth: bool,
+    detect_every: int,
+    depth_refresh: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    stages: dict[str, dict[str, Any]] = {}
+    for stage in _PERFORMANCE_STAGES:
+        active = _sample_summary(stats[stage]["active"])
+        frame = _sample_summary(stats[stage]["frame"])
+        stages[stage] = {"active": active, "frame": frame}
+
+    bottleneck_stage = max(
+        _PERFORMANCE_STAGES,
+        key=lambda stage: float(stages[stage]["frame"]["avg_ms"] or 0.0),
+    )
+    return {
+        "processed_frames": processed_frames,
+        "elapsed_sec": elapsed_sec,
+        "effective_fps": processed_frames / elapsed_sec if elapsed_sec > 0.0 else 0.0,
+        "bottleneck": {
+            "stage": bottleneck_stage,
+            "active_avg_ms": stages[bottleneck_stage]["active"]["avg_ms"],
+            "frame_avg_ms": stages[bottleneck_stage]["frame"]["avg_ms"],
+        },
+        "sampling": {
+            "lane_every": lane_every,
+            "flow_every": flow_every,
+            "depth_every": depth_every,
+            "adaptive_depth": adaptive_depth,
+            "detect_every": detect_every,
+        },
+        "depth_refresh": depth_refresh or {
+            "runs": 0,
+            "skips": processed_frames,
+            "initial_runs": 0,
+            "periodic_runs": 0,
+            "motion_triggered_runs": 0,
+        },
+        "stages": stages,
+    }
+
+
+def _fmt_ms(value: float | int | None) -> str:
+    return "-" if value is None else f"{float(value):.0f}"
+
+
+def _format_performance_summary(summary: dict[str, Any]) -> list[str]:
+    bottleneck = summary["bottleneck"]
+    sampling = summary["sampling"]
+    depth_refresh = summary["depth_refresh"]
+    lines = [
+        "SUMMARY",
+        (
+            f"Processed: {summary['processed_frames']} frames in {summary['elapsed_sec']:.2f}s "
+            f"| Effective FPS: {summary['effective_fps']:.1f}"
+        ),
+        (
+            f"Bottleneck: {bottleneck['stage']} "
+            f"active_avg={_fmt_ms(bottleneck['active_avg_ms'])}ms "
+            f"frame_avg={_fmt_ms(bottleneck['frame_avg_ms'])}ms"
+        ),
+        "Stage active avg/p95/max | frame avg:",
+    ]
+    for stage in _PERFORMANCE_STAGES:
+        stage_stats = summary["stages"][stage]
+        active = stage_stats["active"]
+        frame = stage_stats["frame"]
+        lines.append(
+            f"  {stage:<10} "
+            f"{_fmt_ms(active['avg_ms'])}/{_fmt_ms(active['p95_ms'])}/{_fmt_ms(active['max_ms'])}ms "
+            f"| frame_avg={_fmt_ms(frame['avg_ms'])}ms"
+        )
+    lines.append(
+        "Depth refresh: "
+        f"runs={depth_refresh['runs']} "
+        f"skips={depth_refresh['skips']} "
+        f"initial={depth_refresh['initial_runs']} "
+        f"periodic={depth_refresh['periodic_runs']} "
+        f"motion={depth_refresh['motion_triggered_runs']}"
+    )
+    lines.append(
+        "Sampling: "
+        f"lane_every={sampling['lane_every']} "
+        f"depth_every={sampling['depth_every']} "
+        f"adaptive_depth={'on' if sampling['adaptive_depth'] else 'off'} "
+        f"detect_every={sampling['detect_every']} "
+        f"flow_every={sampling['flow_every']}"
+    )
+    return lines
 
 
 class VideoLoader:
@@ -255,6 +393,7 @@ def analyze_spatial_video(
     max_saved_events: int,
     resize_max_side: int,
     depth_every: int = 10,
+    adaptive_depth: bool = True,
     detect_every: int = 3,
     lane_every: int = 5,
     flow_every: int = 1,
@@ -282,7 +421,15 @@ def analyze_spatial_video(
     pending_renders: dict[int, _DeferredRender] = {}
     frames: list[dict[str, Any]] = []
     preview_rows_buffer: list[dict[str, Any]] = []
-    performance_logs: list[str] = []
+    performance_sample_logs: list[str] = []
+    performance_stats = _empty_performance_stats()
+    depth_refresh = {
+        "runs": 0,
+        "skips": 0,
+        "initial_runs": 0,
+        "periodic_runs": 0,
+        "motion_triggered_runs": 0,
+    }
     expansion_smoother = ExpansionSmoother()
     depth_smoother = DepthDeltaSmoother()
     lane_kalman = LaneKalman()
@@ -292,6 +439,7 @@ def analyze_spatial_video(
     tracker = IoUTracker(iou_threshold=0.25, max_misses=5)
     processed_frames = 0
     previous_timestamp_sec: float | None = None
+    processing_start = time.perf_counter()
 
     for video_frame in loader.frames():
         t0 = time.perf_counter()
@@ -303,7 +451,8 @@ def analyze_spatial_video(
         # committed UFLDv2 detection is cached and reused on in-between frames.
         # Kalman smooths endpoint jitter and coasts through brief misses.
         fi = video_frame.frame_index
-        if fi % max(lane_every, 1) == 0:
+        did_lane = fi % max(lane_every, 1) == 0
+        if did_lane:
             new_roi = _detect_lanes(frame.bgr, lanenet)
             if new_roi.detected:
                 cached_road_roi = new_roi
@@ -320,7 +469,8 @@ def analyze_spatial_video(
             flow_dt_sec = max(1.0 / 120.0, video_frame.timestamp_sec - previous_timestamp_sec)
 
         # Flow every N frames: reuse previous result on skipped frames.
-        if last_flow is None or fi % max(flow_every, 1) == 0:
+        did_flow = last_flow is None or fi % max(flow_every, 1) == 0
+        if did_flow:
             flow = compute_velocity(previous_frame, frame)
             last_flow = flow
         else:
@@ -332,17 +482,28 @@ def analyze_spatial_video(
 
         # 1. Fast motion check: is the scene busy enough to re-run depth?
         quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
-        is_high_risk = quick_risk > 0.15
+        is_high_risk = adaptive_depth and quick_risk > 0.15
         is_periodic = fi % max(depth_every, 1) == 0
-        needs_depth = last_depth is None or is_periodic or is_high_risk
+        is_initial_depth = last_depth is None
+        is_motion_triggered_depth = (not is_initial_depth) and (not is_periodic) and is_high_risk
+        needs_depth = is_initial_depth or is_periodic or is_high_risk
         depth_is_fresh = bool(needs_depth)
         if needs_depth:
+            depth_refresh["runs"] += 1
+            if is_initial_depth:
+                depth_refresh["initial_runs"] += 1
+            elif is_periodic:
+                depth_refresh["periodic_runs"] += 1
+            elif is_motion_triggered_depth:
+                depth_refresh["motion_triggered_runs"] += 1
             last_depth = estimate_frame_depth(frame)
+        else:
+            depth_refresh["skips"] += 1
         t_depth = time.perf_counter()
 
         # 2. Detect objects every N frames; between detections the tracker
         # propagates existing tracks so IDs and TTC history stay continuous.
-        should_detect = (fi % max(detect_every, 1) == 0)
+        should_detect = fi % max(detect_every, 1) == 0
         if should_detect:
             detections = filter_relevant_detections(detector.detect(frame.bgr), lane)
             active_tracks = tracker.update(
@@ -355,16 +516,22 @@ def analyze_spatial_video(
             active_tracks = tracker.propagate()
         t_yolo = time.perf_counter()
 
+        _record_stage(performance_stats, "preprocess", t_preprocess - t0)
+        _record_stage(performance_stats, "lane", t_lane - t_preprocess, active=did_lane)
+        _record_stage(performance_stats, "flow", t_flow - t_lane, active=did_flow)
+        _record_stage(performance_stats, "depth", t_depth - t_flow, active=needs_depth)
+        _record_stage(performance_stats, "yolo", t_yolo - t_depth, active=should_detect)
+
         if processed_frames % 30 == 0:
             log_line = (
                 f"[FRAME {fi:4d}] "
                 f"preprocess={1000*(t_preprocess-t0):.0f}ms  "
-                f"lane={'skip' if fi % max(lane_every,1) != 0 else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
-                f"flow={'skip' if fi % max(flow_every,1) != 0 else f'{1000*(t_flow-t_lane):.0f}ms':>7}  "
+                f"lane={'skip' if not did_lane else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
+                f"flow={'skip' if not did_flow else f'{1000*(t_flow-t_lane):.0f}ms':>7}  "
                 f"depth={'skip' if not needs_depth else f'{1000*(t_depth-t_flow):.0f}ms':>7}  "
                 f"yolo={'skip' if not should_detect else f'{1000*(t_yolo-t_depth):.0f}ms':>7}"
             )
-            performance_logs.append(log_line)
+            performance_sample_logs.append(log_line)
 
         # 3. Per-object risk via scale-expansion TTC + lateral crossing.
         primary_event, all_events = build_object_events(
@@ -492,6 +659,21 @@ def analyze_spatial_video(
             _attach_render(payload, deferred)
     pending_renders.clear()
 
+    performance_summary = _build_performance_summary(
+        performance_stats,
+        processed_frames=processed_frames,
+        elapsed_sec=time.perf_counter() - processing_start,
+        lane_every=lane_every,
+        flow_every=flow_every,
+        depth_every=depth_every,
+        adaptive_depth=adaptive_depth,
+        detect_every=detect_every,
+        depth_refresh=depth_refresh,
+    )
+    performance_logs = _format_performance_summary(performance_summary)
+    if performance_sample_logs:
+        performance_logs.extend(["", "SAMPLES", *performance_sample_logs])
+
     peak_event = saved_events[0] if saved_events else None
     return {
         "fps": loader.fps,
@@ -500,6 +682,7 @@ def analyze_spatial_video(
         "frames": frames,
         "events": saved_events,
         "peak_event": peak_event,
+        "performance_summary": performance_summary,
         "performance_logs": performance_logs,
     }
 

@@ -139,6 +139,7 @@
     <input type="hidden" name="max_saved_events" value="20">
     <input type="hidden" name="resize_max_side" value="512">
     <input type="hidden" name="depth_every" value="10">
+    <input type="hidden" name="adaptive_depth" value="1">
     <input type="hidden" name="detect_every" value="3">
     <input type="hidden" name="lane_every" value="5">
     <input type="hidden" name="flow_every" value="1">
@@ -611,6 +612,14 @@
               <button type="button" class="segmented-btn" data-value="3">3x</button>
               <button type="button" class="segmented-btn" data-value="5">5x</button>
               <button type="button" class="segmented-btn active" data-value="10">10x</button>
+              <button type="button" class="segmented-btn" data-value="15">15x</button>
+            </div>
+          </label>
+          <label class="drawer-row">
+            <span>Adaptive Depth</span>
+            <div class="segmented-control compact" data-param="adaptive_depth">
+              <button type="button" class="segmented-btn" data-value="0">Off</button>
+              <button type="button" class="segmented-btn active" data-value="1">On</button>
             </div>
           </label>
           <label class="drawer-row">
@@ -651,6 +660,7 @@
           <label class="drawer-row">
             <span>Analysis Resolution</span>
             <div class="segmented-control" data-param="resize_max_side">
+              <button type="button" class="segmented-btn" data-value="128">128</button>
               <button type="button" class="segmented-btn" data-value="256">256</button>
               <button type="button" class="segmented-btn" data-value="384">384</button>
               <button type="button" class="segmented-btn active" data-value="512">512</button>

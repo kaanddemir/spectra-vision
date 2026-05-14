@@ -114,18 +114,17 @@
   height: 26px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--panel-hi);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: color 200ms ease, border-color 200ms ease, background 200ms ease, transform 160ms ease;
+  padding: 0;
+  transition: color 200ms ease, transform 160ms ease;
 }
 
 .drawer-icon-btn:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-  background: var(--panel-2);
+  color: var(--text-soft);
 }
 
 .drawer-icon-btn:active {

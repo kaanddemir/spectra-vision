@@ -1596,6 +1596,7 @@ export function initializeSpectra() {
 
   function resetAdvancedSampling() {
     setSegmentedValue("depth_every", 10);
+    setSegmentedValue("adaptive_depth", 1);
     setSegmentedValue("detect_every", 3);
     setSegmentedValue("lane_every", 5);
     setSegmentedValue("flow_every", 1);

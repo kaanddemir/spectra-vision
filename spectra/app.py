@@ -24,6 +24,11 @@ _PREVIEW_QUEUE_MAX = 24
 _MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
 VIDEO_TYPES = {"mp4", "mov", "avi", "mkv", "m4v"}
+DEPTH_EVERY_OPTIONS = (1, 2, 3, 5, 10, 15)
+DETECT_EVERY_OPTIONS = (1, 2, 3, 5, 10)
+LANE_EVERY_OPTIONS = (1, 2, 3, 5, 10)
+FLOW_EVERY_OPTIONS = (1, 2, 3, 5, 10)
+RESIZE_MAX_SIDE_OPTIONS = (128, 256, 384, 512, 768, 1024)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "web" / "static"
@@ -138,6 +143,8 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
         "peakEvent": None if peak_event is None else _serialize_event(peak_event, image_ref=peak_ref),
         "events": serialized_events,
         "images": images,
+        "performance_summary": result.get("performance_summary") or {},
+        "performance_logs": result.get("performance_logs") or [],
     }
     return {"payload": payload}
 
@@ -154,6 +161,16 @@ def _validate_video_upload(upload: UploadFile) -> None:
             status_code=400,
             detail=f"Unsupported video format '.{ext}'. Supported formats: {supported_list}.",
         )
+
+
+def _nearest_allowed(value: int, options: tuple[int, ...]) -> int:
+    return min(options, key=lambda option: (abs(option - value), option))
+
+
+def _form_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 @app.get("/", include_in_schema=False)
@@ -223,6 +240,7 @@ async def analyze_endpoint(
     max_saved_events: int = Form(20),
     resize_max_side: int = Form(512),
     depth_every: int = Form(10),
+    adaptive_depth: str = Form("1"),
     detect_every: int = Form(3),
     lane_every: int = Form(5),
     flow_every: int = Form(1),
@@ -278,11 +296,12 @@ async def analyze_endpoint(
                 video_path=source_path,
                 max_processed_frames=min(2000, max(1, int(max_processed_frames))),
                 max_saved_events=min(50, max(1, int(max_saved_events))),
-                resize_max_side=min(1920, max(128, int(resize_max_side))),
-                depth_every=max(1, int(depth_every)),
-                detect_every=max(1, int(detect_every)),
-                lane_every=max(1, int(lane_every)),
-                flow_every=max(1, int(flow_every)),
+                resize_max_side=_nearest_allowed(int(resize_max_side), RESIZE_MAX_SIDE_OPTIONS),
+                depth_every=_nearest_allowed(int(depth_every), DEPTH_EVERY_OPTIONS),
+                adaptive_depth=_form_bool(adaptive_depth),
+                detect_every=_nearest_allowed(int(detect_every), DETECT_EVERY_OPTIONS),
+                lane_every=_nearest_allowed(int(lane_every), LANE_EVERY_OPTIONS),
+                flow_every=_nearest_allowed(int(flow_every), FLOW_EVERY_OPTIONS),
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
                 progress_callback=progress_callback if queue is not None else None,

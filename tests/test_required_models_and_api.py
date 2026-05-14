@@ -278,9 +278,10 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
             max_saved_events=99,
             resize_max_side=9999,
             depth_every=0,
-            detect_every=0,
-            lane_every=0,
-            flow_every=0,
+            adaptive_depth="0",
+            detect_every=999,
+            lane_every=999,
+            flow_every=999,
             start_sec=2.5,
             end_sec=0.0,
             session_id="",
@@ -291,11 +292,12 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
     assert response["payload"]["schemaVersion"] == 2
     assert captured["max_processed_frames"] == 1
     assert captured["max_saved_events"] == 50
-    assert captured["resize_max_side"] == 1920
+    assert captured["resize_max_side"] == 1024
     assert captured["depth_every"] == 1
-    assert captured["detect_every"] == 1
-    assert captured["lane_every"] == 1
-    assert captured["flow_every"] == 1
+    assert captured["adaptive_depth"] is False
+    assert captured["detect_every"] == 10
+    assert captured["lane_every"] == 10
+    assert captured["flow_every"] == 10
     assert captured["start_sec"] == 2.5
     assert captured["end_sec"] is None
     assert captured["progress_callback"] is None

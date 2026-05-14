@@ -24,6 +24,7 @@ def test_analysis_settings_exposes_supported_api_controls():
         'name="max_saved_events" value="20"',
         'name="resize_max_side" value="512"',
         'name="depth_every" value="10"',
+        'name="adaptive_depth" value="1"',
         'name="detect_every" value="3"',
         'name="lane_every" value="5"',
         'name="flow_every" value="1"',
@@ -40,7 +41,12 @@ def test_analysis_settings_exposes_supported_api_controls():
         'id="reset-advanced-sampling"',
         'id="max-saved-events-input"',
         'data-param="resize_max_side"',
+        'data-value="128">128</button>',
         'data-param="depth_every"',
+        'data-value="15">15x</button>',
+        'data-param="adaptive_depth"',
+        'data-value="0">Off</button>',
+        'data-value="1">On</button>',
         'data-param="detect_every"',
         'data-param="lane_every"',
         'data-param="flow_every"',
@@ -75,4 +81,5 @@ def test_active_ui_contracts_are_kept():
 
     assert 'id="reset-advanced-sampling"' in index
     assert "resetAdvancedSampling" in controls
+    assert 'setSegmentedValue("adaptive_depth", 1)' in controls
     assert ".drawer-icon-btn" in drawers_css
