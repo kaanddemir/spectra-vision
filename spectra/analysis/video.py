@@ -18,6 +18,7 @@ from .risk import (
     RiskEvent,
     SpatialFields,
     StateStabilizer,
+    TtcImminenceSmoother,
     build_object_events,
     compute_quick_risk,
     score_raw,
@@ -472,6 +473,7 @@ def analyze_spatial_video(
     }
     expansion_smoother = ExpansionSmoother()
     depth_smoother = DepthDeltaSmoother()
+    ttc_imminence_smoother = TtcImminenceSmoother()
     lane_kalman = LaneKalman()
     lanenet = get_lanenet_model()
     stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=7)
@@ -629,6 +631,7 @@ def analyze_spatial_video(
             ),
             expansion_smoother=expansion_smoother,
             depth_smoother=depth_smoother,
+            ttc_imminence_smoother=ttc_imminence_smoother,
         )
 
         # 4. Smooth State Transitions (Hysteresis)

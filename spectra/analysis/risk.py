@@ -84,7 +84,7 @@ _EXPANSION_EMA_FALL = 0.30
 
 # Maximum lateral velocity in lane-units per second that we still treat as
 # real path-cross. Above this is bbox jitter or detection swap.
-_LATERAL_MAX_LANE_PER_SEC = 4.0
+_LATERAL_MAX_LANE_PER_SEC = 2.5
 _LANE_TRUST_FLOOR = 0.45
 
 
@@ -309,23 +309,53 @@ def lane_lateral_velocity(
     lane: LaneFrame,
     *,
     min_dt: float = 0.06,
+    max_samples: int = 4,
+    max_age_sec: float = 0.4,
 ) -> float:
-    """Lateral velocity in lane-units per second.
+    """Lateral velocity in lane-units per second, robust to bbox jitter.
 
-    Uses the change in lane_position between the current bbox and the most
-    recent history sample, so the value stays consistent across distances.
+    Builds pairwise (pos_now - pos_old)/dt instantaneous velocities from the
+    current bbox and the most recent history samples within ``max_age_sec``,
+    then returns the **median**. A single-frame bbox jitter that produces a
+    phantom large velocity gets rejected by the median; sustained motion (real
+    cut-in) survives because all pairwise slopes agree.
+
+    Falls back to single-pair computation when history is too short.
     """
 
-    sample = track.previous_sample(min_dt=min_dt)
-    if sample is None:
-        return 0.0
-    dt = float(track.timestamp_sec - sample.timestamp_sec)
-    if dt <= 0.0:
-        return 0.0
+    # Collect (timestamp, lane_position) samples newest-first within the window.
     pos_now = lane_position(track.bbox, lane)
-    pos_prev = lane_position(sample.bbox, lane)
-    velocity = (pos_now - pos_prev) / dt
-    return float(np.clip(velocity, -_LATERAL_MAX_LANE_PER_SEC, _LATERAL_MAX_LANE_PER_SEC))
+    samples: list[tuple[float, float]] = [(float(track.timestamp_sec), pos_now)]
+    for sample in reversed(track.history):
+        age = float(track.timestamp_sec - sample.timestamp_sec)
+        if age > max_age_sec:
+            break
+        samples.append((float(sample.timestamp_sec), lane_position(sample.bbox, lane)))
+        if len(samples) >= max_samples:
+            break
+
+    if len(samples) < 2:
+        return 0.0
+
+    velocities: list[float] = []
+    ts_new, pos_new = samples[0]
+    for ts_old, pos_old in samples[1:]:
+        dt = ts_new - ts_old
+        if dt < min_dt:
+            continue
+        velocities.append((pos_new - pos_old) / dt)
+
+    if not velocities:
+        return 0.0
+
+    velocities.sort()
+    n = len(velocities)
+    if n % 2 == 1:
+        median_v = velocities[n // 2]
+    else:
+        median_v = 0.5 * (velocities[n // 2 - 1] + velocities[n // 2])
+
+    return float(np.clip(median_v, -_LATERAL_MAX_LANE_PER_SEC, _LATERAL_MAX_LANE_PER_SEC))
 
 
 def lane_crossing_risk(
@@ -351,6 +381,16 @@ def lane_crossing_risk(
     lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
     if lane_trust < 1.0:
         predicted_relevance *= lane_trust
+
+    # Defense in depth against single-frame lateral_v outliers. The median
+    # smoothing in lane_lateral_velocity is the primary line of defense, but
+    # if a static off-corridor object briefly produces a high predicted
+    # relevance we cap it so crossing cannot leap from ~0.2 to ~1.0 in one
+    # frame. Sustained motion grows base too (overlap/proximity terms), so
+    # genuine cut-ins are not capped.
+    if base < 0.30 and predicted_relevance > base + 0.30:
+        predicted_relevance = base + 0.30
+
     return float(np.clip(max(base, predicted_relevance), 0.0, 1.0))
 
 
@@ -392,6 +432,58 @@ class DepthDeltaSmoother:
                 self._state.pop(track_id, None)
 
 
+class TtcImminenceSmoother:
+    """Per-track sliding count of imminent-TTC frames within a short window.
+
+    ``classify_state`` uses the returned count to require multi-frame
+    confirmation before upgrading to DANGER on the TTC<1s rule. The window
+    rule (2-of-last-3 imminent) survives a single intermediate frame where
+    TTC briefly recovers above 1s — a common pattern for real cut-ins where
+    expansion-rate noise causes one-frame TTC spikes — while still rejecting
+    a single isolated TTC dip from bbox jitter.
+
+    History is preserved across short tracker gaps (a YOLO frame where the
+    track didn't match, or a propagate-only frame where it wasn't in the
+    returned set) so a cut-in's imminent streak isn't wiped by an
+    intermediate frame where the detector missed it. ``forget`` only drops a
+    track after ``GRACE_FRAMES`` of consecutive inactivity, matching the
+    tracker's ``max_misses`` tolerance.
+    """
+
+    WINDOW_SIZE = 3
+    GRACE_FRAMES = 5
+
+    def __init__(self) -> None:
+        self._history: dict[int, list[bool]] = {}
+        self._miss_count: dict[int, int] = {}
+
+    def update(self, track_id: int, fused_ttc: float | None) -> int:
+        # Frames where TTC is None usually mean we don't have a fresh
+        # measurement (YOLO skipped, bbox unchanged on a propagated frame, or
+        # no valid components fused). Skipping the window update preserves
+        # the per-track signal across detection gaps so a cut-in's imminent
+        # frames aren't diluted by intermediate propagation frames.
+        self._miss_count[track_id] = 0
+        window = self._history.get(track_id, [])
+        if fused_ttc is None:
+            return sum(window)
+        window.append(bool(fused_ttc < _DANGER_TTC_SEC))
+        if len(window) > self.WINDOW_SIZE:
+            window = window[-self.WINDOW_SIZE:]
+        self._history[track_id] = window
+        return sum(window)
+
+    def forget(self, active_track_ids: set[int]) -> None:
+        for track_id in list(self._history.keys()):
+            if track_id in active_track_ids:
+                self._miss_count[track_id] = 0
+                continue
+            self._miss_count[track_id] = self._miss_count.get(track_id, 0) + 1
+            if self._miss_count[track_id] > self.GRACE_FRAMES:
+                self._history.pop(track_id, None)
+                self._miss_count.pop(track_id, None)
+
+
 # ── State machine ─────────────────────────────────────────────────────────────
 
 
@@ -404,6 +496,7 @@ def classify_state(
     lane_pos: float,
     confidence: float,
     lane_confidence: float = 1.0,
+    ttc_imminent_streak: int = 2,
 ) -> str:
     if confidence < 0.20:
         return "SAFE"
@@ -411,7 +504,17 @@ def classify_state(
     in_ego_lane = abs(lane_pos) < 0.7 and lane_confidence >= _LANE_TRUST_FLOOR
 
     if fused_ttc is not None:
-        if fused_ttc < _DANGER_TTC_SEC and (in_ego_lane or crossing >= 0.55):
+        # The TTC<1s immediate-DANGER rule requires at least two consecutive
+        # frames of imminent TTC so a single-frame bbox-expansion spike cannot
+        # flip the state on its own. The streak counter is maintained per
+        # track by ``TtcImminenceSmoother``. Callers without a smoother get
+        # the default ``2`` (treated as already confirmed) for backward
+        # compatibility.
+        if (
+            fused_ttc < _DANGER_TTC_SEC
+            and ttc_imminent_streak >= 2
+            and (in_ego_lane or crossing >= 0.55)
+        ):
             return "DANGER"
         if fused_ttc < _CAUTION_TTC_SEC and (in_ego_lane or crossing >= 0.30):
             return "CAUTION"
@@ -497,6 +600,7 @@ def calculate_track_risk(
     depth_is_fresh: bool,
     frame_index: int,
     timestamp_sec: float,
+    ttc_imminent_streak: int = 2,
 ) -> RiskEvent:
     """Build a RiskEvent for a single tracked object using fused TTC.
 
@@ -562,6 +666,7 @@ def calculate_track_risk(
         lane_pos=pos,
         confidence=detection_confidence,
         lane_confidence=lane.confidence,
+        ttc_imminent_streak=ttc_imminent_streak,
     )
 
     return RiskEvent(
@@ -599,6 +704,12 @@ def is_imminent_danger(event: RiskEvent) -> bool:
 
 
 def stabilized_event_state(stabilizer: "StateStabilizer", event: RiskEvent) -> str:
+    # Multi-frame TTC confirmation already happens per-track in
+    # ``TtcImminenceSmoother`` before ``classify_state`` returns DANGER, so by
+    # the time an imminent event reaches the stabilizer it has already
+    # survived the ``ttc<1s for 2 consecutive frames`` filter. The stabilizer
+    # still bypasses upgrade hysteresis for those confirmed imminent events
+    # so true cut-ins are flagged without an extra frame delay.
     if is_imminent_danger(event):
         stabilizer.current_state = "DANGER"
         stabilizer.pending_state = "DANGER"
@@ -681,24 +792,60 @@ def build_object_events(
     fields: SpatialFields,
     expansion_smoother: ExpansionSmoother,
     depth_smoother: DepthDeltaSmoother,
+    ttc_imminence_smoother: TtcImminenceSmoother | None = None,
 ) -> tuple[RiskEvent, list[RiskEvent]]:
     """Build per-object risk events plus a primary event for the frame."""
 
     if not tracks:
         expansion_smoother.forget(set())
         depth_smoother.forget(set())
+        if ttc_imminence_smoother is not None:
+            ttc_imminence_smoother.forget(set())
         safe = make_safe_event(
             frame_index=frame_index,
             timestamp_sec=timestamp_sec,
         )
         return safe, [safe]
 
+    # Two-pass: fuse TTC first so the imminence streak per track is updated
+    # before classify_state sees it. Per-track work is light, so this is
+    # cheaper than carrying state across function calls.
     events: list[RiskEvent] = []
     active_ids: set[int] = set()
     for track in tracks:
         active_ids.add(track.track_id)
         raw_rate = expansion_rate_from_track(track)
         expansion_rate = expansion_smoother.update(track.track_id, raw_rate)
+
+        if ttc_imminence_smoother is not None:
+            # Peek fused TTC without mutating depth history: build the same
+            # three components calculate_track_risk will, but pass
+            # update_history=False here so the smoother doesn't consume the
+            # depth delta sample twice.
+            expansion_component = ttc_from_expansion(
+                expansion_rate, history_age=len(track.history)
+            )
+            flow_component = ttc_from_flow(
+                track.bbox,
+                fields.flow.flow,
+                fields.lane.vanishing_point,
+                fields.flow_dt_sec,
+            )
+            depth_component = ttc_from_depth_delta(
+                track.track_id,
+                track.bbox,
+                fields.depth.near_map,
+                track.timestamp_sec,
+                depth_smoother.state,
+                update_history=False,
+            )
+            peek_ttc, _ = fuse_ttc(
+                [expansion_component, flow_component, depth_component]
+            )
+            streak = ttc_imminence_smoother.update(track.track_id, peek_ttc)
+        else:
+            streak = 2  # backward-compat: no smoother → treat as confirmed
+
         event = calculate_track_risk(
             track=track,
             near_map=fields.depth.near_map,
@@ -711,11 +858,14 @@ def build_object_events(
             depth_is_fresh=fields.depth_is_fresh,
             frame_index=frame_index,
             timestamp_sec=timestamp_sec,
+            ttc_imminent_streak=streak,
         )
         events.append(event)
 
     expansion_smoother.forget(active_ids)
     depth_smoother.forget(active_ids)
+    if ttc_imminence_smoother is not None:
+        ttc_imminence_smoother.forget(active_ids)
 
     # Intent gate: off-corridor tracks (|lane_position| > 1.0) are admitted by
     # the depth-gated corridor filter so the tracker can build history before
