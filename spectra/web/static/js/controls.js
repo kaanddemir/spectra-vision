@@ -301,7 +301,7 @@ export function initializeSpectra() {
       seekBar.value = 0;
       seekBar.style.setProperty("--fill", "0%");
       hidePreviewOverlay();
-      refreshEmptyStates(true);
+      refreshEmptyStates();
       return;
     }
     previewVideo.src = resolved;
@@ -314,16 +314,14 @@ export function initializeSpectra() {
     });
   }
 
-  function refreshEmptyStates(switchingView) {
+  function refreshEmptyStates() {
     const vEmpty = byId("empty-video");
     if (!vEmpty) return;
     const hasVideo = !!(previewVideo.src && previewVideo.src !== location.href);
 
     vEmpty.hidden = hasVideo;
-    if (switchingView) {
-      previewVideo.hidden = !hasVideo;
-      previewBlend.hidden = !(hasVideo && previewBlend.src);
-    }
+    previewVideo.hidden = !hasVideo;
+    previewBlend.hidden = !(hasVideo && previewBlend.src);
   }
 
   function clearPreviewOverlayTimer() {
@@ -1894,17 +1892,11 @@ export function initializeSpectra() {
     document.querySelectorAll(".side-bar-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         const toggleId = btn.dataset.toggle;
-        const viewMode = btn.dataset.view;
-
-        if (toggleId) {
-          const panel = byId(toggleId);
-          if (panel) {
-            panel.hidden = !panel.hidden;
-            btn.classList.toggle("is-active", !panel.hidden);
-          }
-        } else if (viewMode === "video") {
-          btn.classList.add("is-active");
-          refreshEmptyStates(true);
+        if (!toggleId) return;
+        const panel = byId(toggleId);
+        if (panel) {
+          panel.hidden = !panel.hidden;
+          btn.classList.toggle("is-active", !panel.hidden);
         }
       });
     });
