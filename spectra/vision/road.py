@@ -258,13 +258,43 @@ def _bbox_lane_overlap(
     return float(np.clip(overlap / bbox_width, 0.0, 1.0))
 
 
-def detection_corridor_score(detection: Detection, lane: LaneFrame) -> float:
+def _bbox_median_nearness(
+    near_map: np.ndarray | None,
+    bbox: tuple[int, int, int, int],
+) -> float:
+    if near_map is None:
+        return 0.0
+    height, width = near_map.shape[:2]
+    x1, y1, x2, y2 = bbox
+    x1 = max(0, min(width, x1))
+    x2 = max(0, min(width, x2))
+    y1 = max(0, min(height, y1))
+    y2 = max(0, min(height, y2))
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    crop = near_map[y1:y2, x1:x2]
+    if crop.size == 0:
+        return 0.0
+    return float(np.clip(np.median(crop), 0.0, 1.0))
+
+
+def detection_corridor_score(
+    detection: Detection,
+    lane: LaneFrame,
+    *,
+    near_map: np.ndarray | None = None,
+) -> float:
     """Score whether a YOLO detection is worth tracking for ego-lane risk.
 
     YOLO still runs on the full frame. This score gates only the downstream
     tracker/risk pool so distant vehicles in the ego corridor remain visible,
     while far side-lane/background detections never receive IDs or overlay
     boxes.
+
+    When ``near_map`` is provided, nearby off-corridor detections that are
+    physically close (high median nearness) are admitted as cut-in candidates
+    with a barely-passing score so the tracker can build history before they
+    intrude. Without ``near_map`` the original strict gate applies.
     """
 
     x1, y1, x2, y2 = detection.bbox
@@ -324,6 +354,13 @@ def detection_corridor_score(detection: Detection, lane: LaneFrame) -> float:
     if near_or_large and abs(pos) > 0.95:
         intrudes_lane = overlap_px >= max(lane_width * 0.07, width * 0.025)
         if not intrudes_lane and (abs(pos) > 1.24 or overlap_score < 0.18):
+            # Depth-gated cut-in admit: a physically close side-lane vehicle
+            # within ~2 lane widths is admitted with a barely-passing score
+            # so the tracker can build history before it intrudes.
+            if near_map is not None and abs(pos) <= 2.0:
+                bbox_nearness = _bbox_median_nearness(near_map, detection.bbox)
+                if bbox_nearness >= 0.55:
+                    return 0.32
             return 0.0
         score = max(score, 0.58 if intrudes_lane else 0.52)
 
@@ -334,6 +371,7 @@ def filter_relevant_detections(
     detections: list[Detection],
     lane: LaneFrame,
     *,
+    near_map: np.ndarray | None = None,
     min_score: float = 0.30,
 ) -> list[Detection]:
     """Keep only YOLO detections relevant to the ego-lane risk pipeline."""
@@ -341,7 +379,8 @@ def filter_relevant_detections(
     return [
         detection
         for detection in detections
-        if detection_corridor_score(detection, lane) >= float(min_score)
+        if detection_corridor_score(detection, lane, near_map=near_map)
+        >= float(min_score)
     ]
 
 

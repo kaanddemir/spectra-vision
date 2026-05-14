@@ -715,10 +715,40 @@ def build_object_events(
     expansion_smoother.forget(active_ids)
     depth_smoother.forget(active_ids)
 
-    primary = max(events, key=lambda e: (
+    # Intent gate: off-corridor tracks (|lane_position| > 1.0) are admitted by
+    # the depth-gated corridor filter so the tracker can build history before
+    # they intrude, but they should NOT win primary-event selection while they
+    # are still drifting away or sitting parallel. Only promote them when they
+    # show inbound lateral motion toward the ego lane *and* their predicted
+    # position within 1.5 s lands inside the corridor.
+    eligible = [e for e in events if _primary_eligible(e)]
+    if not eligible:
+        safe = make_safe_event(
+            frame_index=frame_index,
+            timestamp_sec=timestamp_sec,
+        )
+        return safe, events
+
+    primary = max(eligible, key=lambda e: (
         {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(e.state, 0.0)
         + (0.0 if e.ttc_sec is None else max(0.0, 3.0 - e.ttc_sec) / 3.0)
         + e.closing_speed
         + (0.5 * e.crossing_risk)
     ))
     return primary, events
+
+
+_INBOUND_LANE_PER_SEC = 0.15
+_INTENT_HORIZON_SEC = 1.5
+
+
+def _primary_eligible(event: RiskEvent) -> bool:
+    pos = float(event.lane_position)
+    if abs(pos) <= 1.0:
+        return True
+    lat_v = float(event.lateral_velocity_norm)
+    inbound_rate = -lat_v * (1.0 if pos > 0.0 else -1.0)
+    if inbound_rate < _INBOUND_LANE_PER_SEC:
+        return False
+    predicted_pos = pos + (lat_v * _INTENT_HORIZON_SEC)
+    return abs(predicted_pos) <= 1.0

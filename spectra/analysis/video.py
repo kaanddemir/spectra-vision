@@ -577,7 +577,17 @@ def analyze_spatial_video(
         # propagates existing tracks so IDs and TTC history stay continuous.
         should_detect = fi % max(detect_every, 1) == 0
         if should_detect:
-            detections = filter_relevant_detections(detector.detect(frame.bgr), lane)
+            # Pass the latest near_map so the corridor filter can admit
+            # physically-close side-lane vehicles as cut-in candidates.
+            # ``last_depth`` may be None on the very first frame before the
+            # initial depth pass completes; the filter falls back to its
+            # strict gate in that case.
+            depth_near_map = last_depth.near_map if last_depth is not None else None
+            detections = filter_relevant_detections(
+                detector.detect(frame.bgr),
+                lane,
+                near_map=depth_near_map,
+            )
             active_tracks = tracker.update(
                 detections,
                 frame_index=fi,
