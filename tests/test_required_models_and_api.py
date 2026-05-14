@@ -1,7 +1,12 @@
 """Required ONNX model and lane-only API contract tests."""
 
-import numpy as np
+import asyncio
+import io
 
+import numpy as np
+from fastapi import UploadFile
+
+import spectra.app as app_module
 from spectra.app import _serialize_result
 from spectra.vision.motion import compute_velocity
 from spectra.vision.preprocessing import preprocess_frame
@@ -244,3 +249,53 @@ def test_primary_risk_score_matches_objects_entry():
     peak = payload["peakEvent"]
     peak_primary = next(o for o in peak["objects"] if o["objectId"] == peak["primaryObjectId"])
     assert peak["primaryRiskScore"] == peak_primary["riskScore"]
+
+
+def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
+    """The API layer must clamp form values before delegating analysis."""
+
+    captured = {}
+
+    def fake_analyze_spatial_video(**kwargs):
+        captured.update(kwargs)
+        return {
+            "fps": 30.0,
+            "frame_count": 0,
+            "processed_frames": 0,
+            "frames": [],
+            "events": [],
+            "peak_event": None,
+        }
+
+    monkeypatch.setattr(app_module, "analyze_spatial_video", fake_analyze_spatial_video)
+
+    async def call_endpoint():
+        upload = UploadFile(filename="clip.mp4", file=io.BytesIO(b"fake video bytes"))
+        return await app_module.analyze_endpoint(
+            file=upload,
+            mode="video",
+            max_processed_frames=0,
+            max_saved_events=99,
+            resize_max_side=9999,
+            depth_every=0,
+            detect_every=0,
+            lane_every=0,
+            flow_every=0,
+            start_sec=2.5,
+            end_sec=0.0,
+            session_id="",
+        )
+
+    response = asyncio.run(call_endpoint())
+
+    assert response["payload"]["schemaVersion"] == 2
+    assert captured["max_processed_frames"] == 1
+    assert captured["max_saved_events"] == 50
+    assert captured["resize_max_side"] == 1920
+    assert captured["depth_every"] == 1
+    assert captured["detect_every"] == 1
+    assert captured["lane_every"] == 1
+    assert captured["flow_every"] == 1
+    assert captured["start_sec"] == 2.5
+    assert captured["end_sec"] is None
+    assert captured["progress_callback"] is None
