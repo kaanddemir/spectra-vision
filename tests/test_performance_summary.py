@@ -37,6 +37,7 @@ def test_performance_summary_reports_stage_stats_and_bottleneck():
             "initial_runs": 1,
             "periodic_runs": 1,
             "motion_triggered_runs": 0,
+            "cooldown_frames": 5,
         },
     )
 
@@ -44,6 +45,7 @@ def test_performance_summary_reports_stage_stats_and_bottleneck():
     assert summary["effective_fps"] == pytest.approx(2.0)
     assert summary["depth_refresh"]["runs"] == 2
     assert summary["depth_refresh"]["skips"] == 1
+    assert summary["depth_refresh"]["effective_interval_frames"] == pytest.approx(1.5)
     assert summary["bottleneck"]["stage"] == "yolo"
     assert summary["stages"]["preprocess"]["active"]["avg_ms"] == pytest.approx(20.0)
     assert summary["stages"]["preprocess"]["active"]["p95_ms"] == pytest.approx(30.0)
@@ -54,5 +56,8 @@ def test_performance_summary_reports_stage_stats_and_bottleneck():
     lines = _format_performance_summary(summary)
     assert lines[0] == "SUMMARY"
     assert any("Bottleneck: yolo" in line for line in lines)
-    assert any("Depth refresh: runs=2 skips=1 initial=1 periodic=1 motion=0" in line for line in lines)
+    assert any(
+        "Depth refresh: runs=2 skips=1 initial=1 periodic=1 motion=0 cooldown=5 effective_interval=1.5f" in line
+        for line in lines
+    )
     assert any("Sampling: lane_every=5 depth_every=10 adaptive_depth=on detect_every=3 flow_every=1" in line for line in lines)

@@ -111,6 +111,19 @@ def _build_performance_summary(
         _PERFORMANCE_STAGES,
         key=lambda stage: float(stages[stage]["frame"]["avg_ms"] or 0.0),
     )
+    refresh = depth_refresh or {
+        "runs": 0,
+        "skips": processed_frames,
+        "initial_runs": 0,
+        "periodic_runs": 0,
+        "motion_triggered_runs": 0,
+        "cooldown_frames": max(3, depth_every // 2),
+    }
+    refresh.setdefault("cooldown_frames", max(3, depth_every // 2))
+    refresh["effective_interval_frames"] = (
+        processed_frames / refresh["runs"] if refresh["runs"] > 0 else None
+    )
+
     return {
         "processed_frames": processed_frames,
         "elapsed_sec": elapsed_sec,
@@ -127,19 +140,17 @@ def _build_performance_summary(
             "adaptive_depth": adaptive_depth,
             "detect_every": detect_every,
         },
-        "depth_refresh": depth_refresh or {
-            "runs": 0,
-            "skips": processed_frames,
-            "initial_runs": 0,
-            "periodic_runs": 0,
-            "motion_triggered_runs": 0,
-        },
+        "depth_refresh": refresh,
         "stages": stages,
     }
 
 
 def _fmt_ms(value: float | int | None) -> str:
     return "-" if value is None else f"{float(value):.0f}"
+
+
+def _fmt_frames(value: float | int | None) -> str:
+    return "-" if value is None else f"{float(value):.1f}"
 
 
 def _format_performance_summary(summary: dict[str, Any]) -> list[str]:
@@ -174,7 +185,9 @@ def _format_performance_summary(summary: dict[str, Any]) -> list[str]:
         f"skips={depth_refresh['skips']} "
         f"initial={depth_refresh['initial_runs']} "
         f"periodic={depth_refresh['periodic_runs']} "
-        f"motion={depth_refresh['motion_triggered_runs']}"
+        f"motion={depth_refresh['motion_triggered_runs']} "
+        f"cooldown={depth_refresh['cooldown_frames']} "
+        f"effective_interval={_fmt_frames(depth_refresh['effective_interval_frames'])}f"
     )
     lines.append(
         "Sampling: "
@@ -429,6 +442,7 @@ def analyze_spatial_video(
         "initial_runs": 0,
         "periodic_runs": 0,
         "motion_triggered_runs": 0,
+        "cooldown_frames": max(3, depth_every // 2),
     }
     expansion_smoother = ExpansionSmoother()
     depth_smoother = DepthDeltaSmoother()
@@ -439,6 +453,7 @@ def analyze_spatial_video(
     tracker = IoUTracker(iou_threshold=0.25, max_misses=5)
     processed_frames = 0
     previous_timestamp_sec: float | None = None
+    last_motion_depth_frame: int | None = None
     processing_start = time.perf_counter()
 
     for video_frame in loader.frames():
@@ -482,11 +497,20 @@ def analyze_spatial_video(
 
         # 1. Fast motion check: is the scene busy enough to re-run depth?
         quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
-        is_high_risk = adaptive_depth and quick_risk > 0.15
         is_periodic = fi % max(depth_every, 1) == 0
         is_initial_depth = last_depth is None
-        is_motion_triggered_depth = (not is_initial_depth) and (not is_periodic) and is_high_risk
-        needs_depth = is_initial_depth or is_periodic or is_high_risk
+        motion_cooldown_ready = (
+            last_motion_depth_frame is None
+            or fi - last_motion_depth_frame >= depth_refresh["cooldown_frames"]
+        )
+        is_high_risk = adaptive_depth and quick_risk > 0.15
+        is_motion_triggered_depth = (
+            (not is_initial_depth)
+            and (not is_periodic)
+            and is_high_risk
+            and motion_cooldown_ready
+        )
+        needs_depth = is_initial_depth or is_periodic or is_motion_triggered_depth
         depth_is_fresh = bool(needs_depth)
         if needs_depth:
             depth_refresh["runs"] += 1
@@ -496,6 +520,7 @@ def analyze_spatial_video(
                 depth_refresh["periodic_runs"] += 1
             elif is_motion_triggered_depth:
                 depth_refresh["motion_triggered_runs"] += 1
+                last_motion_depth_frame = fi
             last_depth = estimate_frame_depth(frame)
         else:
             depth_refresh["skips"] += 1
