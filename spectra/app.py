@@ -8,7 +8,7 @@ import io
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
