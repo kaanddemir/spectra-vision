@@ -480,6 +480,30 @@ class TestCalculateTrackRisk:
 
         assert event.state == "SAFE"
 
+    def test_risk_event_uses_display_id_when_present(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.3, dtype=np.float32)
+        magnitude = np.zeros((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(17, (130, 100, 170, 140), t=1.0)
+        track.display_id = 2
+
+        event = calculate_track_risk(
+            track=track,
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=0.0,
+            depth_history={},
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=True,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
+        )
+
+        assert event.object_id == 2
+
 
 class TestExpansionSmoother:
     def test_first_value_is_passthrough(self):
@@ -546,6 +570,7 @@ class TestIoUTracker:
         assert tracks_t0 == []
         assert tracks_t1[0].track_id == 1
         assert tracks_t1[0].confirmed
+        assert tracks_t1[0].display_id == 1
         assert len(tracks_t1[0].history) == 1
 
     def test_fast_confirms_large_high_confidence_detection(self):
@@ -559,6 +584,92 @@ class TestIoUTracker:
 
         assert len(tracks) == 1
         assert tracks[0].confirmed
+        assert tracks[0].display_id == 1
+
+    def test_links_low_iou_detection_by_center_and_scale(self):
+        tracker = IoUTracker(iou_threshold=0.5)
+        first = [Detection(bbox=(0, 0, 100, 100), class_name="car", confidence=0.9)]
+        tracks_t0 = tracker.update(first, frame_index=0, timestamp_sec=0.0, frame_shape=(200, 300, 3))
+        second = [Detection(bbox=(35, 10, 135, 110), class_name="car", confidence=0.8)]
+        tracks_t1 = tracker.update(second, frame_index=1, timestamp_sec=0.1, frame_shape=(200, 300, 3))
+
+        assert tracks_t0[0].track_id == 1
+        assert tracks_t1[0].track_id == 1
+        assert tracks_t1[0].display_id == 1
+        assert len(tracks_t1[0].history) == 1
+
+    def test_reconnects_after_short_detection_miss(self):
+        tracker = IoUTracker(iou_threshold=0.5, max_misses=5)
+        tracker.update(
+            [Detection(bbox=(0, 0, 100, 100), class_name="car", confidence=0.9)],
+            frame_index=0,
+            timestamp_sec=0.0,
+            frame_shape=(200, 300, 3),
+        )
+        tracker.update(
+            [Detection(bbox=(10, 0, 110, 100), class_name="car", confidence=0.9)],
+            frame_index=1,
+            timestamp_sec=0.1,
+            frame_shape=(200, 300, 3),
+        )
+        assert tracker.update([], frame_index=2, timestamp_sec=0.2, frame_shape=(200, 300, 3)) == []
+
+        tracks = tracker.update(
+            [Detection(bbox=(75, 0, 175, 100), class_name="car", confidence=0.9)],
+            frame_index=3,
+            timestamp_sec=0.3,
+            frame_shape=(200, 300, 3),
+        )
+
+        assert len(tracks) == 1
+        assert tracks[0].track_id == 1
+        assert tracks[0].display_id == 1
+        assert tracks[0].misses == 0
+
+    def test_center_scale_gate_does_not_merge_adjacent_tracks(self):
+        tracker = IoUTracker(iou_threshold=0.5)
+        tracks_t0 = tracker.update(
+            [
+                Detection(bbox=(0, 0, 100, 100), class_name="car", confidence=0.9),
+                Detection(bbox=(160, 0, 260, 100), class_name="car", confidence=0.9),
+            ],
+            frame_index=0,
+            timestamp_sec=0.0,
+            frame_shape=(200, 320, 3),
+        )
+
+        tracks_t1 = tracker.update(
+            [
+                Detection(bbox=(35, 0, 135, 100), class_name="car", confidence=0.9),
+                Detection(bbox=(195, 0, 295, 100), class_name="car", confidence=0.9),
+            ],
+            frame_index=1,
+            timestamp_sec=0.1,
+            frame_shape=(200, 320, 3),
+        )
+
+        assert sorted(track.track_id for track in tracks_t0) == [1, 2]
+        assert sorted(track.track_id for track in tracks_t1) == [1, 2]
+        assert sorted(track.display_id for track in tracks_t1) == [1, 2]
+
+    def test_pending_false_positive_does_not_consume_display_id(self):
+        tracker = IoUTracker()
+        tracker.update(
+            [Detection(bbox=(0, 0, 20, 20), class_name="car", confidence=0.6)],
+            frame_index=0,
+            timestamp_sec=0.0,
+        )
+
+        tracks = tracker.update(
+            [Detection(bbox=(40, 40, 100, 100), class_name="car", confidence=0.9)],
+            frame_index=1,
+            timestamp_sec=0.1,
+            frame_shape=(200, 300, 3),
+        )
+
+        assert len(tracks) == 1
+        assert tracks[0].track_id == 2
+        assert tracks[0].display_id == 1
 
     def test_pending_false_positive_does_not_propagate(self):
         tracker = IoUTracker()

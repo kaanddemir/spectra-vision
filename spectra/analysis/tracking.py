@@ -1,4 +1,4 @@
-"""Lightweight IoU-based multi-object tracker.
+"""Lightweight multi-signal object tracker.
 
 Maintains short per-track history (bbox + timestamp) so downstream code can
 compute scale expansion (TTC source) and lateral velocity (path crossing).
@@ -31,6 +31,7 @@ class Track:
     age: int = 0
     hits: int = 1
     confirmed: bool = False
+    display_id: int | None = None
     misses: int = 0
     history: Deque[TrackSample] = field(default_factory=lambda: deque(maxlen=12))
 
@@ -65,24 +66,97 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     return inter / union
 
 
+def _bbox_size(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
+    x1, y1, x2, y2 = bbox
+    return max(1.0, float(x2 - x1)), max(1.0, float(y2 - y1))
+
+
+def _bbox_center(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
+    x1, y1, x2, y2 = bbox
+    return (float(x1 + x2) * 0.5, float(y1 + y2) * 0.5)
+
+
+def _bbox_area(bbox: tuple[int, int, int, int]) -> float:
+    width, height = _bbox_size(bbox)
+    return width * height
+
+
+def _center_distance_ratio(
+    a: tuple[int, int, int, int],
+    b: tuple[int, int, int, int],
+) -> float:
+    ax, ay = _bbox_center(a)
+    bx, by = _bbox_center(b)
+    aw, ah = _bbox_size(a)
+    bw, bh = _bbox_size(b)
+    scale = max(1.0, ((aw * aw + ah * ah) ** 0.5 + (bw * bw + bh * bh) ** 0.5) * 0.5)
+    return (((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5) / scale
+
+
+def _scale_compatible(
+    a: tuple[int, int, int, int],
+    b: tuple[int, int, int, int],
+    *,
+    min_area_ratio: float = 0.45,
+    max_area_ratio: float = 2.60,
+    max_aspect_ratio_delta: float = 2.20,
+) -> bool:
+    aw, ah = _bbox_size(a)
+    bw, bh = _bbox_size(b)
+    area_ratio = _bbox_area(b) / max(_bbox_area(a), 1.0)
+    if area_ratio < min_area_ratio or area_ratio > max_area_ratio:
+        return False
+    aspect_a = aw / ah
+    aspect_b = bw / bh
+    aspect_delta = max(aspect_a, aspect_b) / max(min(aspect_a, aspect_b), 1e-6)
+    return aspect_delta <= max_aspect_ratio_delta
+
+
+def _predict_bbox(track: Track, timestamp_sec: float) -> tuple[int, int, int, int]:
+    previous = track.previous_sample(min_dt=0.001)
+    if previous is None:
+        return track.bbox
+
+    dt = track.timestamp_sec - previous.timestamp_sec
+    future_dt = timestamp_sec - track.timestamp_sec
+    if dt <= 0.0 or future_dt <= 0.0:
+        return track.bbox
+
+    # Use a conservative constant-velocity bbox prediction. Cap the horizon so
+    # one stale motion sample cannot pull a track across the whole frame.
+    ratio = min(3.0, future_dt / dt)
+    predicted = []
+    for current, prior in zip(track.bbox, previous.bbox):
+        predicted.append(int(round(float(current) + (float(current) - float(prior)) * ratio)))
+    x1, y1, x2, y2 = predicted
+    if x2 <= x1 or y2 <= y1:
+        return track.bbox
+    return (x1, y1, x2, y2)
+
+
 class IoUTracker:
-    """Greedy IoU matcher with per-track history for expansion-rate TTC."""
+    """Greedy multi-signal matcher with per-track history for TTC."""
 
     def __init__(
         self,
         *,
         iou_threshold: float = 0.25,
+        predicted_iou_threshold: float = 0.12,
+        center_distance_threshold: float = 0.70,
         max_misses: int = 5,
         confirm_hits: int = 2,
         fast_confirm_confidence: float = 0.70,
         fast_confirm_height_ratio: float = 0.18,
     ) -> None:
         self.iou_threshold = float(iou_threshold)
+        self.predicted_iou_threshold = float(predicted_iou_threshold)
+        self.center_distance_threshold = float(center_distance_threshold)
         self.max_misses = int(max_misses)
         self.confirm_hits = int(confirm_hits)
         self.fast_confirm_confidence = float(fast_confirm_confidence)
         self.fast_confirm_height_ratio = float(fast_confirm_height_ratio)
         self._next_id = 1
+        self._next_display_id = 1
         self._tracks: dict[int, Track] = {}
 
     def _is_fast_confirm(self, det: Detection, frame_height: int | None) -> bool:
@@ -95,6 +169,49 @@ class IoUTracker:
     @staticmethod
     def _visible(tracks: list[Track]) -> list[Track]:
         return [track for track in tracks if track.confirmed]
+
+    def _ensure_display_id(self, track: Track) -> None:
+        if track.display_id is not None:
+            return
+        track.display_id = self._next_display_id
+        self._next_display_id += 1
+
+    def _confirm_if_ready(
+        self,
+        track: Track,
+        det: Detection,
+        frame_height: int | None,
+    ) -> None:
+        if track.hits >= self.confirm_hits or self._is_fast_confirm(det, frame_height):
+            track.confirmed = True
+            self._ensure_display_id(track)
+
+    def _match_score(
+        self,
+        track: Track,
+        det: Detection,
+        *,
+        timestamp_sec: float,
+    ) -> float | None:
+        direct_iou = _iou(track.bbox, det.bbox)
+        predicted_bbox = _predict_bbox(track, timestamp_sec)
+        predicted_iou = _iou(predicted_bbox, det.bbox)
+        center_ratio = _center_distance_ratio(predicted_bbox, det.bbox)
+        scale_ok = _scale_compatible(predicted_bbox, det.bbox)
+
+        accepted = (
+            direct_iou >= self.iou_threshold
+            or predicted_iou >= self.predicted_iou_threshold
+            or (scale_ok and center_ratio <= self.center_distance_threshold)
+        )
+        if not accepted:
+            return None
+
+        center_score = max(0.0, 1.0 - (center_ratio / max(self.center_distance_threshold, 1e-6)))
+        match_iou = max(direct_iou, predicted_iou)
+        area_ratio = _bbox_area(det.bbox) / max(_bbox_area(predicted_bbox), 1.0)
+        scale_score = max(0.0, 1.0 - min(abs(area_ratio - 1.0), 1.0))
+        return (2.0 * match_iou) + center_score + (0.25 * scale_score) - (0.03 * track.misses)
 
     def update(
         self,
@@ -109,16 +226,22 @@ class IoUTracker:
         unmatched_dets = list(range(len(detections)))
         matched_track_ids: set[int] = set()
 
-        # Build all candidate (track, det) pairs above the IoU threshold and
-        # pick them greedily by descending IoU, requiring class agreement.
+        # Build all candidate (track, det) pairs and pick greedily by the
+        # strongest multi-signal score. IoU remains the primary signal, while
+        # predicted IoU and center/scale compatibility keep IDs stable across
+        # sparse YOLO frames and box jitter.
         candidates: list[tuple[float, int, int]] = []
         for det_idx, det in enumerate(detections):
             for track in active_tracks:
                 if track.class_name != det.class_name:
                     continue
-                iou = _iou(track.bbox, det.bbox)
-                if iou >= self.iou_threshold:
-                    candidates.append((iou, det_idx, track.track_id))
+                score = self._match_score(
+                    track,
+                    det,
+                    timestamp_sec=timestamp_sec,
+                )
+                if score is not None:
+                    candidates.append((score, det_idx, track.track_id))
         candidates.sort(reverse=True)
 
         used_dets: set[int] = set()
@@ -140,8 +263,7 @@ class IoUTracker:
             track.timestamp_sec = timestamp_sec
             track.age += 1
             track.hits += 1
-            if track.hits >= self.confirm_hits or self._is_fast_confirm(det, frame_height):
-                track.confirmed = True
+            self._confirm_if_ready(track, det, frame_height)
             track.misses = 0
             matched_track_ids.add(track_id)
             used_dets.add(det_idx)
@@ -152,7 +274,7 @@ class IoUTracker:
             det = detections[det_idx]
             track_id = self._next_id
             self._next_id += 1
-            self._tracks[track_id] = Track(
+            track = Track(
                 track_id=track_id,
                 class_name=det.class_name,
                 confidence=det.confidence,
@@ -161,9 +283,11 @@ class IoUTracker:
                 timestamp_sec=timestamp_sec,
                 age=1,
                 hits=1,
-                confirmed=self._is_fast_confirm(det, frame_height),
+                confirmed=False,
                 misses=0,
             )
+            self._confirm_if_ready(track, det, frame_height)
+            self._tracks[track_id] = track
             new_track_ids.add(track_id)
 
         # Age out tracks that were not updated this frame. Risk is only
@@ -190,3 +314,4 @@ class IoUTracker:
     def reset(self) -> None:
         self._tracks.clear()
         self._next_id = 1
+        self._next_display_id = 1

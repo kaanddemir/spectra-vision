@@ -744,7 +744,7 @@ def calculate_track_risk(
         closing_speed=round(closing_speed, 3),
         bbox=bbox,
         reason=reason,
-        object_id=track.track_id,
+        object_id=track.display_id if track.display_id is not None else track.track_id,
         expansion_rate=round(float(expansion_rate), 3),
         lateral_velocity_norm=round(float(lateral_v), 3),
         crossing_risk=round(float(crossing), 3),
