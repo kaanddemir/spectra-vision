@@ -138,8 +138,18 @@ class TestLaneGeometry:
             Detection(bbox=(0, 130, 70, 199), class_name="car", confidence=0.9),
         ]
 
+        # The filter admits the partially-visible side vehicle so the tracker
+        # can build history before it fully intrudes.
         assert filter_relevant_detections(detections, lane) == detections
-        assert lane_corridor_relevance(detections[0].bbox, lane) >= 0.7
+
+        # Its *static* corridor relevance is intentionally moderate, not a flat
+        # high floor: a barely-clipping side-lane object must not read as
+        # in-lane on geometry alone (a moving cut-in is caught dynamically via
+        # lateral velocity in lane_crossing_risk). So it stays a positive
+        # candidate but well below a fully in-lane vehicle.
+        edge = lane_corridor_relevance(detections[0].bbox, lane)
+        centered = lane_corridor_relevance((130, 145, 170, 199), lane)
+        assert 0.0 < edge < centered
 
     def test_detection_filter_keeps_distant_ego_corridor_vehicle(self):
         lane = make_lane()
@@ -305,6 +315,15 @@ class TestCrossing:
         )
 
         assert lane_crossing_risk(moving_in, lane, 2.0) > lane_crossing_risk(static, lane, 2.0)
+
+    def test_far_object_crossing_damped_vs_near(self):
+        # Same rightward-to-center motion; one high in frame (far, near the
+        # horizon), one low (near). The collision-cone distance reliability
+        # damps the far object's predicted crossing.
+        lane = make_lane()
+        far = make_track(1, (225, 100, 245, 130), t=1.0, history=[(0.7, (255, 100, 275, 130))])
+        near = make_track(2, (225, 160, 245, 190), t=1.0, history=[(0.7, (255, 160, 275, 190))])
+        assert lane_crossing_risk(far, lane, 2.0) < lane_crossing_risk(near, lane, 2.0)
 
 
 class TestClassifyState:

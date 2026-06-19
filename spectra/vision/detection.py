@@ -33,6 +33,10 @@ RELEVANT_CLASSES: dict[str, str] = {
     "bus": "bus",
     "train": "train",
     "truck": "truck",
+    # Traffic lights are detected for the advisory colour-state cue. They are
+    # NOT collision participants — callers split them out before tracking
+    # (see analysis/video.py).
+    "traffic light": "traffic_light",
 }
 
 
@@ -46,6 +50,7 @@ CLASS_RISK_WEIGHT: dict[str, float] = {
     "bus": 0.95,
     "truck": 0.95,
     "train": 0.90,
+    "traffic_light": 0.0,  # advisory only, never a collision participant
 }
 
 CLASS_MIN_CONFIDENCE: dict[str, float] = {
@@ -56,6 +61,7 @@ CLASS_MIN_CONFIDENCE: dict[str, float] = {
     "bus": 0.40,
     "train": 0.40,
     "truck": 0.40,
+    "traffic_light": 0.35,
 }
 
 

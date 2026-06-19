@@ -11,7 +11,8 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 - Road geometry: The road/lane corridor and vanishing point are estimated.
 - Depth: Depth Anything V2 ONNX produces a relative nearness map. On Apple Silicon the ONNX session prefers the CoreML execution provider so depth inference runs on the ANE/GPU.
 - Motion: Classical DIS optical flow (OpenCV) with ego-motion compensation. There is no neural-flow ONNX dependency anymore — DIS is fast on CPU and accurate enough for bbox-level TTC and divergence signals.
-- Risk: TTC, lane relationship, nearness, closing speed, and confidence are fused into a risk state.
+- Appearance cues: a brake-light detector (early deceleration warning for in-path lead vehicles) and a traffic-light colour classifier (advisory). Both are heuristic OpenCV, no extra models.
+- Risk: TTC, lane relationship (with a collision-cone distance reliability term), nearness, closing speed, brake-light, and confidence are fused into a risk state.
 
 The backend returns timeline rows, the peak event, per-object risk metrics, and deferred visual overlays to the frontend.
 
@@ -53,7 +54,7 @@ Runtime notes:
 
 ## 4. Video Frame Loop
 
-The main frame loop lives in `spectra/analysis/video.py`.
+The per-frame perception + risk logic is encapsulated in the `SpatialFrameAnalyzer` class in `spectra/analysis/video.py`. It holds all cross-frame state (tracker, lane Kalman, hysteresis stabilizer, the per-track smoothers, and the cached lane/flow/depth) so any source can drive it via `process_frame(frame_bgr, frame_index, timestamp_sec)`. `analyze_spatial_video()` is a thin orchestrator that reads frames with `VideoLoader`, calls `process_frame`, and handles video-level concerns (event dedup/top-N, deferred rendering, progress callbacks).
 
 For each frame:
 
@@ -63,10 +64,10 @@ For each frame:
 4. DIS optical flow is computed on the configured flow interval; skipped frames reuse the previous flow.
 5. A cheap motion score decides whether depth should be refreshed early.
 6. Depth Anything V2 estimates a relative nearness map when scheduled or motion-triggered.
-7. YOLO detects road participants on the configured detection interval.
+7. YOLO detects road participants on the configured detection interval. Traffic-light detections are split out (advisory colour cue) and excluded from tracking.
 8. Detections are filtered by ego-lane relevance before tracking.
 9. The IoU tracker links detections to existing tracks or propagates tracks on skipped detection frames.
-10. Risk is computed for every active track and the primary object is selected.
+10. Risk is computed for every active track (including the brake-light cue) and the primary object is selected.
 11. State transitions are stabilized with hysteresis.
 12. A metadata-only event payload and a timeline row are produced.
 13. Saved events are deduplicated, ranked, and trimmed to `max_saved_events`.
@@ -188,8 +189,7 @@ YOLO detections are filtered to road-relevant COCO classes:
 - bus
 - train
 - truck
-- traffic light
-- stop sign
+- traffic light (advisory only — see below)
 
 Each detection is stored as `Detection`:
 
@@ -197,7 +197,15 @@ Each detection is stored as `Detection`:
 - `class_name`: normalized class name
 - `confidence`: YOLO confidence
 
-Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals. Static objects such as traffic lights and stop signs receive lower risk weights.
+Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals.
+
+Traffic lights are detected but are **not collision participants**: `spectra/analysis/video.py` splits them out of the detection list before the corridor filter and tracker, so they never receive track IDs or TTC. They feed only the advisory traffic-light colour cue (section 9b). Their `CLASS_RISK_WEIGHT` is `0.0`.
+
+## 9b. Traffic Light State (advisory)
+
+Colour classification is implemented in `spectra/vision/traffic_light.py`.
+
+For each detected traffic-light bbox, `classify_light_state()` reads the HSV histogram and returns `red`, `yellow`, `green`, or `unknown`. `frame_light_state()` picks the largest (nearest) light and returns one frame-level state, coasted on detection-skipped frames. This is surfaced as a frame-level advisory (`trafficLight` on each timeline row and a coloured dot in the overlay); it never gates collision logic, because "which light applies to my lane" is ambiguous from a single forward camera.
 
 ## 10. Object Tracking
 
@@ -296,6 +304,8 @@ Signals:
 
 For example, a vehicle in the right lane may stay low risk even if it is approaching. If it is laterally moving toward the ego lane, crossing risk rises.
 
+Collision-cone distance reliability: `lane_position` is normalized by the lane width at the object's image row, so far objects (near the horizon) are computed from very few pixels and their lateral-velocity extrapolation is jittery. `lane_crossing_risk()` damps the *predicted* (velocity-based) crossing toward the horizon using the object's vertical position; the static corridor `base` stays a floor, so genuine near cut-ins are untouched while phantom far cut-ins fade. (Ego-yaw / curved-path handling is intentionally not modeled — lane geometry is stored as straight lines.)
+
 ## 14. Closing Speed and Confidence
 
 For every object, Spectra computes a normalized closing-speed-like signal:
@@ -304,7 +314,7 @@ For every object, Spectra computes a normalized closing-speed-like signal:
 - 30% crossing risk
 - 20% optical-flow magnitude
 
-This signal is multiplied by class risk weight. People and bicycles are slightly more sensitive; traffic lights and stop signs are down-weighted.
+This signal is multiplied by class risk weight. People and bicycles are slightly more sensitive.
 
 Fused confidence combines:
 
@@ -336,6 +346,12 @@ Main thresholds:
 - Otherwise: `SAFE`
 
 This raw decision is later stabilized.
+
+### 15b. Brake-Light Cue
+
+Code: `spectra/vision/brake_lights.py` (`brake_score`), applied in `calculate_track_risk()`.
+
+A lit brake-lamp pair lights up *before* the gap visibly closes, so it is an early forward-collision cue no TTC signal captures. For rear-facing vehicle classes (car/truck/bus), `brake_score()` looks for a bright, symmetric, localized red pair in the lower band of the bbox (full-band red is treated as bodywork and suppressed). When an in-path lead vehicle shows a confident brake score, the state is escalated one band (`SAFE`→`CAUTION`, and `CAUTION`→`DANGER` only with a closing TTC). It is a corroborating signal, never acted on alone; the value is exposed as `RiskEvent.brake_score` and a `BRAKE` label in the overlay.
 
 ## 16. State Stabilization
 
@@ -392,13 +408,13 @@ Overlay rendering is implemented in `spectra/analysis/overlay.py`.
 It draws:
 
 - Ego lane corridor
-- Object bounding boxes coloured by stabilized risk state
-- A compact, fixed-width card pinned to the top-left of the frame containing:
+- Object bounding boxes coloured by stabilized risk state, with a per-box label (`#id TYPE TTC`, plus a `BRAKE` tag when the brake-light cue fires)
+- A coloured traffic-light dot + label in the top-right corner when a light state is known (advisory)
+- A compact card pinned to the top-left (CAUTION/DANGER only) containing:
   - a coloured `STATE` pill plus the fused `TTC` reading
-  - an object · lane subtitle (e.g. `CAR · Same Lane`)
-  - four stacked progress bars for `Prox`, `Appr`, `Cross`, and `Conf`
+  - an object · lane subtitle (e.g. `CAR | Same Lane`)
 
-The card has a fixed footprint (≤220 px wide, ~116 px tall) so it does not overflow narrow previews. The four bars mirror the right-side object panel one-for-one (`closing_speed` drives both the panel `Approach` bar and the overlay `Appr` bar, and so on), so the HUD reads the same way as the dashboard. The per-component TTC breakdown (`Exp / Flow / Depth`) is no longer drawn on the frame; the UI uses the fused TTC plus object-level risk factors instead.
+The card stays small (≤220 px wide). The numeric risk factors (proximity, approach, crossing, confidence) live in the right-side dashboard panel, not as in-frame bars; the per-component TTC breakdown (`Exp / Flow / Depth`) is not drawn on the frame either — the HUD shows the fused TTC and the object panel carries the rest.
 
 This overlay is used for live preview and saved event imagery.
 

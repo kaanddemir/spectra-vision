@@ -21,6 +21,7 @@ from typing import Optional
 import numpy as np
 
 from .tracking import Track
+from ..vision.brake_lights import brake_score
 from ..vision.depth import DepthResult
 from ..vision.detection import CLASS_RISK_WEIGHT
 from ..vision.motion import FlowResult
@@ -55,6 +56,7 @@ class RiskEvent:
     crossing_risk: float = 0.0
     lane_position: float = 0.0
     ttc_components: tuple[TtcComponent, ...] = ()
+    brake_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,7 @@ class SpatialFields:
     lane: LaneFrame
     flow_dt_sec: float
     depth_is_fresh: bool
+    bgr: "np.ndarray | None" = None  # raw frame for appearance cues (brake lights)
 
 
 # Hard floors and ceilings on the reported TTC. The fusion can swing wildly
@@ -86,6 +89,16 @@ _EXPANSION_EMA_FALL = 0.30
 # real path-cross. Above this is bbox jitter or detection swap.
 _LATERAL_MAX_LANE_PER_SEC = 2.5
 _LANE_TRUST_FLOOR = 0.45
+
+# Classes with rear brake lamps worth inspecting for a deceleration cue.
+_BRAKE_LIGHT_CLASSES = {"car", "truck", "bus"}
+# Brake-light confidence above which an in-path lead vehicle escalates risk.
+_BRAKE_ESCALATE_SCORE = 0.5
+
+# Collision-cone: how much to trust the velocity-extrapolated crossing for a
+# *far* object (near the horizon), whose lane_position is computed from few
+# pixels and is jittery. Near objects get full trust (1.0).
+_CROSSING_FAR_RELIABILITY_FLOOR = 0.4
 
 
 def lane_bucket_from_position(pos: float) -> str:
@@ -334,6 +347,17 @@ def lane_lateral_velocity(
         if len(samples) >= max_samples:
             break
 
+    if len(samples) < 2 and track.history:
+        # Sparse detections (high detect_every / low fps): the most recent
+        # history sample can be older than the recency window. Rather than
+        # collapsing to zero lateral velocity — which silently drops real
+        # cut-ins at coarse sampling — fall back to that single most-recent
+        # sample, mirroring how ``expansion_rate_from_track`` consumes history.
+        recent = track.history[-1]
+        dt = float(track.timestamp_sec - recent.timestamp_sec)
+        if dt >= min_dt:
+            samples.append((float(recent.timestamp_sec), lane_position(recent.bbox, lane)))
+
     if len(samples) < 2:
         return 0.0
 
@@ -381,6 +405,20 @@ def lane_crossing_risk(
     lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
     if lane_trust < 1.0:
         predicted_relevance *= lane_trust
+
+    # Collision-cone distance reliability: lane_position is normalised by the
+    # lane width at the object's row, so far objects (near the horizon) yield a
+    # jittery position and an unreliable velocity extrapolation. Damp the
+    # *predicted* crossing toward the horizon; ``base`` below stays a floor so
+    # genuine near cut-ins are untouched.
+    vp_y = float(lane.vanishing_point[1])
+    span = max(1.0, float(lane.height) - vp_y)
+    depth_frac = float(np.clip((float(track.bbox[3]) - vp_y) / span, 0.0, 1.0))
+    reliability = (
+        _CROSSING_FAR_RELIABILITY_FLOOR
+        + (1.0 - _CROSSING_FAR_RELIABILITY_FLOOR) * depth_frac
+    )
+    predicted_relevance *= reliability
 
     # Defense in depth against single-frame lateral_v outliers. The median
     # smoothing in lane_lateral_velocity is the primary line of defense, but
@@ -601,12 +639,14 @@ def calculate_track_risk(
     frame_index: int,
     timestamp_sec: float,
     ttc_imminent_streak: int = 2,
+    bgr: "np.ndarray | None" = None,
 ) -> RiskEvent:
     """Build a RiskEvent for a single tracked object using fused TTC.
 
     The three TTC sources are combined with a weighted median and lane-
     relative crossing prediction. ``depth_history`` is mutated in place by
-    the depth-delta TTC source.
+    the depth-delta TTC source. ``bgr`` (raw frame) enables the brake-light
+    cue for in-path lead vehicles.
     """
 
     bbox = track.bbox
@@ -669,6 +709,27 @@ def calculate_track_risk(
         ttc_imminent_streak=ttc_imminent_streak,
     )
 
+    # Brake-light cue: a lead vehicle braking in our lane is an early warning
+    # even before TTC drops. Escalate one band when a rear-facing vehicle shows
+    # a confident brake-lamp pair and is reasonably in-path. Corroborating only
+    # — it lifts SAFE→CAUTION, and CAUTION→DANGER only with a closing TTC.
+    brake = brake_score(bgr, bbox) if track.class_name in _BRAKE_LIGHT_CLASSES else 0.0
+    in_ego_lane = abs(pos) < 0.7 and lane.confidence >= _LANE_TRUST_FLOOR
+    braking_lead = brake >= _BRAKE_ESCALATE_SCORE and in_ego_lane
+    if braking_lead:
+        if state == "SAFE":
+            state = "CAUTION"
+        elif state == "CAUTION" and fused_ttc is not None and fused_ttc < _CAUTION_TTC_SEC:
+            state = "DANGER"
+
+    reason = _risk_reason(state, fused_ttc, pos)
+    if braking_lead and state != "SAFE":
+        reason = (
+            f"lead vehicle braking: TTC {fused_ttc:.1f}s"
+            if fused_ttc is not None
+            else "lead vehicle braking ahead"
+        )
+
     return RiskEvent(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
@@ -682,13 +743,14 @@ def calculate_track_risk(
         velocity_magnitude=round(velocity_magnitude, 3),
         closing_speed=round(closing_speed, 3),
         bbox=bbox,
-        reason=_risk_reason(state, fused_ttc, pos),
+        reason=reason,
         object_id=track.track_id,
         expansion_rate=round(float(expansion_rate), 3),
         lateral_velocity_norm=round(float(lateral_v), 3),
         crossing_risk=round(float(crossing), 3),
         lane_position=round(float(pos), 3),
         ttc_components=tuple(components),
+        brake_score=round(float(brake), 3),
     )
 
 
@@ -859,6 +921,7 @@ def build_object_events(
             frame_index=frame_index,
             timestamp_sec=timestamp_sec,
             ttc_imminent_streak=streak,
+            bgr=fields.bgr,
         )
         events.append(event)
 

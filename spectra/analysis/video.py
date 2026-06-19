@@ -30,6 +30,7 @@ from ..vision.lanenet import UFLDv2ONNX, get_lanenet_model, is_lanenet_available
 from ..vision.models import get_depth_model, is_depth_available
 from ..vision.motion import compute_velocity
 from ..vision.preprocessing import preprocess_frame
+from ..vision.traffic_light import frame_light_state
 from ..vision.road import (
     LaneKalman,
     RoadROI,
@@ -318,6 +319,7 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
         "crossingRisk": event.crossing_risk,
         "lanePosition": event.lane_position,
         "confidence": round(event.confidence, 4),
+        "brakeScore": event.brake_score,
     }
 
 
@@ -364,13 +366,18 @@ class _DeferredRender:
     primary_event: RiskEvent
     all_events: list[RiskEvent]
     lane: Any
+    traffic_light_state: str = "none"
 
 
 def _attach_render(payload: dict[str, Any], render: "_DeferredRender") -> dict[str, Any]:
     """Materialize RGB views and attach them to the payload in place."""
 
     annotated = annotate_frame(
-        render.frame_bgr, render.primary_event, render.all_events, lane=render.lane
+        render.frame_bgr,
+        render.primary_event,
+        render.all_events,
+        lane=render.lane,
+        traffic_light_state=render.traffic_light_state,
     )
     payload["original_rgb"] = _to_rgb(render.frame_bgr)
     payload["overlay_rgb"] = _to_rgb(annotated)
@@ -423,6 +430,293 @@ def _endpoint_drift_px(a: RoadROI, b: RoadROI) -> float:
     return float(max(diffs))
 
 
+@dataclass
+class FrameAnalysis:
+    """Per-frame risk output plus the inputs needed to render or preview it.
+
+    ``primary_event`` is the hysteresis-stabilized primary; ``primary_risk_score``
+    is computed from the *raw* primary (before stabilization) so it matches the
+    matching entry in ``all_events``/``objects[]``. ``frame_bgr`` is the resized
+    frame the pipeline actually ran on (not the caller's raw input).
+    """
+
+    primary_event: RiskEvent
+    all_events: list[RiskEvent]
+    primary_risk_score: float
+    frame_bgr: np.ndarray
+    lane: Any
+    traffic_light_state: str = "none"
+
+
+class SpatialFrameAnalyzer:
+    """Stateful per-frame driver for the spatial-risk pipeline.
+
+    Holds every piece of cross-frame state — tracker, lane Kalman, hysteresis
+    stabilizer, the three per-track smoothers, and the cached lane/flow/depth —
+    so callers can feed frames from any source (a video file or a live camera)
+    through identical logic.
+
+    ``analyze_spatial_video`` is now a thin orchestrator on top of this class;
+    the per-frame behaviour is byte-for-byte identical to the previous inline
+    loop. Per-video diagnostics (``performance_stats``, ``depth_refresh``,
+    ``performance_sample_logs``) accumulate on the instance and are read by the
+    orchestrator after the loop.
+    """
+
+    def __init__(
+        self,
+        *,
+        resize_max_side: int,
+        depth_every: int = 10,
+        adaptive_depth: bool = True,
+        detect_every: int = 3,
+        lane_every: int = 5,
+        flow_every: int = 1,
+        lane_reset_after_misses: int = 4,
+        lane_drift_reset_px_ratio: float = 0.12,
+        fps: float = 0.0,
+    ) -> None:
+        _ensure_required_models()
+
+        self.resize_max_side = resize_max_side
+        self.depth_every = depth_every
+        self.adaptive_depth = adaptive_depth
+        self.detect_every = detect_every
+        self.lane_every = lane_every
+        self.flow_every = flow_every
+        self.lane_reset_after_misses = lane_reset_after_misses
+        self.lane_drift_reset_px_ratio = lane_drift_reset_px_ratio
+        # Only used for the first frame's flow dt fallback (no previous
+        # timestamp yet). Live sources can leave this 0.0 to get the 1/30s
+        # default.
+        self.fps = fps
+
+        # Cross-frame perception state.
+        self.previous_frame = None
+        self.last_depth: DepthResult | None = None
+        self.last_flow = None
+        self.cached_road_roi: RoadROI | None = None
+        self.lane_miss_streak = 0
+        self.previous_timestamp_sec: float | None = None
+        self.last_motion_depth_frame: int | None = None
+        # Advisory traffic-light colour, refreshed on detection frames and
+        # coasted on skipped frames.
+        self.last_traffic_light_state = "none"
+
+        # Per-track history / hysteresis.
+        self.expansion_smoother = ExpansionSmoother()
+        self.depth_smoother = DepthDeltaSmoother()
+        self.ttc_imminence_smoother = TtcImminenceSmoother()
+        self.lane_kalman = LaneKalman()
+        self.stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=7)
+        self.tracker = IoUTracker(iou_threshold=0.25, max_misses=5)
+
+        # Models (cached singletons).
+        self.lanenet = get_lanenet_model()
+        self.detector = get_detector()
+
+        # Diagnostics accumulated across frames.
+        self.processed_frames = 0
+        self.performance_stats = _empty_performance_stats()
+        self.performance_sample_logs: list[str] = []
+        self.depth_refresh = {
+            "runs": 0,
+            "skips": 0,
+            "initial_runs": 0,
+            "periodic_runs": 0,
+            "motion_triggered_runs": 0,
+            "cooldown_frames": max(3, depth_every // 2),
+        }
+
+    def process_frame(
+        self,
+        frame_bgr: np.ndarray,
+        frame_index: int,
+        timestamp_sec: float,
+    ) -> FrameAnalysis:
+        """Run the full perception + risk pipeline on a single frame."""
+
+        t0 = time.perf_counter()
+
+        frame = preprocess_frame(frame_bgr, max_side=self.resize_max_side)
+        t_preprocess = time.perf_counter()
+
+        # Lane detection runs on scheduled frames only; the most recent
+        # committed UFLDv2 detection is cached and reused on in-between frames.
+        # Kalman smooths endpoint jitter and coasts through brief misses.
+        # The synthetic default ROI is never fed to the Kalman — it would
+        # initialize the filter on fake geometry and lock the corridor for
+        # the rest of the video.
+        fi = frame_index
+        did_lane = fi % max(self.lane_every, 1) == 0
+        frame_w = frame.bgr.shape[1]
+        if did_lane:
+            new_roi = _detect_lanes(frame.bgr, self.lanenet)
+            if new_roi.detected:
+                smoothed = apply_lane_kalman(new_roi, self.lane_kalman)
+                if _endpoint_drift_px(new_roi, smoothed) > self.lane_drift_reset_px_ratio * frame_w:
+                    self.lane_kalman.reset()
+                    smoothed = apply_lane_kalman(new_roi, self.lane_kalman)
+                self.cached_road_roi = smoothed
+                self.lane_miss_streak = 0
+            else:
+                self.lane_miss_streak += 1
+                if self.lane_miss_streak >= self.lane_reset_after_misses:
+                    self.cached_road_roi = None
+                    self.lane_kalman.reset()
+                    self.lane_miss_streak = 0
+
+        if self.cached_road_roi is not None:
+            if did_lane:
+                road_roi = self.cached_road_roi
+            else:
+                road_roi = apply_lane_kalman(self.cached_road_roi, self.lane_kalman, predict_only=True)
+        else:
+            road_roi = default_road_roi(frame.bgr.shape)
+
+        frame_h, frame_w = frame.gray.shape
+        lane = build_lane_frame(road_roi, width=frame_w, height=frame_h)
+        t_lane = time.perf_counter()
+
+        if self.previous_timestamp_sec is None:
+            flow_dt_sec = 1.0 / self.fps if self.fps > 0.0 else 1.0 / 30.0
+        else:
+            flow_dt_sec = max(1.0 / 120.0, timestamp_sec - self.previous_timestamp_sec)
+
+        # Flow every N frames: reuse previous result on skipped frames.
+        did_flow = self.last_flow is None or fi % max(self.flow_every, 1) == 0
+        if did_flow:
+            flow = compute_velocity(self.previous_frame, frame)
+            self.last_flow = flow
+        else:
+            flow = self.last_flow
+
+        self.previous_frame = frame
+        self.previous_timestamp_sec = timestamp_sec
+        t_flow = time.perf_counter()
+
+        # 1. Fast motion check: is the scene busy enough to re-run depth?
+        quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
+        is_periodic = fi % max(self.depth_every, 1) == 0
+        is_initial_depth = self.last_depth is None
+        motion_cooldown_ready = (
+            self.last_motion_depth_frame is None
+            or fi - self.last_motion_depth_frame >= self.depth_refresh["cooldown_frames"]
+        )
+        is_high_risk = self.adaptive_depth and quick_risk > 0.15
+        is_motion_triggered_depth = (
+            (not is_initial_depth)
+            and (not is_periodic)
+            and is_high_risk
+            and motion_cooldown_ready
+        )
+        needs_depth = is_initial_depth or is_periodic or is_motion_triggered_depth
+        depth_is_fresh = bool(needs_depth)
+        if needs_depth:
+            self.depth_refresh["runs"] += 1
+            if is_initial_depth:
+                self.depth_refresh["initial_runs"] += 1
+            elif is_periodic:
+                self.depth_refresh["periodic_runs"] += 1
+            elif is_motion_triggered_depth:
+                self.depth_refresh["motion_triggered_runs"] += 1
+                self.last_motion_depth_frame = fi
+            self.last_depth = estimate_frame_depth(frame)
+        else:
+            self.depth_refresh["skips"] += 1
+        t_depth = time.perf_counter()
+
+        # 2. Detect objects every N frames; between detections the tracker
+        # propagates existing tracks so IDs and TTC history stay continuous.
+        should_detect = fi % max(self.detect_every, 1) == 0
+        if should_detect:
+            # Pass the latest near_map so the corridor filter can admit
+            # physically-close side-lane vehicles as cut-in candidates.
+            # ``last_depth`` may be None on the very first frame before the
+            # initial depth pass completes; the filter falls back to its
+            # strict gate in that case.
+            depth_near_map = self.last_depth.near_map if self.last_depth is not None else None
+            raw_detections = self.detector.detect(frame.bgr)
+            # Traffic lights are advisory-only: split them out so they never
+            # enter the collision tracker, then classify the nearest one.
+            lights = [d for d in raw_detections if d.class_name == "traffic_light"]
+            collision_detections = [d for d in raw_detections if d.class_name != "traffic_light"]
+            self.last_traffic_light_state = frame_light_state(frame.bgr, lights)
+            detections = filter_relevant_detections(
+                collision_detections,
+                lane,
+                near_map=depth_near_map,
+            )
+            active_tracks = self.tracker.update(
+                detections,
+                frame_index=fi,
+                timestamp_sec=timestamp_sec,
+                frame_shape=frame.bgr.shape,
+            )
+        else:
+            active_tracks = self.tracker.propagate()
+        t_yolo = time.perf_counter()
+
+        _record_stage(self.performance_stats, "preprocess", t_preprocess - t0)
+        _record_stage(self.performance_stats, "lane", t_lane - t_preprocess, active=did_lane)
+        _record_stage(self.performance_stats, "flow", t_flow - t_lane, active=did_flow)
+        _record_stage(self.performance_stats, "depth", t_depth - t_flow, active=needs_depth)
+        _record_stage(self.performance_stats, "yolo", t_yolo - t_depth, active=should_detect)
+
+        if self.processed_frames % 30 == 0:
+            log_line = (
+                f"[FRAME {fi:4d}] "
+                f"preprocess={1000*(t_preprocess-t0):.0f}ms  "
+                f"lane={'skip' if not did_lane else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
+                f"flow={'skip' if not did_flow else f'{1000*(t_flow-t_lane):.0f}ms':>7}  "
+                f"depth={'skip' if not needs_depth else f'{1000*(t_depth-t_flow):.0f}ms':>7}  "
+                f"yolo={'skip' if not should_detect else f'{1000*(t_yolo-t_depth):.0f}ms':>7}"
+            )
+            self.performance_sample_logs.append(log_line)
+
+        # 3. Per-object risk via scale-expansion TTC + lateral crossing.
+        primary_event, all_events = build_object_events(
+            frame_index=frame_index,
+            timestamp_sec=timestamp_sec,
+            tracks=active_tracks,
+            fields=SpatialFields(
+                depth=self.last_depth,
+                flow=flow,
+                lane=lane,
+                flow_dt_sec=flow_dt_sec,
+                depth_is_fresh=depth_is_fresh,
+                bgr=frame.bgr,
+            ),
+            expansion_smoother=self.expansion_smoother,
+            depth_smoother=self.depth_smoother,
+            ttc_imminence_smoother=self.ttc_imminence_smoother,
+        )
+
+        # 4. Smooth State Transitions (Hysteresis)
+        # Note: TTC is preserved through SAFE stabilization so the timeline
+        # chart stays continuous and the UI can still show a TTC reading
+        # while the scene is calm.
+        # The primary's RAW risk score is captured before stabilization
+        # mutates the event, so it stays consistent with the entry in
+        # ``all_events`` (and therefore with ``objects[primaryObjectId]``).
+        # ``stabilized_risk_state`` carries the hysteresis-smoothed state
+        # band independently.
+        primary_risk_score = _risk_score(primary_event)
+        stabilized_state = stabilized_event_state(self.stabilizer, primary_event)
+        primary_event = replace(primary_event, state=stabilized_state)
+
+        self.processed_frames += 1
+
+        return FrameAnalysis(
+            primary_event=primary_event,
+            all_events=all_events,
+            primary_risk_score=primary_risk_score,
+            frame_bgr=frame.bgr,
+            lane=lane,
+            traffic_light_state=self.last_traffic_light_state,
+        )
+
+
 def analyze_spatial_video(
     video_path: str | Path,
     *,
@@ -452,200 +746,34 @@ def analyze_spatial_video(
         max_processed_frames = min(max_processed_frames, loader.frame_count)
     loader.max_frames = max_processed_frames
 
-    previous_frame = None
-    last_depth: DepthResult | None = None
-    last_flow = None
-    cached_road_roi: RoadROI | None = None
-    lane_miss_streak = 0
+    analyzer = SpatialFrameAnalyzer(
+        resize_max_side=resize_max_side,
+        depth_every=depth_every,
+        adaptive_depth=adaptive_depth,
+        detect_every=detect_every,
+        lane_every=lane_every,
+        flow_every=flow_every,
+        lane_reset_after_misses=lane_reset_after_misses,
+        lane_drift_reset_px_ratio=lane_drift_reset_px_ratio,
+        fps=loader.fps,
+    )
+
     saved_events: list[dict[str, Any]] = []
     pending_renders: dict[int, _DeferredRender] = {}
     frames: list[dict[str, Any]] = []
     preview_rows_buffer: list[dict[str, Any]] = []
-    performance_sample_logs: list[str] = []
-    performance_stats = _empty_performance_stats()
-    depth_refresh = {
-        "runs": 0,
-        "skips": 0,
-        "initial_runs": 0,
-        "periodic_runs": 0,
-        "motion_triggered_runs": 0,
-        "cooldown_frames": max(3, depth_every // 2),
-    }
-    expansion_smoother = ExpansionSmoother()
-    depth_smoother = DepthDeltaSmoother()
-    ttc_imminence_smoother = TtcImminenceSmoother()
-    lane_kalman = LaneKalman()
-    lanenet = get_lanenet_model()
-    stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=7)
-    detector = get_detector()
-    tracker = IoUTracker(iou_threshold=0.25, max_misses=5)
-    processed_frames = 0
-    previous_timestamp_sec: float | None = None
-    last_motion_depth_frame: int | None = None
     processing_start = time.perf_counter()
 
     for video_frame in loader.frames():
-        t0 = time.perf_counter()
-
-        frame = preprocess_frame(video_frame.bgr, max_side=resize_max_side)
-        t_preprocess = time.perf_counter()
-
-        # Lane detection runs on scheduled frames only; the most recent
-        # committed UFLDv2 detection is cached and reused on in-between frames.
-        # Kalman smooths endpoint jitter and coasts through brief misses.
-        # The synthetic default ROI is never fed to the Kalman — it would
-        # initialize the filter on fake geometry and lock the corridor for
-        # the rest of the video.
-        fi = video_frame.frame_index
-        did_lane = fi % max(lane_every, 1) == 0
-        frame_w = frame.bgr.shape[1]
-        if did_lane:
-            new_roi = _detect_lanes(frame.bgr, lanenet)
-            if new_roi.detected:
-                smoothed = apply_lane_kalman(new_roi, lane_kalman)
-                if _endpoint_drift_px(new_roi, smoothed) > lane_drift_reset_px_ratio * frame_w:
-                    lane_kalman.reset()
-                    smoothed = apply_lane_kalman(new_roi, lane_kalman)
-                cached_road_roi = smoothed
-                lane_miss_streak = 0
-            else:
-                lane_miss_streak += 1
-                if lane_miss_streak >= lane_reset_after_misses:
-                    cached_road_roi = None
-                    lane_kalman.reset()
-                    lane_miss_streak = 0
-
-        if cached_road_roi is not None:
-            if did_lane:
-                road_roi = cached_road_roi
-            else:
-                road_roi = apply_lane_kalman(cached_road_roi, lane_kalman, predict_only=True)
-        else:
-            road_roi = default_road_roi(frame.bgr.shape)
-
-        frame_h, frame_w = frame.gray.shape
-        lane = build_lane_frame(road_roi, width=frame_w, height=frame_h)
-        t_lane = time.perf_counter()
-
-        if previous_timestamp_sec is None:
-            flow_dt_sec = 1.0 / loader.fps if loader.fps > 0.0 else 1.0 / 30.0
-        else:
-            flow_dt_sec = max(1.0 / 120.0, video_frame.timestamp_sec - previous_timestamp_sec)
-
-        # Flow every N frames: reuse previous result on skipped frames.
-        did_flow = last_flow is None or fi % max(flow_every, 1) == 0
-        if did_flow:
-            flow = compute_velocity(previous_frame, frame)
-            last_flow = flow
-        else:
-            flow = last_flow
-
-        previous_frame = frame
-        previous_timestamp_sec = video_frame.timestamp_sec
-        t_flow = time.perf_counter()
-
-        # 1. Fast motion check: is the scene busy enough to re-run depth?
-        quick_risk = compute_quick_risk(flow, frame.gray.shape[1], frame.gray.shape[0])
-        is_periodic = fi % max(depth_every, 1) == 0
-        is_initial_depth = last_depth is None
-        motion_cooldown_ready = (
-            last_motion_depth_frame is None
-            or fi - last_motion_depth_frame >= depth_refresh["cooldown_frames"]
+        analysis = analyzer.process_frame(
+            video_frame.bgr,
+            video_frame.frame_index,
+            video_frame.timestamp_sec,
         )
-        is_high_risk = adaptive_depth and quick_risk > 0.15
-        is_motion_triggered_depth = (
-            (not is_initial_depth)
-            and (not is_periodic)
-            and is_high_risk
-            and motion_cooldown_ready
-        )
-        needs_depth = is_initial_depth or is_periodic or is_motion_triggered_depth
-        depth_is_fresh = bool(needs_depth)
-        if needs_depth:
-            depth_refresh["runs"] += 1
-            if is_initial_depth:
-                depth_refresh["initial_runs"] += 1
-            elif is_periodic:
-                depth_refresh["periodic_runs"] += 1
-            elif is_motion_triggered_depth:
-                depth_refresh["motion_triggered_runs"] += 1
-                last_motion_depth_frame = fi
-            last_depth = estimate_frame_depth(frame)
-        else:
-            depth_refresh["skips"] += 1
-        t_depth = time.perf_counter()
-
-        # 2. Detect objects every N frames; between detections the tracker
-        # propagates existing tracks so IDs and TTC history stay continuous.
-        should_detect = fi % max(detect_every, 1) == 0
-        if should_detect:
-            # Pass the latest near_map so the corridor filter can admit
-            # physically-close side-lane vehicles as cut-in candidates.
-            # ``last_depth`` may be None on the very first frame before the
-            # initial depth pass completes; the filter falls back to its
-            # strict gate in that case.
-            depth_near_map = last_depth.near_map if last_depth is not None else None
-            detections = filter_relevant_detections(
-                detector.detect(frame.bgr),
-                lane,
-                near_map=depth_near_map,
-            )
-            active_tracks = tracker.update(
-                detections,
-                frame_index=fi,
-                timestamp_sec=video_frame.timestamp_sec,
-                frame_shape=frame.bgr.shape,
-            )
-        else:
-            active_tracks = tracker.propagate()
-        t_yolo = time.perf_counter()
-
-        _record_stage(performance_stats, "preprocess", t_preprocess - t0)
-        _record_stage(performance_stats, "lane", t_lane - t_preprocess, active=did_lane)
-        _record_stage(performance_stats, "flow", t_flow - t_lane, active=did_flow)
-        _record_stage(performance_stats, "depth", t_depth - t_flow, active=needs_depth)
-        _record_stage(performance_stats, "yolo", t_yolo - t_depth, active=should_detect)
-
-        if processed_frames % 30 == 0:
-            log_line = (
-                f"[FRAME {fi:4d}] "
-                f"preprocess={1000*(t_preprocess-t0):.0f}ms  "
-                f"lane={'skip' if not did_lane else f'{1000*(t_lane-t_preprocess):.0f}ms':>7}  "
-                f"flow={'skip' if not did_flow else f'{1000*(t_flow-t_lane):.0f}ms':>7}  "
-                f"depth={'skip' if not needs_depth else f'{1000*(t_depth-t_flow):.0f}ms':>7}  "
-                f"yolo={'skip' if not should_detect else f'{1000*(t_yolo-t_depth):.0f}ms':>7}"
-            )
-            performance_sample_logs.append(log_line)
-
-        # 3. Per-object risk via scale-expansion TTC + lateral crossing.
-        primary_event, all_events = build_object_events(
-            frame_index=video_frame.frame_index,
-            timestamp_sec=video_frame.timestamp_sec,
-            tracks=active_tracks,
-            fields=SpatialFields(
-                depth=last_depth,
-                flow=flow,
-                lane=lane,
-                flow_dt_sec=flow_dt_sec,
-                depth_is_fresh=depth_is_fresh,
-            ),
-            expansion_smoother=expansion_smoother,
-            depth_smoother=depth_smoother,
-            ttc_imminence_smoother=ttc_imminence_smoother,
-        )
-
-        # 4. Smooth State Transitions (Hysteresis)
-        # Note: TTC is preserved through SAFE stabilization so the timeline
-        # chart stays continuous and the UI can still show a TTC reading
-        # while the scene is calm.
-        # The primary's RAW risk score is captured before stabilization
-        # mutates the event, so it stays consistent with the entry in
-        # ``all_events`` (and therefore with ``objects[primaryObjectId]``).
-        # ``stabilized_risk_state`` carries the hysteresis-smoothed state
-        # band independently.
-        primary_risk_score = _risk_score(primary_event)
-        stabilized_state = stabilized_event_state(stabilizer, primary_event)
-        primary_event = replace(primary_event, state=stabilized_state)
+        primary_event = analysis.primary_event
+        all_events = analysis.all_events
+        primary_risk_score = analysis.primary_risk_score
+        lane = analysis.lane
 
         # Build the metadata-only payload first; heavy RGB views are deferred
         # so we can skip them entirely on frames that won't be saved or
@@ -656,29 +784,27 @@ def analyze_spatial_video(
             primary_risk_score=primary_risk_score,
         )
         deferred = _DeferredRender(
-            frame_bgr=frame.bgr,
+            frame_bgr=analysis.frame_bgr,
             primary_event=primary_event,
             all_events=all_events,
             lane=lane,
+            traffic_light_state=analysis.traffic_light_state,
         )
 
         # Deduplicate events within 1.0 second window
         new_score = score_event_payload(event_payload)
         replaced = False
-        kept = False
         for i, saved in enumerate(saved_events):
             if abs(saved["timestamp_sec"] - primary_event.timestamp_sec) <= 1.0:
                 if new_score > score_event_payload(saved):
                     saved_events[i] = event_payload
                     pending_renders[id(event_payload)] = deferred
-                    kept = True
                 replaced = True
                 break
 
         if not replaced:
             saved_events.append(event_payload)
             pending_renders[id(event_payload)] = deferred
-            kept = True
 
         # Trim to top-N. Drop pending-render entries that get cut so we
         # don't render images we'll throw away.
@@ -694,16 +820,25 @@ def analyze_spatial_video(
             "primaryObjectId": primary_event.object_id,
             "primaryRiskScore": primary_risk_score,
             "primaryLane": primary_event.lane,
+            "trafficLight": analysis.traffic_light_state,
             "objects": object_metrics,
         }
         frames.append(frame_row)
         if progress_callback is not None:
             preview_rows_buffer.append(frame_row)
-        processed_frames += 1
+        # ``analyzer.process_frame`` already advanced the processed-frame
+        # counter, so read it back here for progress reporting.
+        processed_frames = analyzer.processed_frames
 
         is_first_frame = (processed_frames == 1)
         if progress_callback is not None and (is_first_frame or processed_frames % max(1, int(progress_every)) == 0):
-            annotated = annotate_frame(frame.bgr, primary_event, all_events, lane=lane)
+            annotated = annotate_frame(
+                analysis.frame_bgr,
+                primary_event,
+                all_events,
+                lane=lane,
+                traffic_light_state=analysis.traffic_light_state,
+            )
             preview_uri = _encode_preview_jpeg(annotated)
             progress_pct = min(100.0, round((processed_frames / max(1, max_processed_frames)) * 100.0, 1))
             try:
@@ -745,25 +880,25 @@ def analyze_spatial_video(
     pending_renders.clear()
 
     performance_summary = _build_performance_summary(
-        performance_stats,
-        processed_frames=processed_frames,
+        analyzer.performance_stats,
+        processed_frames=analyzer.processed_frames,
         elapsed_sec=time.perf_counter() - processing_start,
         lane_every=lane_every,
         flow_every=flow_every,
         depth_every=depth_every,
         adaptive_depth=adaptive_depth,
         detect_every=detect_every,
-        depth_refresh=depth_refresh,
+        depth_refresh=analyzer.depth_refresh,
     )
     performance_logs = _format_performance_summary(performance_summary)
-    if performance_sample_logs:
-        performance_logs.extend(["", "SAMPLES", *performance_sample_logs])
+    if analyzer.performance_sample_logs:
+        performance_logs.extend(["", "SAMPLES", *analyzer.performance_sample_logs])
 
     peak_event = saved_events[0] if saved_events else None
     return {
         "fps": loader.fps,
         "frame_count": loader.frame_count,
-        "processed_frames": processed_frames,
+        "processed_frames": analyzer.processed_frames,
         "frames": frames,
         "events": saved_events,
         "peak_event": peak_event,

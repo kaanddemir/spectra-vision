@@ -31,27 +31,6 @@ def _readable_lane(lane: str | None) -> str:
     return value.title()
 
 
-def _draw_metric_bar(
-    img: np.ndarray,
-    x: int,
-    y: int,
-    width: int,
-    label: str,
-    pct: int,
-    color: tuple[int, int, int],
-) -> None:
-    pct = max(0, min(100, int(pct)))
-    cv2.putText(img, label, (x, y), _FONT, 0.34, (170, 180, 195), 1, cv2.LINE_AA)
-    pct_text = f"{pct}%"
-    (pw, _), _ = cv2.getTextSize(pct_text, _FONT, 0.34, 1)
-    cv2.putText(img, pct_text, (x + width - pw, y), _FONT, 0.34, (220, 225, 235), 1, cv2.LINE_AA)
-    track_y = y + 4
-    cv2.rectangle(img, (x, track_y), (x + width, track_y + 3), (38, 46, 60), thickness=-1)
-    fill_w = int(round(width * pct / 100.0))
-    if fill_w > 0:
-        cv2.rectangle(img, (x, track_y), (x + fill_w, track_y + 3), color, thickness=-1)
-
-
 def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
     if event.bbox is None:
         return
@@ -67,6 +46,8 @@ def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
     label_parts.append(event.object_type.upper())
     if event.ttc_sec is not None:
         label_parts.append(f"{event.ttc_sec:.1f}s")
+    if event.brake_score >= 0.5:
+        label_parts.append("BRAKE")
     label = " ".join(label_parts)
 
     (tw, th), baseline = cv2.getTextSize(label, _FONT, 0.42, 1)
@@ -222,11 +203,35 @@ def _draw_lane_overlay(
         _draw_dashed_line(output, right_top, right_bottom, edge_color, thickness=edge_thickness)
 
 
+_TRAFFIC_LIGHT_COLORS = {
+    "red": (60, 60, 230),
+    "yellow": (40, 210, 230),
+    "green": (90, 200, 90),
+}
+
+
+def _draw_traffic_light(output: np.ndarray, state: str) -> None:
+    """Top-right advisory dot + label for the detected traffic-light colour."""
+
+    if state not in _TRAFFIC_LIGHT_COLORS:
+        return
+    color = _TRAFFIC_LIGHT_COLORS[state]
+    width = output.shape[1]
+    cx = width - 18
+    cy = 18
+    cv2.circle(output, (cx, cy), 8, color, thickness=-1, lineType=cv2.LINE_AA)
+    cv2.circle(output, (cx, cy), 8, (20, 24, 30), thickness=1, lineType=cv2.LINE_AA)
+    label = state.upper()
+    (tw, _), _ = cv2.getTextSize(label, _FONT, 0.4, 1)
+    cv2.putText(output, label, (cx - 14 - tw, cy + 4), _FONT, 0.4, color, 1, cv2.LINE_AA)
+
+
 def annotate_frame(
     frame_bgr: np.ndarray,
     primary_event: RiskEvent,
     object_events: list[RiskEvent],
     lane: LaneFrame | None = None,
+    traffic_light_state: str = "none",
 ) -> np.ndarray:
     output = frame_bgr.copy()
     height, width = output.shape[:2]
@@ -235,6 +240,7 @@ def annotate_frame(
     # 1. Forward collision corridor. This is presentation only; risk uses the
     # same lane geometry upstream and adjusts trust via lane confidence.
     _draw_lane_overlay(output, lane, color)
+    _draw_traffic_light(output, traffic_light_state)
 
     # 2. Per-object bboxes — paint SAFE first, then CAUTION/DANGER on top so
     # the worst object stays visually dominant when bboxes overlap.
@@ -243,10 +249,6 @@ def annotate_frame(
         _draw_bbox(output, event)
 
     ttc_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
-    proximity_pct = int(round((primary_event.near_score or 0) * 100))
-    approach_pct = int(round(min(1.0, max(0.0, primary_event.closing_speed or 0.0)) * 100))
-    crossing_pct = int(round((primary_event.crossing_risk or 0) * 100))
-    confidence_pct = int(round((primary_event.confidence or 0) * 100))
     lane_lbl = _readable_lane(primary_event.lane)
     obj_lbl = (primary_event.object_type or "scene").upper()
 
@@ -257,7 +259,6 @@ def annotate_frame(
         card_w = min(220, max(160, width - 24))
         pad = 10
         inner_x = card_x + pad
-        inner_w = card_w - 2 * pad
 
         # background
         card_y2 = card_y + 64

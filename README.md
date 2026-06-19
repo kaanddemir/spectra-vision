@@ -12,6 +12,9 @@ The current pipeline is object-centric and does not use external narrative servi
 - Required Depth Anything V2 ONNX depth estimation
 - Classical DIS dense optical flow with ego-motion compensation
 - Fused TTC from bbox expansion, radial flow, and depth delta
+- Brake-light deceleration cue (early warning for in-path lead vehicles)
+- Traffic-light colour advisory (red/yellow/green)
+- Collision-cone distance reliability on lane-crossing risk
 - `SAFE`, `CAUTION`, and `DANGER` states
 - Timeline rows, per-object metrics, event snapshots, live preview, and overlay imagery
 
@@ -114,7 +117,10 @@ spectra/
     - Calculates lane position, crossing risk, fused TTC, confidence, and risk state
 
 7. `spectra/analysis/overlay.py`
-    - Draws lane corridor, object boxes, state/TTC, and compact risk-factor bars onto frames
+    - Draws lane corridor, object boxes (with TTC and `BRAKE` labels), the state/TTC card, and a traffic-light advisory indicator onto frames
+
+8. `spectra/vision/brake_lights.py` and `spectra/vision/traffic_light.py`
+    - Heuristic OpenCV appearance cues: lead-vehicle brake-light detection and traffic-light colour state
 
 ## How the Algorithm Works
 
@@ -129,7 +135,8 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 - Road geometry: The road/lane corridor and vanishing point are estimated.
 - Depth: Depth Anything V2 ONNX produces a relative nearness map.
 - Motion: OpenCV DIS produces dense optical flow, with ego-motion compensation.
-- Risk: TTC, lane relationship, nearness, closing speed, and confidence are fused into a risk state.
+- Appearance cues: heuristic brake-light detection (early deceleration warning) and traffic-light colour classification (advisory).
+- Risk: TTC, lane relationship (with a collision-cone distance reliability term), nearness, closing speed, brake-light, and confidence are fused into a risk state.
 
 The backend returns timeline rows, the peak event, per-object risk metrics, and deferred visual overlays to the frontend.
 
@@ -165,7 +172,7 @@ If Depth Anything, UFLDv2, YOLO weights, or their runtime dependencies cannot lo
 
 ### 4. Video Frame Loop
 
-The main frame loop lives in `spectra/analysis/video.py`.
+The per-frame logic is encapsulated in `SpatialFrameAnalyzer.process_frame()` in `spectra/analysis/video.py`, which holds all cross-frame state so any source can drive it. `analyze_spatial_video()` is a thin orchestrator that reads frames with `VideoLoader` and handles video-level concerns (event dedup, deferred rendering, progress).
 
 For each frame:
 
@@ -292,6 +299,7 @@ YOLO detections are filtered to road-relevant COCO classes:
 - bus
 - train
 - truck
+- traffic light (advisory only)
 
 Each detection is stored as `Detection`:
 
@@ -300,6 +308,8 @@ Each detection is stored as `Detection`:
 - `confidence`: YOLO confidence
 
 Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals.
+
+Traffic lights are detected but are not collision participants: they are split out before the corridor filter and tracker (so they never get track IDs or TTC) and feed only the advisory traffic-light colour cue in `spectra/vision/traffic_light.py` (`red`/`yellow`/`green`/`unknown`, surfaced per timeline row and in the overlay).
 
 ### 10. Object Tracking
 
@@ -398,6 +408,8 @@ Signals:
 
 For example, a vehicle in the right lane may stay low risk even if it is approaching. If it is laterally moving toward the ego lane, crossing risk rises.
 
+Collision-cone distance reliability: because `lane_position` is normalized by the lane width at the object's row, far objects (near the horizon) yield jittery positions. `lane_crossing_risk()` damps the velocity-extrapolated crossing for far objects while keeping the static corridor relevance as a floor, so phantom far cut-ins fade and genuine near cut-ins are untouched. (Curved-path / ego-yaw handling is not modeled; lane geometry is straight lines.)
+
 ### 14. Closing Speed and Confidence
 
 For every object, Spectra computes a normalized closing-speed-like signal:
@@ -406,7 +418,7 @@ For every object, Spectra computes a normalized closing-speed-like signal:
 - 30% crossing risk
 - 20% optical-flow magnitude
 
-This signal is multiplied by class risk weight. People and bicycles are slightly more sensitive; traffic lights and stop signs are down-weighted.
+This signal is multiplied by class risk weight. People and bicycles are slightly more sensitive.
 
 Fused confidence combines:
 
@@ -436,6 +448,8 @@ Main thresholds:
 - Moderate expansion with lane relevance: `CAUTION`
 - Very high nearness with meaningful crossing: `CAUTION`
 - Otherwise: `SAFE`
+
+A brake-light cue (`spectra/vision/brake_lights.py`) escalates an in-path lead vehicle by one band when a confident brake-lamp pair is detected (`SAFE`→`CAUTION`, `CAUTION`→`DANGER` only with a closing TTC). It is corroborating only.
 
 This raw decision is later stabilized.
 
