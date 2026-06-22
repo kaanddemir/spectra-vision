@@ -64,12 +64,22 @@ _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 # (sky/horizon are cropped before resize to match training distribution).
 _CROP_RATIO = float(os.environ.get("SPECTRA_LANENET_CROP_RATIO", "0.6"))
 
-# Row anchor sample positions in the cropped image (normalized).
-# Defaults follow the upstream CULane config — 72 anchors spanning the
-# bottom 60% of the cropped region.
+# Anchor sample positions, normalized to the ORIGINAL image (upstream CULane
+# config). Row anchors are y-fractions where the row head samples a lane's x;
+# col anchors are x-fractions where the col head samples a lane's y. Both span
+# the bottom portion of the frame the network was trained/cropped on.
 _ROW_ANCHOR_RANGE = (0.42, 1.0)
 _NUM_ROW_ANCHORS = 72
+_COL_ANCHOR_RANGE = (0.0, 1.0)
+_NUM_COL_ANCHORS = 81
 _NUM_LANES = 4
+
+# Upstream UFLDv2 ``pred2coords`` decodes the two ego-lane boundaries (indices
+# 1, 2) from the ROW head and the two outer lanes (indices 0, 3) from the COL
+# head — each lane from one head, not a fusion. The ego corridor that
+# downstream risk uses is therefore driven entirely by the row head.
+_ROW_LANE_INDICES = (1, 2)
+_COL_LANE_INDICES = (0, 3)
 
 _lanenet_lock = threading.Lock()
 _lanenet_singleton: "UFLDv2ONNX" | None = None
@@ -106,9 +116,12 @@ class UFLDv2ONNX:
         self.input_name = self.session.get_inputs()[0].name
         self.output_names = [o.name for o in self.session.get_outputs()]
 
-        # Pre-compute row anchor y-positions in the cropped resized image.
+        # Pre-compute anchor fractions (relative to the ORIGINAL image).
         self._row_anchors_norm = np.linspace(
             _ROW_ANCHOR_RANGE[0], _ROW_ANCHOR_RANGE[1], _NUM_ROW_ANCHORS, dtype=np.float32
+        )
+        self._col_anchors_norm = np.linspace(
+            _COL_ANCHOR_RANGE[0], _COL_ANCHOR_RANGE[1], _NUM_COL_ANCHORS, dtype=np.float32
         )
 
     def predict(self, rgb: np.ndarray) -> list[np.ndarray]:
@@ -121,10 +134,11 @@ class UFLDv2ONNX:
 
         original_h, original_w = rgb.shape[:2]
 
-        # Top-crop to match training distribution (sky removed).
+        # Top-crop to match training distribution (sky removed). The crop only
+        # affects what the network sees; lane coordinates are decoded back into
+        # the full original frame because the anchors are full-image fractions.
         crop_top = int(original_h * (1.0 - _CROP_RATIO))
         cropped = rgb[crop_top:, :, :]
-        cropped_h = cropped.shape[0]
 
         resized = cv2.resize(cropped, (_INPUT_W, _INPUT_H), interpolation=cv2.INTER_LINEAR)
         normalized = resized.astype(np.float32) / 255.0
@@ -136,8 +150,6 @@ class UFLDv2ONNX:
             outputs,
             original_w=original_w,
             original_h=original_h,
-            crop_top=crop_top,
-            cropped_h=cropped_h,
         )
 
     def _decode_lanes(
@@ -146,96 +158,137 @@ class UFLDv2ONNX:
         *,
         original_w: int,
         original_h: int,
-        crop_top: int,
-        cropped_h: int,
     ) -> list[np.ndarray]:
-        """Convert the row-anchor logits into per-lane polylines.
+        """Decode the row/col logits into per-lane polylines (upstream pred2coords).
 
-        Resolves outputs by shape rather than name so this works across
-        different export naming conventions. The row-anchor head is the one
-        whose last dim equals ``_NUM_LANES`` and whose third-to-last dim is
-        large (the grid). Existence head shares lane/anchor dims but has
-        size 2 on its second axis.
+        Outputs are resolved by shape, not name, so renamed exports still work.
+        Per upstream UFLDv2: the two ego lanes (indices 1, 2) come from the ROW
+        head, the two outer lanes (0, 3) from the COL head. For each kept anchor
+        the grid location is the argmax refined by a local softmax window (not a
+        global expectation, which biases toward the image center). Anchors map
+        to full-image fractions, so no crop offset is re-applied.
         """
 
-        # First pass: pick loc_row as the largest grid (shape[1]) head.
-        # Both row and col location heads exist; the row head has the
-        # larger grid (CULane: 200 row vs 100 col). Existence heads share
-        # the lane axis (shape[-1]==4) but have shape[1]==2.
-        loc_row = None
-        for tensor in outputs:
-            if tensor.ndim != 4 or tensor.shape[-1] != _NUM_LANES:
-                continue
-            if tensor.shape[1] == 2:
-                continue
-            if loc_row is None or tensor.shape[1] > loc_row.shape[1]:
-                loc_row = tensor
-
-        if loc_row is None:
+        locs = [
+            t for t in outputs
+            if t.ndim == 4 and t.shape[-1] == _NUM_LANES and t.shape[1] != 2
+        ]
+        exists = [
+            t for t in outputs
+            if t.ndim == 4 and t.shape[-1] == _NUM_LANES and t.shape[1] == 2
+        ]
+        if not locs:
             return [np.empty((0, 2), dtype=np.float32) for _ in range(_NUM_LANES)]
 
-        num_grid = loc_row.shape[1]
-        num_cls = loc_row.shape[2]
+        # Row head has the larger grid (CULane: 200 row vs 100 col).
+        loc_row = max(locs, key=lambda t: t.shape[1])
+        loc_col = min(locs, key=lambda t: t.shape[1]) if len(locs) > 1 else None
+        if loc_col is loc_row:
+            loc_col = None
+        exist_row = self._match_exist(exists, loc_row.shape[2])
+        exist_col = self._match_exist(exists, loc_col.shape[2]) if loc_col is not None else None
 
-        # Second pass: existence head has the same num_cls as loc_row.
-        # Without this constraint the col-existence head (which has a
-        # different num_cls) silently shadowed the row head, producing a
-        # mask whose length did not match the grid index array.
-        exist_row = None
-        for tensor in outputs:
-            if tensor.ndim != 4 or tensor.shape[-1] != _NUM_LANES:
-                continue
-            if tensor.shape[1] == 2 and tensor.shape[2] == num_cls:
-                exist_row = tensor
-                break
+        lanes: list[np.ndarray] = [np.empty((0, 2), dtype=np.float32) for _ in range(_NUM_LANES)]
 
-        # Soft-argmax over the grid dimension yields a continuous column
-        # index per (anchor, lane) — much smoother than hard argmax.
-        logits = loc_row[0]  # (num_grid, num_cls, num_lane)
-        # Numerical-stability softmax over grid axis.
-        logits = logits - logits.max(axis=0, keepdims=True)
-        probs = np.exp(logits)
-        probs = probs / np.clip(probs.sum(axis=0, keepdims=True), 1e-6, None)
-        grid_idx = np.arange(num_grid, dtype=np.float32)[:, None, None]
-        col_idx = (probs * grid_idx).sum(axis=0)  # (num_cls, num_lane)
-
-        if exist_row is not None:
-            exist_logits = exist_row[0]  # (2, num_cls, num_lane)
-            exist_score = np.exp(exist_logits[1]) / (
-                np.exp(exist_logits[0]) + np.exp(exist_logits[1]) + 1e-6
+        row_anchors = self._anchors_for(loc_row.shape[2], self._row_anchors_norm, _ROW_ANCHOR_RANGE)
+        for lane_i in _ROW_LANE_INDICES:
+            lanes[lane_i] = self._decode_lane(
+                loc_row[0], exist_row, lane_i,
+                anchors_norm=row_anchors, axis="row",
+                original_w=original_w, original_h=original_h,
+                valid_divisor=2,
             )
-            valid = exist_score > 0.5
-        else:
-            # No explicit existence head — gate on softmax confidence instead.
-            valid = probs.max(axis=0) > 0.30
 
-        # Map (num_cls anchors) to actual y-positions in the cropped image,
-        # then offset by crop_top to land in original-frame coordinates.
-        # If the model emits a different anchor count we resample linearly.
-        if num_cls == _NUM_ROW_ANCHORS:
-            anchors_norm = self._row_anchors_norm
-        else:
-            anchors_norm = np.linspace(
-                _ROW_ANCHOR_RANGE[0], _ROW_ANCHOR_RANGE[1], num_cls, dtype=np.float32
-            )
-        ys_in_cropped = anchors_norm * cropped_h
-        ys_in_frame = ys_in_cropped + float(crop_top)
-
-        # Grid index → x in original frame width.
-        # The grid spans the full input width (in cropped, pre-resize space).
-        x_scale = float(original_w) / float(num_grid)
-
-        lanes: list[np.ndarray] = []
-        for lane_i in range(_NUM_LANES):
-            mask = valid[:, lane_i]
-            if int(mask.sum()) < 2:
-                lanes.append(np.empty((0, 2), dtype=np.float32))
-                continue
-            xs = col_idx[mask, lane_i] * x_scale
-            ys = ys_in_frame[mask]
-            lanes.append(np.stack([xs, ys], axis=1).astype(np.float32))
+        if loc_col is not None:
+            col_anchors = self._anchors_for(loc_col.shape[2], self._col_anchors_norm, _COL_ANCHOR_RANGE)
+            for lane_i in _COL_LANE_INDICES:
+                lanes[lane_i] = self._decode_lane(
+                    loc_col[0], exist_col, lane_i,
+                    anchors_norm=col_anchors, axis="col",
+                    original_w=original_w, original_h=original_h,
+                    valid_divisor=4,
+                )
 
         return lanes
+
+    @staticmethod
+    def _match_exist(exists: list[np.ndarray], num_cls: int) -> np.ndarray | None:
+        for tensor in exists:
+            if tensor.shape[2] == num_cls:
+                return tensor
+        return None
+
+    @staticmethod
+    def _anchors_for(num_cls: int, precomputed: np.ndarray, anchor_range: tuple[float, float]) -> np.ndarray:
+        if num_cls == precomputed.shape[0]:
+            return precomputed
+        return np.linspace(anchor_range[0], anchor_range[1], num_cls, dtype=np.float32)
+
+    @staticmethod
+    def _decode_lane(
+        loc: np.ndarray,
+        exist: np.ndarray | None,
+        lane_i: int,
+        *,
+        anchors_norm: np.ndarray,
+        axis: str,
+        original_w: int,
+        original_h: int,
+        valid_divisor: int,
+    ) -> np.ndarray:
+        """Decode one lane from a single head (row or col).
+
+        ``loc`` is ``(num_grid, num_cls, num_lane)``. For a row head the grid
+        spans x (anchor gives y); for a col head the grid spans y (anchor gives
+        x). Returns an ``(N, 2)`` ``(x, y)`` polyline, empty if the lane fails
+        the upstream majority existence gate.
+        """
+
+        num_grid, num_cls, _ = loc.shape
+        logits = loc[:, :, lane_i]  # (num_grid, num_cls)
+
+        if exist is not None:
+            exist_lane = exist[0, :, :, lane_i]  # (2, num_cls)
+            valid = exist_lane[1] > exist_lane[0]
+        else:
+            # No existence head — gate on per-anchor peak confidence instead.
+            shifted = logits - logits.max(axis=0, keepdims=True)
+            probs = np.exp(shifted)
+            probs /= np.clip(probs.sum(axis=0, keepdims=True), 1e-6, None)
+            valid = probs.max(axis=0) > 0.30
+
+        # Upstream lane-level gate: keep the lane only if a majority (row) /
+        # quarter (col) of its anchors exist, which rejects noisy partials.
+        if int(valid.sum()) <= num_cls // valid_divisor:
+            return np.empty((0, 2), dtype=np.float32)
+
+        peak = np.argmax(logits, axis=0)  # (num_cls,)
+        points: list[tuple[float, float]] = []
+        for k in range(num_cls):
+            if not valid[k]:
+                continue
+            lo = max(0, int(peak[k]) - 1)
+            hi = min(num_grid - 1, int(peak[k]) + 1)
+            idx = np.arange(lo, hi + 1)
+            window = logits[idx, k]
+            window = window - window.max()
+            w = np.exp(window)
+            w /= np.clip(w.sum(), 1e-6, None)
+            grid_pos = float((w * idx).sum()) + 0.5
+            loc_frac = grid_pos / float(num_grid - 1)
+            if axis == "row":
+                x = loc_frac * original_w
+                y = float(anchors_norm[k]) * original_h
+            else:  # col head: grid is y, anchor is x
+                x = float(anchors_norm[k]) * original_w
+                y = loc_frac * original_h
+            points.append((x, y))
+
+        if len(points) < 2:
+            return np.empty((0, 2), dtype=np.float32)
+        pts = np.array(points, dtype=np.float32)
+        # Sort by y so the polyline is monotonic top→bottom for the line fit.
+        return pts[np.argsort(pts[:, 1])]
 
 
 def is_lanenet_available() -> bool:

@@ -472,7 +472,7 @@ class SpatialFrameAnalyzer:
         detect_every: int = 3,
         lane_every: int = 5,
         flow_every: int = 1,
-        lane_reset_after_misses: int = 4,
+        lane_reset_after_misses: int = 6,
         lane_drift_reset_px_ratio: float = 0.12,
         fps: float = 0.0,
     ) -> None:
