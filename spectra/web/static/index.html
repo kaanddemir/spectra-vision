@@ -730,8 +730,8 @@
                 <div class="step-num">02</div>
               </div>
               <h5>Road Geometry</h5>
-              <p>Estimates lane corridor and vanishing point using UFLDv2. Normalizes positions relative to the
-                ego-lane.</p>
+              <p>Runs UFLDv2 on every frame by default, estimates the ego-lane corridor and vanishing point, then
+                normalizes object positions relative to that lane.</p>
               <div class="step-tags">
                 <span>Lane ROI</span>
                 <span>Vanishing Point</span>
@@ -764,8 +764,8 @@
                 <div class="step-num">04</div>
               </div>
               <h5>Motion Analysis</h5>
-              <p>DIS Optical Flow calculates pixel-level vectors. RANSAC-based homography compensates for camera
-                ego-motion.</p>
+              <p>DIS Optical Flow runs every frame by default. RANSAC-based homography compensates for camera
+                ego-motion before object-level motion is scored.</p>
               <div class="step-tags">
                 <span>OpenCV DIS</span>
                 <span>Ego-Motion</span>
@@ -781,8 +781,8 @@
                 <div class="step-num">05</div>
               </div>
               <h5>Object Tracking</h5>
-              <p>YOLO detects road participants. A lightweight IoU tracker maintains history for velocity and expansion
-                rates.</p>
+              <p>YOLO detects road participants every frame by default. The tracker keeps stable internal IDs while
+                display IDs are numbered per class, such as Car #1 and Truck #1.</p>
               <div class="step-tags">
                 <span>YOLOv8</span>
                 <span>IoU Tracker</span>
@@ -798,7 +798,8 @@
                 <div class="step-num">06</div>
               </div>
               <h5>Risk Fusion</h5>
-              <p>Fuses TTC from three sources: BBox Expansion, Radial Flow, and Depth-Delta using weighted median logic.
+              <p>Fuses TTC from bbox expansion, radial flow, and depth delta, then combines lane relevance, approach,
+                nearness, confidence, and brake-light cues.
               </p>
               <div class="step-tags">
                 <span>TTC Fusion</span>
@@ -832,7 +833,8 @@
                 <div class="step-num">08</div>
               </div>
               <h5>Efficiency</h5>
-              <p>Deferred rendering ensures heavy overlays are only drawn for saved events or on-demand previews.</p>
+              <p>SAFE objects remain tracked for continuity but are hidden from the object list and overlay so the view
+                stays focused on CAUTION and DANGER cases.</p>
               <div class="step-tags">
                 <span>Telemetry</span>
                 <span>Deferred Render</span>
@@ -868,7 +870,7 @@
                 </tr>
                 <tr>
                   <td><span class="module-name">YOLO Detection</span></td>
-                  <td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td>
+                  <td><span class="freq-badge freq-every">Default: every frame</span></td>
                   <td class="skip-cell">Tracker propagates existing IDs</td>
                 </tr>
                 <tr>
@@ -883,7 +885,7 @@
                 </tr>
                 <tr>
                   <td><span class="module-name">Lane Detection</span></td>
-                  <td><span class="freq-badge freq-periodic">Default: every 5th frame</span></td>
+                  <td><span class="freq-badge freq-every">Default: every frame</span></td>
                   <td class="skip-cell">Last ROI reused and smoothed</td>
                 </tr>
                 <tr>
@@ -914,7 +916,7 @@
                 <tr>
                   <td><span class="module-name">Render Images</span></td>
                   <td><span class="freq-badge freq-event">Saved events only</span></td>
-                  <td class="skip-cell">No render on normal frames</td>
+                  <td class="skip-cell">SAFE boxes hidden from overlays</td>
                 </tr>
               </tbody>
             </table>
