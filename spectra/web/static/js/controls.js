@@ -86,9 +86,13 @@ export function initializeSpectra() {
   const normalizeDisplayTtc = (stateOrBand, ttc) => {
     const n = num(ttc, null);
     if (n === null || n <= 0.05) return null;
-    // TTC is shown for every state — including SAFE — so the temporal chart
-    // and the alert banner stay continuous while the scene is calm.
+    // TTC remains available to the temporal chart even when the scene is SAFE,
+    // so the chart can stay continuous while the banner stays calm.
     return n;
+  };
+  const normalizeBannerTtc = (stateOrBand, ttc) => {
+    if (stateClass(stateOrBand) === "safe") return null;
+    return normalizeDisplayTtc(stateOrBand, ttc);
   };
   const laneWithPosition = (lane, lanePosition) => {
     const laneText = lane ? shortLane(lane) : MISSING;
@@ -571,7 +575,7 @@ export function initializeSpectra() {
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
     banner.classList.add(riskClass(riskState));
     byId("risk-band-main").textContent = riskState ? String(riskState).toUpperCase() : MISSING;
-    byId("alert-ttc").textContent = ttcLabel(normalizeDisplayTtc(riskState, source?.ttcSec));
+    byId("alert-ttc").textContent = ttcLabel(normalizeBannerTtc(riskState, source?.ttcSec));
     byId("risk-object").textContent = objectLabel(source);
     byId("risk-lane").textContent = laneWithPosition(source?.lane, source?.lanePosition);
     byId("risk-confidence").textContent = percentLabel(source?.confidencePct);
