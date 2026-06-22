@@ -140,8 +140,8 @@
     <input type="hidden" name="resize_max_side" value="512">
     <input type="hidden" name="depth_every" value="10">
     <input type="hidden" name="adaptive_depth" value="1">
-    <input type="hidden" name="detect_every" value="1">
-    <input type="hidden" name="lane_every" value="1">
+    <input type="hidden" name="detect_every" value="3">
+    <input type="hidden" name="lane_every" value="3">
     <input type="hidden" name="flow_every" value="1">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
@@ -625,9 +625,9 @@
           <label class="drawer-row">
             <span>YOLO Detection</span>
             <div class="segmented-control" data-param="detect_every">
-              <button type="button" class="segmented-btn active" data-value="1">1x</button>
+              <button type="button" class="segmented-btn" data-value="1">1x</button>
               <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn" data-value="3">3x</button>
+              <button type="button" class="segmented-btn active" data-value="3">3x</button>
               <button type="button" class="segmented-btn" data-value="5">5x</button>
               <button type="button" class="segmented-btn" data-value="10">10x</button>
             </div>
@@ -635,9 +635,9 @@
           <label class="drawer-row">
             <span>Lane Detection</span>
             <div class="segmented-control" data-param="lane_every">
-              <button type="button" class="segmented-btn active" data-value="1">1x</button>
+              <button type="button" class="segmented-btn" data-value="1">1x</button>
               <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn" data-value="3">3x</button>
+              <button type="button" class="segmented-btn active" data-value="3">3x</button>
               <button type="button" class="segmented-btn" data-value="5">5x</button>
               <button type="button" class="segmented-btn" data-value="10">10x</button>
             </div>
@@ -730,7 +730,7 @@
                 <div class="step-num">02</div>
               </div>
               <h5>Road Geometry</h5>
-              <p>Runs UFLDv2 on every frame by default, estimates the ego-lane corridor and vanishing point, then
+              <p>Runs UFLDv2 every 3rd frame by default, reuses the smoothed ego-lane corridor between updates, and
                 normalizes object positions relative to that lane.</p>
               <div class="step-tags">
                 <span>Lane ROI</span>
@@ -781,8 +781,8 @@
                 <div class="step-num">05</div>
               </div>
               <h5>Object Tracking</h5>
-              <p>YOLO detects road participants every frame by default. The tracker keeps stable internal IDs while
-                display IDs are numbered per class, such as Car #1 and Truck #1.</p>
+              <p>YOLO detects road participants every 3rd frame by default. The tracker propagates objects between
+                detections while display IDs are numbered per class, such as Car #1 and Truck #1.</p>
               <div class="step-tags">
                 <span>YOLOv8</span>
                 <span>IoU Tracker</span>
@@ -798,8 +798,8 @@
                 <div class="step-num">06</div>
               </div>
               <h5>Risk Fusion</h5>
-              <p>Fuses TTC from bbox expansion, radial flow, and depth delta, then combines lane relevance, approach,
-                nearness, confidence, and brake-light cues.
+              <p>Fuses TTC from bbox expansion, radial flow, and metric depth delta. Approach stays a normalized
+                percentage score led by estimated closing speed, with bbox growth and optical flow as supporting cues.
               </p>
               <div class="step-tags">
                 <span>TTC Fusion</span>
@@ -870,7 +870,7 @@
                 </tr>
                 <tr>
                   <td><span class="module-name">YOLO Detection</span></td>
-                  <td><span class="freq-badge freq-every">Default: every frame</span></td>
+                  <td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td>
                   <td class="skip-cell">Tracker propagates existing IDs</td>
                 </tr>
                 <tr>
@@ -885,7 +885,7 @@
                 </tr>
                 <tr>
                   <td><span class="module-name">Lane Detection</span></td>
-                  <td><span class="freq-badge freq-every">Default: every frame</span></td>
+                  <td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td>
                   <td class="skip-cell">Last ROI reused and smoothed</td>
                 </tr>
                 <tr>

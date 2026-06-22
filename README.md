@@ -365,12 +365,22 @@ Code: `ttc_from_depth_delta()`
 
 Logic:
 
-- Compute median nearness inside the object's bounding box.
-- Compare it with the previous nearness for the same track.
-- If nearness increases, the object may be approaching.
-- Estimate TTC from nearness growth rate and remaining-distance proxy.
+- Compute estimated metric distance in meters from the object's lower-center bbox crop.
+- Compare it with the previous metric distance for the same track.
+- If distance is decreasing faster than 0.30 m/s, the object is closing.
+- Estimate TTC as `current_distance_m / closing_mps`.
 
 This component updates history only when depth is fresh. If an old depth map is reused, history is not mutated, preventing false deltas.
+
+### 11.4 Approach Score
+
+Approach is the normalized "getting closer" factor shown in the UI as a percentage. It is led by metric closing speed:
+
+- 50% estimated closing speed in m/s from metric depth
+- 30% bounding-box expansion
+- 20% radial optical flow
+
+Metric closing speed below 0.30 m/s is treated as no approach. Around 12 m/s and above is treated as a full metric approach signal.
 
 ### 12. TTC Fusion
 

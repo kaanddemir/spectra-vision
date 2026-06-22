@@ -99,6 +99,11 @@ _BRAKE_LIGHT_CLASSES = {"car", "truck", "bus"}
 # Brake-light confidence above which an in-path lead vehicle escalates risk.
 _BRAKE_ESCALATE_SCORE = 0.5
 
+# Approach score normalization. Metric depth closing is the primary approach
+# cue; bbox expansion and optical flow remain corroborating image-space cues.
+_APPROACH_MIN_CLOSING_MPS = 0.30
+_APPROACH_FULL_CLOSING_MPS = 12.0
+
 # Collision-cone: how much to trust the velocity-extrapolated crossing for a
 # *far* object (near the horizon), whose lane_position is computed from few
 # pixels and is jittery. Near objects get full trust (1.0).
@@ -639,6 +644,42 @@ def _flow_magnitude_for_bbox(magnitude_norm: np.ndarray, bbox: tuple[int, int, i
     return float(np.clip(np.percentile(crop, 75), 0.0, 1.0))
 
 
+def _approach_score(
+    *,
+    closing_mps: float | None,
+    expansion_rate: float,
+    flow_magnitude: float,
+    class_weight: float,
+) -> float:
+    """Normalized approach risk, led by metric closing speed."""
+
+    if closing_mps is None or closing_mps <= _APPROACH_MIN_CLOSING_MPS:
+        metric_signal = 0.0
+    else:
+        metric_signal = float(
+            np.clip(
+                (closing_mps - _APPROACH_MIN_CLOSING_MPS)
+                / (_APPROACH_FULL_CLOSING_MPS - _APPROACH_MIN_CLOSING_MPS),
+                0.0,
+                1.0,
+            )
+        )
+    expansion_signal = float(np.clip(expansion_rate / 0.6, 0.0, 1.0))
+    flow_signal = float(np.clip(flow_magnitude, 0.0, 1.0))
+    return float(
+        np.clip(
+            class_weight
+            * (
+                (0.50 * metric_signal)
+                + (0.30 * expansion_signal)
+                + (0.20 * flow_signal)
+            ),
+            0.0,
+            1.0,
+        )
+    )
+
+
 # ── Main per-track risk computation ──────────────────────────────────────────
 
 
@@ -693,18 +734,14 @@ def calculate_track_risk(
     lateral_v = lane_lateral_velocity(track, lane)
 
     class_weight = CLASS_RISK_WEIGHT.get(track.class_name, 1.0)
-    # Approach = "is this object getting closer over time": bbox scale growth
-    # plus radial flow. Lane geometry (crossing) belongs to its own bar; mixing
-    # it here gave parallel adjacent traffic a phantom approach floor.
-    closing_speed = float(
-        np.clip(
-            class_weight * (
-                (0.65 * float(np.clip(expansion_rate / 0.6, 0.0, 1.0)))
-                + (0.35 * velocity_magnitude)
-            ),
-            0.0,
-            1.0,
-        )
+    # Approach = "is this object getting closer over time". Metric depth
+    # closing speed is the lead signal now that depth is in meters; bbox
+    # expansion and radial optical flow only corroborate the visual trend.
+    closing_speed = _approach_score(
+        closing_mps=depth_closing_mps,
+        expansion_rate=expansion_rate,
+        flow_magnitude=velocity_magnitude,
+        class_weight=class_weight,
     )
 
     detection_confidence = float(np.clip(track.confidence, 0.0, 1.0))

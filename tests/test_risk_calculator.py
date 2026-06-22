@@ -527,6 +527,56 @@ class TestCalculateTrackRisk:
         assert history == {1: (0.0, 0.2)}
         assert next(c for c in event.ttc_components if c.name == "depth").value is None
 
+    def test_metric_closing_mps_drives_approach_score(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.4, dtype=np.float32)
+        magnitude = np.zeros((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(1, (130, 120, 180, 190), t=1.0)
+
+        event = calculate_track_risk(
+            track=track,
+            depth_m=make_depth_m(distance=20.0),
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=0.0,
+            depth_history={1: (0.0, 30.0)},
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=True,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
+        )
+
+        assert event.closing_mps == pytest.approx(10.0)
+        assert event.closing_speed == pytest.approx(0.415, abs=0.001)
+
+    def test_approach_falls_back_to_limited_visual_cues_without_metric_closing(self):
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.4, dtype=np.float32)
+        magnitude = np.ones((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(1, (130, 120, 180, 190), t=1.0)
+
+        event = calculate_track_risk(
+            track=track,
+            depth_m=make_depth_m(distance=20.0),
+            near_map=near_map,
+            flow=flow,
+            magnitude_norm=magnitude,
+            lane=make_lane(),
+            expansion_rate=0.6,
+            depth_history={},
+            flow_dt_sec=1.0 / 30.0,
+            depth_is_fresh=True,
+            frame_index=track.frame_index,
+            timestamp_sec=track.timestamp_sec,
+        )
+
+        assert event.closing_mps is None
+        assert event.closing_speed == pytest.approx(0.5)
+
     def test_side_lane_static_object_safe(self):
         height, width = 200, 300
         near_map = np.full((height, width), 0.2, dtype=np.float32)
