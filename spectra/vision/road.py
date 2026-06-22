@@ -353,7 +353,7 @@ def detection_corridor_score(
         # network is sure about) is admitted even when neither far_center nor
         # vp_aligned holds — those gates rely on lane geometry which can be
         # off near the horizon.
-        confident_far = detection.confidence >= 0.55 and not edge_noise and abs(pos) <= max_far_pos
+        confident_far = detection.confidence >= 0.70 and not edge_noise and abs(pos) <= max_far_pos
         if (abs(pos) > max_far_pos or edge_noise or not (far_center or vp_aligned)) and not confident_far:
             return 0.0
         score = max(score, 0.42 if confident_far and not (far_center or vp_aligned) else 0.44)
@@ -373,7 +373,7 @@ def detection_corridor_score(
                     bbox_nearness = _bbox_median_nearness(near_map, detection.bbox)
                     if bbox_nearness >= 0.45:
                         return 0.33
-                if detection.confidence >= 0.65:
+                if detection.confidence >= 0.78:
                     return 0.33
             return 0.0
         score = max(score, 0.58 if intrudes_lane else 0.52)

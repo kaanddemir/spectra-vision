@@ -174,7 +174,7 @@ class IoUTracker:
         predicted_iou_threshold: float = 0.12,
         center_distance_threshold: float = 0.70,
         max_misses: int = 8,
-        confirm_hits: int = 2,
+        confirm_hits: int = 3,
         fast_confirm_confidence: float = 0.70,
         fast_confirm_height_ratio: float = 0.18,
         coast_limit: int = 2,

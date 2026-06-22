@@ -54,14 +54,14 @@ CLASS_RISK_WEIGHT: dict[str, float] = {
 }
 
 CLASS_MIN_CONFIDENCE: dict[str, float] = {
-    "person": 0.35,
-    "bicycle": 0.35,
-    "motorcycle": 0.35,
-    "car": 0.40,
-    "bus": 0.40,
-    "train": 0.40,
-    "truck": 0.40,
-    "traffic_light": 0.35,
+    "person": 0.45,
+    "bicycle": 0.45,
+    "motorcycle": 0.45,
+    "car": 0.50,
+    "bus": 0.50,
+    "train": 0.55,
+    "truck": 0.50,
+    "traffic_light": 0.40,
 }
 
 
@@ -92,7 +92,7 @@ class ObjectDetector:
         self,
         *,
         model_name: str = "yolov8n.pt",
-        confidence: float = 0.35,
+        confidence: float = 0.45,
         iou: float = 0.45,
         image_size: int = 640,
         device: Optional[str] = None,
