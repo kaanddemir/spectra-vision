@@ -309,6 +309,7 @@ def _risk_score(event: RiskEvent) -> float:
 def _object_metric(event: RiskEvent) -> dict[str, Any]:
     return {
         "objectId": event.object_id,
+        "displayId": event.display_id,
         "objectType": event.object_type,
         "rawRiskState": event.state,
         "riskScore": _risk_score(event),

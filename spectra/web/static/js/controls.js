@@ -145,6 +145,7 @@ export function initializeSpectra() {
       timeSec: ts === null ? null : Math.round(ts * 100) / 100,
       riskState: frame.stabilizedRiskState ?? null,
       objectId: frame.primaryObjectId ?? null,
+      displayId: primary?.displayId ?? frame.primaryDisplayId ?? frame.primaryObjectId ?? null,
       objectType: primary?.objectType ?? null,
       lane: primary ? (frame.primaryLane ?? null) : null,
       ttcSec: primary?.ttcSec ?? null,
@@ -185,6 +186,10 @@ export function initializeSpectra() {
     return stateWeight + ttcWeight + near + closing;
   };
   const eventStateClass = (ev) => stateClass(ev?.riskState);
+  const isActionableObject = (obj) => {
+    const sc = stateClass(obj?.riskState ?? obj?.rawRiskState);
+    return sc === "caution" || sc === "danger";
+  };
   const eventTimestamp = (ev) => num(ev?.timestampSec, null);
   const eventDisplayTtc = (ev) => {
     return normalizeDisplayTtc(ev?.riskState, ev?.ttcSec);
@@ -260,7 +265,8 @@ export function initializeSpectra() {
   const timelinePointTooltip = (point) => {
     const ttc = point.ttc === null ? MISSING : `${point.ttc.toFixed(1)}s`;
     const type = shortType(point.objectType);
-    const id = isReal(point.objectId) ? ` #${point.objectId}` : "";
+    const displayId = point.displayId ?? point.objectId;
+    const id = isReal(displayId) ? ` #${displayId}` : "";
     const object = type === MISSING && !id ? MISSING : `${type === MISSING ? "Object" : type}${id}`;
     return [
       `Time: ${point.timeSec.toFixed(2).replace(/\.?0+$/, "")}s`,
@@ -498,7 +504,8 @@ export function initializeSpectra() {
   function objectLabel(source) {
     if (!source) return MISSING;
     const type = shortType(source.objectType);
-    const id = isReal(source.objectId) ? ` #${source.objectId}` : "";
+    const displayId = source.displayId ?? source.objectId;
+    const id = isReal(displayId) ? ` #${displayId}` : "";
     return type === MISSING && !id ? MISSING : `${type === MISSING ? "Object" : type}${id}`;
   }
 
@@ -585,7 +592,7 @@ export function initializeSpectra() {
   }
 
   function renderObjectList(source) {
-    const objects = Array.isArray(source?.objects) ? source.objects : [];
+    const objects = (Array.isArray(source?.objects) ? source.objects : []).filter(isActionableObject);
     const list = byId("detection-list");
     const count = byId("threat-count");
     if (count) count.innerHTML = `Objects: <span>${objects.length}</span>`;
@@ -636,7 +643,7 @@ export function initializeSpectra() {
       timeTag: sourceTime === null ? `${timeLabel}: <span>00:00</span>` : `${timeLabel}: <span>${formatSeconds(sourceTime)}</span>`,
     });
     
-    const objects = Array.isArray(source?.objects) ? source.objects : [];
+    const objects = (Array.isArray(source?.objects) ? source.objects : []).filter(isActionableObject);
     if (state.selectedObjectId !== null && !objects.some(o => o.objectId === state.selectedObjectId)) {
       state.selectedObjectId = null;
     }
@@ -742,7 +749,7 @@ export function initializeSpectra() {
           <div class="card-boxes">
             <div class="box-item">
               <span class="lbl">ID</span>
-              <span class="val">${isReal(ev.objectId) ? `#${ev.objectId}` : MISSING}</span>
+              <span class="val">${isReal(ev.displayId ?? ev.objectId) ? `#${ev.displayId ?? ev.objectId}` : MISSING}</span>
             </div>
             <div class="box-item">
               <span class="lbl">TYPE</span>

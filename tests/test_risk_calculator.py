@@ -221,6 +221,20 @@ class TestLaneGeometry:
         assert detected.dtype == np.uint8
         assert low_conf.dtype == np.uint8
 
+    def test_overlay_hides_safe_object_boxes_but_draws_actionable_boxes(self):
+        frame = np.zeros((200, 300, 3), dtype=np.uint8)
+        lane = make_lane()
+
+        safe = make_event(state="SAFE")
+        safe_without_objects = annotate_frame(frame, safe, [], lane=lane)
+        safe_with_object = annotate_frame(frame, safe, [safe], lane=lane)
+        assert np.array_equal(safe_with_object, safe_without_objects)
+
+        danger = make_event(state="DANGER", ttc_sec=0.8)
+        danger_without_objects = annotate_frame(frame, danger, [], lane=lane)
+        danger_with_object = annotate_frame(frame, danger, [danger], lane=lane)
+        assert not np.array_equal(danger_with_object, danger_without_objects)
+
 
 class TestDirectionFromLateral:
     def test_center_when_small(self):
@@ -480,7 +494,7 @@ class TestCalculateTrackRisk:
 
         assert event.state == "SAFE"
 
-    def test_risk_event_uses_display_id_when_present(self):
+    def test_risk_event_keeps_track_id_and_exposes_display_id(self):
         height, width = 200, 300
         near_map = np.full((height, width), 0.3, dtype=np.float32)
         magnitude = np.zeros((height, width), dtype=np.float32)
@@ -502,7 +516,8 @@ class TestCalculateTrackRisk:
             timestamp_sec=track.timestamp_sec,
         )
 
-        assert event.object_id == 2
+        assert event.object_id == 17
+        assert event.display_id == 2
 
 
 class TestExpansionSmoother:
@@ -566,12 +581,15 @@ class TestIoUTracker:
         tracks_t0 = tracker.update(first, frame_index=0, timestamp_sec=0.0)
         second = [Detection(bbox=(5, 5, 55, 55), class_name="car", confidence=0.6)]
         tracks_t1 = tracker.update(second, frame_index=1, timestamp_sec=0.1)
+        third = [Detection(bbox=(10, 10, 60, 60), class_name="car", confidence=0.6)]
+        tracks_t2 = tracker.update(third, frame_index=2, timestamp_sec=0.2)
 
         assert tracks_t0 == []
-        assert tracks_t1[0].track_id == 1
-        assert tracks_t1[0].confirmed
-        assert tracks_t1[0].display_id == 1
-        assert len(tracks_t1[0].history) == 1
+        assert tracks_t1 == []
+        assert tracks_t2[0].track_id == 1
+        assert tracks_t2[0].confirmed
+        assert tracks_t2[0].display_id == 1
+        assert len(tracks_t2[0].history) == 2
 
     def test_fast_confirms_large_high_confidence_detection(self):
         tracker = IoUTracker()
@@ -657,6 +675,24 @@ class TestIoUTracker:
         assert sorted(track.track_id for track in tracks_t0) == [1, 2]
         assert sorted(track.track_id for track in tracks_t1) == [1, 2]
         assert sorted(track.display_id for track in tracks_t1) == [1, 2]
+
+    def test_display_ids_are_scoped_per_class(self):
+        tracker = IoUTracker()
+        tracks = tracker.update(
+            [
+                Detection(bbox=(0, 0, 80, 80), class_name="car", confidence=0.9),
+                Detection(bbox=(120, 0, 200, 80), class_name="truck", confidence=0.9),
+            ],
+            frame_index=0,
+            timestamp_sec=0.0,
+            frame_shape=(200, 320, 3),
+        )
+
+        by_class = {track.class_name: track for track in tracks}
+        assert by_class["car"].track_id == 1
+        assert by_class["truck"].track_id == 2
+        assert by_class["car"].display_id == 1
+        assert by_class["truck"].display_id == 1
 
     def test_pending_false_positive_does_not_consume_display_id(self):
         tracker = IoUTracker()

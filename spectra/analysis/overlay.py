@@ -34,6 +34,8 @@ def _readable_lane(lane: str | None) -> str:
 def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
     if event.bbox is None:
         return
+    if event.state == "SAFE":
+        return
     x1, y1, x2, y2 = event.bbox
     color = COLORS.get(event.state, (160, 170, 190))
     thickness = 2 if event.state == "DANGER" else 1
@@ -41,8 +43,9 @@ def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
     cv2.rectangle(output, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
 
     label_parts = []
-    if event.object_id is not None:
-        label_parts.append(f"#{event.object_id}")
+    display_id = event.display_id if event.display_id is not None else event.object_id
+    if display_id is not None:
+        label_parts.append(f"#{display_id}")
     label_parts.append(event.object_type.upper())
     if event.ttc_sec is not None:
         label_parts.append(f"{event.ttc_sec:.1f}s")
@@ -242,8 +245,8 @@ def annotate_frame(
     _draw_lane_overlay(output, lane, color)
     _draw_traffic_light(output, traffic_light_state)
 
-    # 2. Per-object bboxes — paint SAFE first, then CAUTION/DANGER on top so
-    # the worst object stays visually dominant when bboxes overlap.
+    # 2. Per-object bboxes — draw only actionable objects so safe background
+    # traffic does not clutter the analysis view.
     state_order = {"SAFE": 0, "CAUTION": 1, "DANGER": 2}
     for event in sorted(object_events, key=lambda e: state_order.get(e.state, 0)):
         _draw_bbox(output, event)
@@ -298,8 +301,9 @@ def annotate_frame(
 
         # row 2 — ID | object | lane
         sub_parts = []
-        if primary_event.object_id is not None:
-            sub_parts.append(f"#{primary_event.object_id}")
+        display_id = primary_event.display_id if primary_event.display_id is not None else primary_event.object_id
+        if display_id is not None:
+            sub_parts.append(f"#{display_id}")
         sub_parts.append(obj_lbl)
         if lane_lbl and primary_event.bbox is not None:
             sub_parts.append(lane_lbl)

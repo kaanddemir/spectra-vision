@@ -199,7 +199,7 @@ class IoUTracker:
         self.max_lost_sec = float(max_lost_sec)
         self.reassoc_gap_gain = float(reassoc_gap_gain)
         self._next_id = 1
-        self._next_display_id = 1
+        self._next_display_id_by_class: dict[str, int] = {}
         self._tracks: dict[int, Track] = {}
         self._lost_tracks: dict[int, Track] = {}
 
@@ -229,8 +229,9 @@ class IoUTracker:
     def _ensure_display_id(self, track: Track) -> None:
         if track.display_id is not None:
             return
-        track.display_id = self._next_display_id
-        self._next_display_id += 1
+        next_id = self._next_display_id_by_class.get(track.class_name, 1)
+        track.display_id = next_id
+        self._next_display_id_by_class[track.class_name] = next_id + 1
 
     def _confirm_if_ready(
         self,
@@ -481,4 +482,4 @@ class IoUTracker:
         self._tracks.clear()
         self._lost_tracks.clear()
         self._next_id = 1
-        self._next_display_id = 1
+        self._next_display_id_by_class.clear()
