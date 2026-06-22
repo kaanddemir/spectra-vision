@@ -38,6 +38,12 @@ export function initializeSpectra() {
     liveEvents: [],
     uiMode: "live",
     analysisWindowMode: "frames",
+    // Time domain that timeline/chart/player render against. When an analysis
+    // covers only part of the video (time window, or a capped frame budget),
+    // everything is scaled to [startSec, endSec] so the analysis fills the
+    // timeline and the player is scoped to that segment. endSec=null → fall
+    // back to the full media duration.
+    analysisWindow: { startSec: 0, endSec: null },
     selectedSummaryEvent: null,
     currentTimelineRow: null,
     suppressVideoSyncCount: 0,
@@ -661,14 +667,8 @@ export function initializeSpectra() {
   function renderTimeline(result) {
     const eventItems = timelineEventItems(result);
     const resultImages = result?.images || {};
-    const dur = state.sourceMeta?.durationSec
-      || (result?.frameCount && result?.fps ? result.frameCount / result.fps : null);
-    const rowTimes = (result?.timelineRows || [])
-      .map((row) => num(row.timeSec, null))
-      .filter((v) => v !== null);
-    const eventDur = eventItems.length ? Math.max(...eventItems.map((item) => item.ts)) : null;
-    const rowDur = rowTimes.length ? Math.max(...rowTimes) : null;
-    const totalDur = dur || rowDur || eventDur || 1;
+    // Scale the strip to the analyzed window so the data fills the timeline.
+    const { start: winStart, span: winSpan } = winBounds();
 
     const totalEventsEl = byId("stat-total-events");
     if (totalEventsEl) totalEventsEl.textContent = String(eventItems.length);
@@ -678,7 +678,7 @@ export function initializeSpectra() {
     const ticks = 6;
     for (let i = 0; i < ticks; i++) {
       const sp = document.createElement("span");
-      sp.textContent = formatSeconds((totalDur * i) / (ticks - 1));
+      sp.textContent = formatSeconds(winStart + (winSpan * i) / (ticks - 1));
       axis.appendChild(sp);
     }
 
@@ -697,7 +697,7 @@ export function initializeSpectra() {
 
     eventItems.forEach((item) => {
       const { ev, index: idx, sc, ts } = item;
-      const left = clamp((ts / totalDur) * 100, 0, 100);
+      const left = clamp(((ts - winStart) / winSpan) * 100, 0, 100);
       const dot = document.createElement("button");
       dot.type = "button";
       dot.className = `timeline-event ev-${sc}`;
@@ -865,12 +865,9 @@ export function initializeSpectra() {
         };
       });
 
-    const observedTimes = points.map((p) => p.timeSec);
-    const observedDur = observedTimes.length ? Math.max(...observedTimes) : 1;
-    const mediaDur = previewVideo?.duration
-      || state.sourceMeta?.durationSec
-      || (state.currentResult?.frameCount && state.currentResult?.fps ? state.currentResult.frameCount / state.currentResult.fps : null);
-    const totalDur = Math.max(mediaDur || 0, observedDur || 0, 1);
+    // Scale the chart x-axis to the analyzed window, not the full media, so the
+    // analysis fills the chart instead of being squeezed into a sub-range.
+    const { start: winStart, span: winSpan } = winBounds();
 
     const W = 400;
     const yByState = {
@@ -903,7 +900,7 @@ export function initializeSpectra() {
       });
     }
 
-    const xForTime = (t) => (t / Math.max(totalDur, 0.01)) * W;
+    const xForTime = (t) => clamp((t - winStart) / winSpan, 0, 1) * W;
 
     [
       { sc: "danger", y: 0, h: 50, color: "rgba(255, 68, 68, 0.07)" },
@@ -934,7 +931,7 @@ export function initializeSpectra() {
       if (pointCountEl) pointCountEl.textContent = "0";
       const totalEventsEl = byId("stat-total-events");
       if (totalEventsEl) totalEventsEl.textContent = String((result?.events || []).length);
-      updateChartAxisX(totalDur);
+      updateChartAxisX();
       return;
     }
 
@@ -1019,7 +1016,7 @@ export function initializeSpectra() {
       lineGroup.appendChild(group);
     });
 
-    updateChartAxisX(totalDur);
+    updateChartAxisX();
     setActiveEventIndex(nearestEventIndexAt(previewVideo?.currentTime ?? 0));
   }
 
@@ -1031,14 +1028,34 @@ export function initializeSpectra() {
       || 1;
   }
 
-  function updateChartAxisX(totalDur) {
+  // Active analysis window the timeline/chart/player render against. Falls back
+  // to the full media duration when no window has been set.
+  function winBounds() {
+    const w = state.analysisWindow || { startSec: 0, endSec: null };
+    const total = currentTotalDuration();
+    const start = clamp(num(w.startSec, 0), 0, total);
+    const rawEnd = w.endSec === null || w.endSec === undefined ? total : num(w.endSec, total);
+    const end = clamp(rawEnd, start, total);
+    return { start, end, span: Math.max(end - start, 0.01) };
+  }
+
+  // Derive [min, max] timeSec from a set of timeline rows. Used to scale the
+  // timeline/chart to the actually-analyzed span (both time and frames modes).
+  function computeWindowFromRows(rows) {
+    const times = (rows || []).map((row) => num(row.timeSec ?? row.timestampSec, null)).filter((v) => v !== null);
+    if (!times.length) return { startSec: 0, endSec: null };
+    return { startSec: Math.min(...times), endSec: Math.max(...times) };
+  }
+
+  function updateChartAxisX() {
     const axis = byId("chart-axis-x");
     if (!axis) return;
+    const { start, span } = winBounds();
     axis.replaceChildren();
     const ticks = 6;
     for (let i = 0; i < ticks; i++) {
       const sp = document.createElement("span");
-      sp.textContent = formatSeconds((totalDur * i) / (ticks - 1));
+      sp.textContent = formatSeconds(start + (span * i) / (ticks - 1));
       axis.appendChild(sp);
     }
   }
@@ -1046,8 +1063,8 @@ export function initializeSpectra() {
   function updateChartCursor(timeSec) {
     const cursor = byId("chart-cursor");
     if (!cursor) return;
-    const totalDur = currentTotalDuration();
-    const ratio = clamp(timeSec / Math.max(totalDur, 0.01), 0, 1);
+    const { start, span } = winBounds();
+    const ratio = clamp((timeSec - start) / span, 0, 1);
     if (cursor) {
       const x = ratio * 400;
       cursor.setAttribute("x1", String(x));
@@ -1060,20 +1077,20 @@ export function initializeSpectra() {
     const t = num(timeSec, null);
     if (t === null) return;
     timeCurrent.textContent = formatSeconds(t);
-    const dur = previewVideo?.duration || state.sourceMeta?.durationSec || 0;
-    if (dur > 0) {
-      const ratio = clamp(t / dur, 0, 1);
-      seekBar.value = String(Math.round(ratio * 1000));
-      seekBar.style.setProperty("--fill", `${(ratio * 100).toFixed(1)}%`);
-    }
+    // Seek bar spans the analyzed window (0% = winStart, 100% = winEnd).
+    const { start, span } = winBounds();
+    const ratio = clamp((t - start) / span, 0, 1);
+    seekBar.value = String(Math.round(ratio * 1000));
+    seekBar.style.setProperty("--fill", `${(ratio * 100).toFixed(1)}%`);
   }
 
   function seekPreviewVideo(timeSec) {
     const t = num(timeSec, null);
     if (t === null || !previewVideo || previewVideo.hidden || !previewVideo.src) return;
     const applySeek = () => {
-      const dur = previewVideo.duration || state.sourceMeta?.durationSec || t;
-      const target = clamp(t, 0, Math.max(dur || t, 0));
+      // Clamp seeks to the analyzed window so the player stays scoped to it.
+      const { start, end } = winBounds();
+      const target = clamp(t, start, end);
       try {
         previewVideo.pause();
         previewVideo.currentTime = target;
@@ -1089,6 +1106,17 @@ export function initializeSpectra() {
     }
   }
 
+  function playWithinWindow() {
+    if (previewVideo.hidden || !previewVideo.src) return;
+    hidePreviewOverlay();
+    const { start, end } = winBounds();
+    // If parked at (or past) the window end, restart from the window start.
+    if (previewVideo.currentTime >= end - 0.04 || previewVideo.currentTime < start - 0.04) {
+      try { previewVideo.currentTime = start; } catch {}
+    }
+    previewVideo.play().catch(() => {});
+  }
+
   function applyTimelineStateAt(timeSec, { switchMode = true } = {}) {
     const t = num(timeSec, 0);
     updateChartCursor(t);
@@ -1098,8 +1126,8 @@ export function initializeSpectra() {
 
     const cursor = byId("timeline-cursor");
     if (cursor) {
-      const totalDur = currentTotalDuration();
-      const left = clamp((t / Math.max(totalDur, 0.01)) * 100, 0, 100);
+      const { start, span } = winBounds();
+      const left = clamp(((t - start) / span) * 100, 0, 100);
       cursor.style.left = `${left}%`;
     }
 
@@ -1143,6 +1171,8 @@ export function initializeSpectra() {
     state.timelineRows = result.timelineRows || [];
     state.events = result.events || [];
     state.selectedSummaryEvent = null;
+    // Scope all time-domain rendering + player control to the analyzed span.
+    state.analysisWindow = computeWindowFromRows(state.timelineRows);
 
     hidePreviewOverlay();
 
@@ -1150,14 +1180,11 @@ export function initializeSpectra() {
     renderTimeline(result);
     renderRiskTimeline(result);
 
-    const lastRow = state.timelineRows[state.timelineRows.length - 1];
-    const lastTime = num(lastRow?.timeSec, null);
-    if (lastTime !== null) {
-      seekPreviewVideo(lastTime);
-      state.currentTimelineRow = findTimelineRowAt(lastTime);
-    } else {
-      state.currentTimelineRow = null;
-    }
+    // Park the player at the window start so playback covers the analyzed
+    // segment from the beginning (and stops at the window end).
+    const { start: winStart } = winBounds();
+    seekPreviewVideo(winStart);
+    state.currentTimelineRow = findTimelineRowAt(winStart) || null;
     setUiMode("summary");
   }
 
@@ -1169,6 +1196,7 @@ export function initializeSpectra() {
     state.liveEvents = [];
     state.selectedSummaryEvent = null;
     state.currentTimelineRow = null;
+    state.analysisWindow = { startSec: 0, endSec: null };
     hidePreviewOverlay();
     renderStatRow(null);
     setUiMode("live");
@@ -1227,6 +1255,10 @@ export function initializeSpectra() {
         state.currentTimelineRow = findTimelineRowAt(ts);
         renderRiskPanel();
       }
+    }
+    if (!state.analyzing && (rowsChanged || eventsChanged)) {
+      // Keep the render domain in sync with the growing live span.
+      state.analysisWindow = computeWindowFromRows(state.liveTimelineRows);
     }
     if (!state.analyzing && eventsChanged) {
       renderTimeline({ events: state.liveEvents });
@@ -1632,13 +1664,16 @@ export function initializeSpectra() {
     previewVideo.addEventListener("loadedmetadata", updateSourceMetaFromVideo);
     previewVideo.addEventListener("timeupdate", () => {
       const cur = previewVideo.currentTime;
-      const dur = previewVideo.duration || 0;
-      timeCurrent.textContent = formatSeconds(cur);
-      if (dur > 0) {
-        const ratio = clamp(cur / dur, 0, 1);
-        seekBar.value = String(Math.round(ratio * 1000));
-        seekBar.style.setProperty("--fill", `${(ratio * 100).toFixed(1)}%`);
+      const { start, end } = winBounds();
+      // Keep playback inside the analyzed window: stop at the end, never run
+      // before the start.
+      if (cur >= end - 0.04) {
+        if (!previewVideo.paused) previewVideo.pause();
+        if (cur > end) { try { previewVideo.currentTime = end; } catch {} }
+      } else if (cur < start - 0.04) {
+        try { previewVideo.currentTime = start; } catch {}
       }
+      updateVideoTimeControls(previewVideo.currentTime);
       syncToVideoTime();
     });
     previewVideo.addEventListener("seeked", syncToVideoTime);
@@ -1652,8 +1687,7 @@ export function initializeSpectra() {
     playToggle.addEventListener("click", () => {
       if (previewVideo.hidden || !previewVideo.src) return;
       if (previewVideo.paused) {
-        hidePreviewOverlay(); // Hide any event overlay when starting play
-        previewVideo.play().catch(() => {});
+        playWithinWindow();
       } else {
         previewVideo.pause();
       }
@@ -1662,7 +1696,9 @@ export function initializeSpectra() {
       const ratio = num(seekBar.value, 0) / 1000;
       seekBar.style.setProperty("--fill", `${(ratio * 100).toFixed(1)}%`);
       if (previewVideo.duration) {
-        const target = ratio * previewVideo.duration;
+        // Seek bar maps onto the analyzed window, not the full video.
+        const { start, span } = winBounds();
+        const target = start + ratio * span;
         previewVideo.currentTime = target;
         setUiMode("live", { timeSec: target });
       }
@@ -1670,8 +1706,7 @@ export function initializeSpectra() {
     byId("center-play-btn")?.addEventListener("click", () => {
       if (!previewVideo.src) return;
       if (previewVideo.paused) {
-        hidePreviewOverlay();
-        previewVideo.play().catch(() => {});
+        playWithinWindow();
       } else {
         previewVideo.pause();
       }
