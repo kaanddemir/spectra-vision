@@ -509,7 +509,7 @@ class SpatialFrameAnalyzer:
         self.ttc_imminence_smoother = TtcImminenceSmoother()
         self.lane_kalman = LaneKalman()
         self.stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=7)
-        self.tracker = IoUTracker(iou_threshold=0.25, max_misses=5)
+        self.tracker = IoUTracker(iou_threshold=0.25)
 
         # Models (cached singletons).
         self.lanenet = get_lanenet_model()
@@ -702,7 +702,20 @@ class SpatialFrameAnalyzer:
         # ``stabilized_risk_state`` carries the hysteresis-smoothed state
         # band independently.
         primary_risk_score = _risk_score(primary_event)
-        stabilized_state = stabilized_event_state(self.stabilizer, primary_event)
+        # Stabilize on the frame's WORST raw-state object, not just the selected
+        # primary. After the eligibility fix this is normally the primary, but
+        # feeding the worst keeps the banner elevated when primary selection
+        # flips between objects or a threat briefly drops out of the active set
+        # for a frame — both of which otherwise let the stabilizer downgrade
+        # prematurely while a real danger is still present.
+        stabilizer_event = max(
+            all_events,
+            key=lambda e: (
+                {"SAFE": 0, "CAUTION": 1, "DANGER": 2}.get(e.state, 0),
+                _risk_score(e),
+            ),
+        )
+        stabilized_state = stabilized_event_state(self.stabilizer, stabilizer_event)
         primary_event = replace(primary_event, state=stabilized_state)
 
         self.processed_frames += 1

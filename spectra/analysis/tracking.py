@@ -134,6 +134,36 @@ def _predict_bbox(track: Track, timestamp_sec: float) -> tuple[int, int, int, in
     return (x1, y1, x2, y2)
 
 
+def _predict_bbox_full(track: Track, timestamp_sec: float) -> tuple[int, int, int, int]:
+    """Constant-velocity bbox prediction over the FULL elapsed gap.
+
+    Unlike ``_predict_bbox`` (capped at ~3 frames for live frame-to-frame
+    matching), this extrapolates the last-known velocity across the whole
+    occlusion gap so a lost track can be re-associated with a detection that
+    has moved a long way in the image. Used only for re-identification, where
+    scale compatibility and a gap-scaled center threshold guard against bad
+    matches.
+    """
+
+    previous = track.previous_sample(min_dt=0.001)
+    if previous is None:
+        return track.bbox
+
+    dt = track.timestamp_sec - previous.timestamp_sec
+    future_dt = timestamp_sec - track.timestamp_sec
+    if dt <= 0.0 or future_dt <= 0.0:
+        return track.bbox
+
+    ratio = future_dt / dt
+    predicted = []
+    for current, prior in zip(track.bbox, previous.bbox):
+        predicted.append(int(round(float(current) + (float(current) - float(prior)) * ratio)))
+    x1, y1, x2, y2 = predicted
+    if x2 <= x1 or y2 <= y1:
+        return track.bbox
+    return (x1, y1, x2, y2)
+
+
 class IoUTracker:
     """Greedy multi-signal matcher with per-track history for TTC."""
 
@@ -143,10 +173,13 @@ class IoUTracker:
         iou_threshold: float = 0.25,
         predicted_iou_threshold: float = 0.12,
         center_distance_threshold: float = 0.70,
-        max_misses: int = 5,
+        max_misses: int = 8,
         confirm_hits: int = 2,
         fast_confirm_confidence: float = 0.70,
         fast_confirm_height_ratio: float = 0.18,
+        coast_limit: int = 2,
+        max_lost_sec: float = 1.0,
+        reassoc_gap_gain: float = 0.8,
     ) -> None:
         self.iou_threshold = float(iou_threshold)
         self.predicted_iou_threshold = float(predicted_iou_threshold)
@@ -155,9 +188,20 @@ class IoUTracker:
         self.confirm_hits = int(confirm_hits)
         self.fast_confirm_confidence = float(fast_confirm_confidence)
         self.fast_confirm_height_ratio = float(fast_confirm_height_ratio)
+        # A confirmed track that misses a detection still emits risk for up to
+        # ``coast_limit`` detection frames (using its last bbox) so a one-off
+        # YOLO miss does not make a live threat vanish from the active set.
+        self.coast_limit = int(coast_limit)
+        # Confirmed tracks that exhaust ``max_misses`` are demoted to a lost
+        # pool instead of deleted, so a re-appearing detection within
+        # ``max_lost_sec`` is re-associated to the original ID rather than
+        # minting a new one (prevents #1 -> #7 relabeling across short gaps).
+        self.max_lost_sec = float(max_lost_sec)
+        self.reassoc_gap_gain = float(reassoc_gap_gain)
         self._next_id = 1
         self._next_display_id = 1
         self._tracks: dict[int, Track] = {}
+        self._lost_tracks: dict[int, Track] = {}
 
     def _is_fast_confirm(self, det: Detection, frame_height: int | None) -> bool:
         if frame_height is None or frame_height <= 0:
@@ -166,9 +210,21 @@ class IoUTracker:
         height_ratio = max(0.0, float(y2 - y1)) / float(frame_height)
         return det.confidence >= self.fast_confirm_confidence and height_ratio >= self.fast_confirm_height_ratio
 
-    @staticmethod
-    def _visible(tracks: list[Track]) -> list[Track]:
-        return [track for track in tracks if track.confirmed]
+    def _emittable(self) -> list[Track]:
+        """Live tracks that should produce risk this frame.
+
+        A confirmed track emits while actively detected (misses == 0) and for a
+        short coast window after a miss (misses <= coast_limit), using its last
+        bbox. Tracks deeper in a miss streak stay live for re-matching but go
+        silent. Applied identically on detection and propagate frames so a
+        threat never flickers between the two.
+        """
+
+        return [
+            track
+            for track in self._tracks.values()
+            if track.confirmed and track.misses <= self.coast_limit
+        ]
 
     def _ensure_display_id(self, track: Track) -> None:
         if track.display_id is not None:
@@ -269,6 +325,51 @@ class IoUTracker:
             used_dets.add(det_idx)
 
         unmatched_dets = [i for i in unmatched_dets if i not in used_dets]
+
+        # Re-associate surviving unmatched detections with recently-lost tracks
+        # before minting new IDs, so a short occlusion/detection gap does not
+        # relabel the same physical object (e.g. #1 -> #7).
+        self._expire_lost_tracks(timestamp_sec)
+        revived_ids: set[int] = set()
+        if self._lost_tracks and unmatched_dets:
+            reassoc_candidates: list[tuple[float, int, int]] = []
+            for det_idx in unmatched_dets:
+                det = detections[det_idx]
+                for lost_id, lost in self._lost_tracks.items():
+                    if lost.class_name != det.class_name:
+                        continue
+                    score = self._reassoc_score(lost, det, timestamp_sec=timestamp_sec)
+                    if score is not None:
+                        reassoc_candidates.append((score, det_idx, lost_id))
+            reassoc_candidates.sort(reverse=True)
+            used_reassoc_dets: set[int] = set()
+            for _, det_idx, lost_id in reassoc_candidates:
+                if det_idx in used_reassoc_dets or lost_id in revived_ids:
+                    continue
+                track = self._lost_tracks.pop(lost_id, None)
+                if track is None:
+                    continue
+                det = detections[det_idx]
+                track.history.append(
+                    TrackSample(
+                        frame_index=track.frame_index,
+                        timestamp_sec=track.timestamp_sec,
+                        bbox=track.bbox,
+                    )
+                )
+                track.bbox = det.bbox
+                track.confidence = det.confidence
+                track.frame_index = frame_index
+                track.timestamp_sec = timestamp_sec
+                track.age += 1
+                track.hits += 1
+                track.misses = 0
+                track.confirmed = True  # only confirmed tracks enter the pool
+                self._tracks[lost_id] = track
+                revived_ids.add(lost_id)
+                used_reassoc_dets.add(det_idx)
+            unmatched_dets = [i for i in unmatched_dets if i not in used_reassoc_dets]
+
         new_track_ids: set[int] = set()
         for det_idx in unmatched_dets:
             det = detections[det_idx]
@@ -290,28 +391,68 @@ class IoUTracker:
             self._tracks[track_id] = track
             new_track_ids.add(track_id)
 
-        # Age out tracks that were not updated this frame. Risk is only
-        # emitted for tracks that received a detection in this frame.
-        updated_ids = matched_track_ids | new_track_ids
+        # Age out tracks that were not updated this frame. Confirmed tracks that
+        # exhaust ``max_misses`` are demoted to the lost pool (for re-id) rather
+        # than deleted; unconfirmed tracks are dropped outright.
+        updated_ids = matched_track_ids | new_track_ids | revived_ids
         for track_id, track in list(self._tracks.items()):
             if track_id in updated_ids:
                 continue
             track.misses += 1
             if track.misses > self.max_misses:
                 del self._tracks[track_id]
+                if track.confirmed:
+                    self._lost_tracks[track_id] = track
 
-        return self._visible([self._tracks[tid] for tid in updated_ids])
+        # Emit freshly-updated tracks plus confirmed coasting tracks (missed
+        # this frame but recently seen) so a one-frame detection miss does not
+        # make a live threat vanish from the active set on a detection frame.
+        return self._emittable()
+
+    def _reassoc_score(
+        self,
+        lost: Track,
+        det: Detection,
+        *,
+        timestamp_sec: float,
+    ) -> float | None:
+        """Score a lost track against a fresh detection for re-identification.
+
+        IoU is ~0 across a multi-frame gap, so the signal is constant-velocity
+        predicted-center proximity plus scale compatibility. Returns ``None``
+        when the pair is incompatible; otherwise a higher score is a better
+        match (negated center distance).
+        """
+
+        predicted = _predict_bbox_full(lost, timestamp_sec)
+        if not _scale_compatible(predicted, det.bbox):
+            return None
+        center_ratio = _center_distance_ratio(predicted, det.bbox)
+        gap = max(0.0, timestamp_sec - lost.timestamp_sec)
+        threshold = self.center_distance_threshold + (
+            min(gap, self.max_lost_sec) * self.reassoc_gap_gain
+        )
+        if center_ratio > threshold:
+            return None
+        return -center_ratio
+
+    def _expire_lost_tracks(self, timestamp_sec: float) -> None:
+        for lost_id in list(self._lost_tracks.keys()):
+            if (timestamp_sec - self._lost_tracks[lost_id].timestamp_sec) > self.max_lost_sec:
+                del self._lost_tracks[lost_id]
 
     def propagate(self) -> list[Track]:
-        """Return all surviving tracks without consuming a detection frame.
+        """Return emittable tracks without consuming a detection frame.
 
-        Called on frames where YOLO is intentionally skipped. Tracks are
-        returned as-is so risk estimation continues; miss counters are not
-        incremented because we chose not to look, not because objects vanished.
+        Called on frames where YOLO is intentionally skipped. Miss counters are
+        not incremented (we chose not to look), and emission uses the same coast
+        gate as ``update`` so a track does not flicker between detection and
+        propagate frames.
         """
-        return self._visible(list(self._tracks.values()))
+        return self._emittable()
 
     def reset(self) -> None:
         self._tracks.clear()
+        self._lost_tracks.clear()
         self._next_id = 1
         self._next_display_id = 1

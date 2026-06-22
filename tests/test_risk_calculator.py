@@ -612,7 +612,13 @@ class TestIoUTracker:
             timestamp_sec=0.1,
             frame_shape=(200, 300, 3),
         )
-        assert tracker.update([], frame_index=2, timestamp_sec=0.2, frame_shape=(200, 300, 3)) == []
+        # A confirmed track coasts through a short detection miss: it keeps
+        # emitting (with its last bbox) so a live threat does not vanish from
+        # the active set on a single missed detection frame.
+        coasting = tracker.update([], frame_index=2, timestamp_sec=0.2, frame_shape=(200, 300, 3))
+        assert len(coasting) == 1
+        assert coasting[0].track_id == 1
+        assert coasting[0].misses == 1
 
         tracks = tracker.update(
             [Detection(bbox=(75, 0, 175, 100), class_name="car", confidence=0.9)],

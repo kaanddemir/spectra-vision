@@ -958,6 +958,13 @@ _INTENT_HORIZON_SEC = 1.5
 
 
 def _primary_eligible(event: RiskEvent) -> bool:
+    # A genuinely high-risk object always drives the primary/banner, even when
+    # its bbox bottom-center sits more than a lane away. A car cutting across in
+    # front at low TTC is dangerous regardless of where it lands laterally; the
+    # intent gate below is only meant to keep *calm* (SAFE) off-corridor traffic
+    # from winning primary selection, never to suppress a real threat.
+    if event.state in ("CAUTION", "DANGER"):
+        return True
     pos = float(event.lane_position)
     if abs(pos) <= 1.0:
         return True
