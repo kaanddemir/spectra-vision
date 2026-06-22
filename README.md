@@ -109,7 +109,7 @@ spectra/
 
 5. `spectra/vision/depth.py`
    - Coordinates per-frame nearness estimation
-   - Uses required Depth Anything V2 ONNX for per-frame nearness maps
+   - Uses required Depth Anything V2 Metric VKITTI ONNX for estimated metric distance maps
 
 6. `spectra/analysis/risk.py`
     - Bundles depth, flow, lane geometry, and track history into spatial fields
@@ -133,7 +133,7 @@ Spectra is designed to find risk-relevant objects in forward-facing driving foot
 - Object detection: YOLO detects road participants such as cars, people, bicycles, motorcycles, buses, and trucks.
 - Tracking: The same object is linked across frames with IoU-based tracking.
 - Road geometry: The road/lane corridor and vanishing point are estimated.
-- Depth: Depth Anything V2 ONNX produces a relative nearness map.
+- Depth: Depth Anything V2 Metric VKITTI ONNX estimates metric distance maps in meters.
 - Motion: OpenCV DIS produces dense optical flow, with ego-motion compensation.
 - Appearance cues: heuristic brake-light detection (early deceleration warning) and traffic-light colour classification (advisory).
 - Risk: TTC, lane relationship (with a collision-cone distance reliability term), nearness, closing speed, brake-light, and confidence are fused into a risk state.
@@ -164,7 +164,7 @@ Before analysis starts, `_ensure_required_models()` in `spectra/analysis/video.p
 
 Required local model files:
 
-- `models/depth_anything_v2_small.onnx`
+- `models/depth_anything_v2_metric_vkitti_vits.onnx`
 - `models/ufld_v2_culane_r18.onnx`
 - `models/yolov8n.pt`
 
@@ -181,7 +181,7 @@ For each frame:
 3. UFLDv2 estimates the ego-lane corridor on the configured lane interval; cached lane geometry is reused between runs and smoothed with Kalman coasting.
 4. DIS optical flow is computed on the configured flow interval; skipped frames reuse the previous flow.
 5. A cheap motion score decides whether depth should be refreshed early.
-6. Depth Anything V2 estimates a relative nearness map when scheduled or motion-triggered.
+6. Depth Anything V2 Metric VKITTI estimates metric depth when scheduled or motion-triggered.
 7. YOLO detects road participants on the configured detection interval.
 8. Detections are filtered by ego-lane relevance before tracking.
 9. The IoU tracker links detections to existing tracks or propagates tracks on skipped detection frames.
@@ -267,16 +267,15 @@ This signal is used both for TTC estimation and the frontend motion visualizatio
 
 Depth estimation is implemented in `spectra/vision/depth.py`.
 
-Depth Anything V2 produces relative depth. Spectra does not interpret it as metric distance. Instead, it converts model output into a normalized `near_map`.
+Depth Anything V2 Metric VKITTI produces estimated metric depth in meters (`depth_m`, capped at 80m). Spectra derives a normalized `near_map` from that metric map for compatibility with existing filtering and scoring code.
 
-Nearness calibration:
+Metric depth usage:
 
-- Normalize model output to `[0, 1]`.
-- Compute a median baseline per image row.
-- Treat row-relative excess above that baseline as obstacle evidence.
-- Combine absolute nearness and row-relative excess.
+- Object distance is read from the lower-center portion of each bbox using a 25th-percentile distance sample.
+- Depth TTC uses metric closing speed: `(previous_distance_m - current_distance_m) / dt`.
+- The UI exposes estimated object distance in meters while preserving normalized proximity bars.
 
-This reduces false risk from normal road perspective. The bottom of the road naturally appears closer; Spectra gives stronger weight to regions that stand out relative to nearby pixels on the same row.
+Metric monocular depth is still an estimate, not a calibrated sensor measurement, so expansion and optical-flow TTC remain part of the final fusion.
 
 Depth is not recomputed every frame. In `spectra/analysis/video.py`, depth refresh happens when:
 
@@ -487,7 +486,7 @@ For each frame, `spectra/analysis/video.py` produces:
 - `frames`: frame-level risk history for the timeline
 - `events`: saved high-risk moments after deduplication and top-N trimming
 - `peak_event`: highest-risk saved event in the analysis
-- `objects`: per-frame object metrics, including TTC, lane, risk score, proximity, approach, crossing, and confidence
+- `objects`: per-frame object metrics, including TTC, estimated distance, metric closing speed, lane, risk score, proximity, approach, crossing, and confidence
 - `images`: shared image payloads referenced by saved events
 
 Saved events are deduplicated within a 1-second window. If a stronger event appears in the same window, it replaces the previous saved event.

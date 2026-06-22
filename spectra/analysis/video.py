@@ -265,7 +265,8 @@ def _ensure_required_models() -> None:
 
     if not is_depth_available():
         raise RuntimeError(
-            "Depth Anything ONNX model missing at models/depth_anything_v2_small.onnx"
+            "Depth Anything metric ONNX model missing at "
+            "models/depth_anything_v2_metric_vkitti_vits.onnx"
         )
     if not is_yolo_available():
         raise RuntimeError(
@@ -321,6 +322,9 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
         "lanePosition": event.lane_position,
         "confidence": round(event.confidence, 4),
         "brakeScore": event.brake_score,
+        "distanceM": event.distance_m,
+        "closingMps": event.closing_mps,
+        "depthTtcSec": event.depth_ttc_sec,
     }
 
 

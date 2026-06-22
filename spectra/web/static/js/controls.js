@@ -155,6 +155,9 @@ export function initializeSpectra() {
       ttcSec: primary?.ttcSec ?? null,
       nearScore: primary?.nearScore ?? null,
       closingSpeed: primary?.closingSpeed ?? null,
+      distanceM: primary?.distanceM ?? null,
+      closingMps: primary?.closingMps ?? null,
+      depthTtcSec: primary?.depthTtcSec ?? null,
       crossingRisk: primary?.crossingRisk ?? null,
       lanePosition: primary?.lanePosition ?? null,
       confidencePct: primary ? (num(primary.confidence, 0) * 100) : null,
@@ -517,6 +520,10 @@ export function initializeSpectra() {
     const n = num(value, null);
     return n === null ? MISSING : `${Math.round(clamp(n, 0, 100))}%`;
   }
+  const distanceLabel = (value) => {
+    const n = num(value, null);
+    return n === null ? MISSING : `${n.toFixed(n < 10 ? 1 : 0)}m`;
+  };
 
   function objectTtcLabel(value) {
     const n = num(value, null);
@@ -668,6 +675,8 @@ export function initializeSpectra() {
     }
 
     setSignalBar("near", activeObject?.nearScore);
+    const distanceValue = byId("signal-near-value");
+    if (distanceValue) distanceValue.textContent = distanceLabel(activeObject?.distanceM);
     setSignalBar("closing", activeObject?.closingSpeed);
     setSignalBar("crossing", activeObject?.crossingRisk);
     const conf = num(activeObject?.confidencePct, null);
@@ -767,13 +776,17 @@ export function initializeSpectra() {
               <span class="lbl">LANE</span>
               <span class="val">${laneWithPosition(ev.lane, ev.lanePosition)}</span>
             </div>
+            <div class="box-item">
+              <span class="lbl">DIST</span>
+              <span class="val">${distanceLabel(ev.distanceM)}</span>
+            </div>
           </div>
 
           <div class="card-bars">
             <div class="bar-row bar-proximity">
               <span class="lbl">Proximity</span>
               <div class="bar-outer"><div class="bar-inner" style="width: ${(nearVal || 0) * 100}%"></div></div>
-              <span class="val">${nearVal !== null ? (nearVal * 100).toFixed(0) + '%' : '—'}</span>
+              <span class="val">${distanceLabel(ev.distanceM)}</span>
             </div>
             <div class="bar-row bar-approach">
               <span class="lbl">Approach</span>

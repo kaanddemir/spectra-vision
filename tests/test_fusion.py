@@ -41,7 +41,9 @@ def make_flow(height=200, width=300, magnitude=0.0, divergence=0.0):
 
 def make_depth(height=200, width=300, near=0.4):
     near_map = np.full((height, width), near, dtype=np.float32)
+    depth_m = np.full((height, width), 80.0 * (1.0 - near), dtype=np.float32)
     return DepthResult(
+        depth_m=depth_m,
         near_map=near_map,
         depth_map=(near_map * 255).astype(np.uint8),
     )

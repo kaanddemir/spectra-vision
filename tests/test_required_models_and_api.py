@@ -46,6 +46,9 @@ def test_serialized_result_uses_v2_schema():
         "crossingRisk": 0.2,
         "lanePosition": 0.0,
         "confidence": 0.67,
+        "distanceM": 18.5,
+        "closingMps": 2.4,
+        "depthTtcSec": 7.7,
     }]
     event = {
         "frame_index": 1,
@@ -117,6 +120,9 @@ def test_serialized_result_uses_v2_schema():
     obj = peak["objects"][0]
     assert obj["rawRiskState"] == "CAUTION"
     assert obj["confidence"] == 0.67
+    assert obj["distanceM"] == 18.5
+    assert obj["closingMps"] == 2.4
+    assert obj["depthTtcSec"] == 7.7
     assert "riskState" not in obj or obj["riskState"] == obj["rawRiskState"]  # objects[].riskState removed
     assert "confidencePct" not in obj
 

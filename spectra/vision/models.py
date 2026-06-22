@@ -16,10 +16,11 @@ import numpy as np
 
 
 _MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
-_DEFAULT_DEPTH_MODEL_PATH = _MODELS_DIR / "depth_anything_v2_small.onnx"
+_DEFAULT_DEPTH_MODEL_PATH = _MODELS_DIR / "depth_anything_v2_metric_vkitti_vits.onnx"
 _DEPTH_MODEL_PATH = Path(os.environ.get("SPECTRA_DEPTH_MODEL", str(_DEFAULT_DEPTH_MODEL_PATH)))
 
-_INPUT_SIZE = int(os.environ.get("SPECTRA_DEPTH_INPUT", "256"))
+_INPUT_SIZE = int(os.environ.get("SPECTRA_DEPTH_INPUT", "518"))
+_METRIC_MAX_DEPTH_M = float(os.environ.get("SPECTRA_DEPTH_MAX_M", "80.0"))
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -33,8 +34,8 @@ _depth_load_failed = False
 _depth_load_error: str | None = None
 
 _DEPTH_UNAVAILABLE_MESSAGE = (
-    "Depth Anything ONNX model unavailable. Install onnxruntime and ensure "
-    "models/depth_anything_v2_small.onnx exists."
+    "Depth Anything metric ONNX model unavailable. Install onnxruntime and ensure "
+    "models/depth_anything_v2_metric_vkitti_vits.onnx exists."
 )
 
 
@@ -101,7 +102,7 @@ class DepthAnythingONNX:
         self.input_name = self.session.get_inputs()[0].name
 
     def predict(self, rgb: np.ndarray) -> np.ndarray:
-        """Return a near-map (float32, [0, 1], larger = closer)."""
+        """Return a metric depth map in meters (float32, smaller = closer)."""
 
         height, width = rgb.shape[:2]
         resized = cv2.resize(rgb, (_INPUT_SIZE, _INPUT_SIZE), interpolation=cv2.INTER_LINEAR)
@@ -117,11 +118,8 @@ class DepthAnythingONNX:
             depth = depth[0]
 
         depth = cv2.resize(depth.astype(np.float32), (width, height), interpolation=cv2.INTER_LINEAR)
-        d_min = float(depth.min())
-        d_max = float(depth.max())
-        if d_max - d_min < 1e-6:
-            return np.zeros_like(depth, dtype=np.float32)
-        return (depth - d_min) / (d_max - d_min)
+        depth = np.nan_to_num(depth, nan=_METRIC_MAX_DEPTH_M, posinf=_METRIC_MAX_DEPTH_M, neginf=0.0)
+        return np.clip(depth, 0.0, _METRIC_MAX_DEPTH_M).astype(np.float32)
 
 
 def is_depth_available() -> bool:
@@ -156,7 +154,6 @@ def get_depth_model() -> DepthAnythingONNX:
             _depth_model_singleton = DepthAnythingONNX(_DEPTH_MODEL_PATH)
         except Exception as exc:
             _depth_load_failed = True
-            _depth_load_error = f"Depth Anything ONNX model failed to load: {exc}"
+            _depth_load_error = f"Depth Anything metric ONNX model failed to load: {exc}"
             raise RuntimeError(_depth_load_error) from exc
         return _depth_model_singleton
-

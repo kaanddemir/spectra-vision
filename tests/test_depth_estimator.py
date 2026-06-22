@@ -38,7 +38,7 @@ class TestDepthEstimator:
         class FakeDepthModel:
             def predict(self, rgb):
                 height, width = rgb.shape[:2]
-                values = np.linspace(0.0, 1.0, height * width, dtype=np.float32)
+                values = np.linspace(5.0, 65.0, height * width, dtype=np.float32)
                 return values.reshape(height, width)
 
         monkeypatch.setattr(models, "get_depth_model", lambda: FakeDepthModel())
@@ -50,18 +50,21 @@ class TestDepthEstimator:
         result = estimate_frame_depth(frame)
 
         assert isinstance(result, DepthResult)
+        assert result.depth_m.shape == frame.gray.shape
         assert result.depth_map.shape == frame.gray.shape
         assert result.near_map.shape == frame.gray.shape
+        assert result.depth_m.dtype == np.float32
         assert result.depth_map.dtype == np.uint8
         assert result.near_map.dtype == np.float32
+        assert 5.0 <= float(result.depth_m.min()) <= float(result.depth_m.max()) <= 65.0
         assert 0.0 <= float(result.near_map.min()) <= float(result.near_map.max()) <= 1.0
 
     def test_estimate_frame_depth_errors_when_onnx_missing(self, monkeypatch):
         def raise_missing():
-            raise RuntimeError("Depth Anything ONNX model unavailable")
+            raise RuntimeError("Depth Anything metric ONNX model unavailable")
 
         monkeypatch.setattr(models, "get_depth_model", raise_missing)
         frame = preprocess_frame(np.zeros((32, 48, 3), dtype=np.uint8), max_side=48)
 
-        with pytest.raises(RuntimeError, match="Depth Anything ONNX model unavailable"):
+        with pytest.raises(RuntimeError, match="Depth Anything metric ONNX model unavailable"):
             estimate_frame_depth(frame)

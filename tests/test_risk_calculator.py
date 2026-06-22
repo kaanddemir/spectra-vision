@@ -10,14 +10,17 @@ from spectra.analysis.risk import (
     TtcComponent,
     calculate_track_risk,
     classify_state,
+    distance_m_for_bbox,
     direction_from_lateral,
     expansion_rate_from_track,
     fuse_ttc,
     is_imminent_danger,
     lane_crossing_risk,
     lane_lateral_velocity,
+    near_score_from_distance,
     score_event,
     stabilized_event_state,
+    ttc_from_depth_delta,
     ttc_from_expansion,
     ttc_from_flow,
 )
@@ -67,6 +70,10 @@ def make_event(state="SAFE", ttc_sec=None, near_score=0.1, closing_speed=0.05, c
         object_id=1,
         crossing_risk=crossing,
     )
+
+
+def make_depth_m(height=200, width=300, distance=30.0):
+    return np.full((height, width), distance, dtype=np.float32)
 
 
 def make_track(track_id, bbox, t, history=None):
@@ -386,6 +393,52 @@ class TestClassifyState:
         assert state != "DANGER"
 
 
+class TestMetricDepth:
+    def test_distance_m_for_bbox_uses_lower_center_percentile(self):
+        depth_m = np.full((100, 100), 40.0, dtype=np.float32)
+        depth_m[50:90, 35:65] = 12.0
+        depth_m[0:40, :] = 3.0
+        assert distance_m_for_bbox(depth_m, (20, 20, 80, 90)) == pytest.approx(12.0)
+
+    def test_near_score_from_metric_distance_thresholds(self):
+        assert near_score_from_distance(8.0) == pytest.approx(1.0)
+        assert near_score_from_distance(60.0) == pytest.approx(0.0)
+        assert near_score_from_distance(34.0) == pytest.approx(0.5)
+        assert near_score_from_distance(None) == pytest.approx(0.0)
+
+    def test_metric_depth_ttc_uses_closing_distance_rate(self):
+        history = {1: (0.0, 30.0)}
+        depth_m = make_depth_m(distance=20.0)
+        component, distance_m, closing_mps = ttc_from_depth_delta(
+            1,
+            (20, 20, 80, 90),
+            depth_m,
+            2.0,
+            history,
+            update_history=True,
+        )
+
+        assert distance_m == pytest.approx(20.0)
+        assert closing_mps == pytest.approx(5.0)
+        assert component.value == pytest.approx(4.0)
+        assert component.confidence > 0.0
+
+    def test_metric_depth_ttc_ignores_static_or_receding_distance(self):
+        history = {1: (0.0, 20.0)}
+        component, distance_m, closing_mps = ttc_from_depth_delta(
+            1,
+            (20, 20, 80, 90),
+            make_depth_m(distance=22.0),
+            1.0,
+            history,
+            update_history=True,
+        )
+
+        assert distance_m == pytest.approx(22.0)
+        assert closing_mps == pytest.approx(-2.0)
+        assert component.value is None
+
+
 class TestCalculateTrackRisk:
     def test_strong_expansion_in_corridor_danger(self):
         height, width = 200, 300
@@ -401,6 +454,7 @@ class TestCalculateTrackRisk:
 
         event = calculate_track_risk(
             track=track,
+            depth_m=make_depth_m(distance=6.0),
             near_map=near_map,
             flow=flow,
             magnitude_norm=magnitude,
@@ -431,6 +485,7 @@ class TestCalculateTrackRisk:
 
         event = calculate_track_risk(
             track=track,
+            depth_m=make_depth_m(distance=40.0),
             near_map=near_map,
             flow=flow,
             magnitude_norm=magnitude,
@@ -456,6 +511,7 @@ class TestCalculateTrackRisk:
 
         event = calculate_track_risk(
             track=track,
+            depth_m=make_depth_m(distance=25.0),
             near_map=near_map,
             flow=flow,
             magnitude_norm=magnitude,
@@ -480,6 +536,7 @@ class TestCalculateTrackRisk:
 
         event = calculate_track_risk(
             track=track,
+            depth_m=make_depth_m(distance=50.0),
             near_map=near_map,
             flow=flow,
             magnitude_norm=magnitude,
@@ -504,6 +561,7 @@ class TestCalculateTrackRisk:
 
         event = calculate_track_risk(
             track=track,
+            depth_m=make_depth_m(distance=35.0),
             near_map=near_map,
             flow=flow,
             magnitude_norm=magnitude,

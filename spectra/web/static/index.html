@@ -380,7 +380,7 @@
                       <span class="signal-label">Proximity 
                         <span class="info-tip">
                           <svg><use href="#icon-info"></use></svg>
-                          <div class="tooltip-content">Distance between the vehicle and the object, calculated using depth estimation.</div>
+                          <div class="tooltip-content">Estimated metric distance between the camera and object, calculated from Depth Anything V2 Metric.</div>
                         </span>
                       </span>
                       <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
@@ -747,11 +747,11 @@
                 <div class="step-num">03</div>
               </div>
               <h5>Depth (Spatial)</h5>
-              <p>Depth Anything V2 produces relative nearness maps. CoreML acceleration is used on Apple Silicon for
-                high FPS.</p>
+              <p>Depth Anything V2 Metric VKITTI estimates object distance in meters. A normalized nearness map is
+                derived only for compatibility with filtering and scoring.</p>
               <div class="step-tags">
-                <span>ONNX</span>
-                <span>CoreML</span>
+                <span>Metric Depth</span>
+                <span>80m Range</span>
               </div>
             </div>
 
@@ -891,7 +891,7 @@
                 <tr>
                   <td><span class="module-name">Depth Estimation</span></td>
                   <td><span class="freq-badge freq-slow">Default: every 10th frame</span></td>
-                  <td class="skip-cell">Previous depth map retained</td>
+                  <td class="skip-cell">Previous metric map retained</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">Risk Calculation</span></td>

@@ -50,6 +50,8 @@ def test_analysis_settings_exposes_supported_api_controls():
         'data-param="detect_every"',
         'data-param="lane_every"',
         'data-param="flow_every"',
+        "Depth Anything V2 Metric",
+        "Estimated metric distance",
     ):
         assert visible_control in index
 

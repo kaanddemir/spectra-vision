@@ -58,6 +58,9 @@ class RiskEvent:
     lane_position: float = 0.0
     ttc_components: tuple[TtcComponent, ...] = ()
     brake_score: float = 0.0
+    distance_m: float | None = None
+    closing_mps: float | None = None
+    depth_ttc_sec: float | None = None
 
 
 @dataclass(frozen=True)
@@ -225,58 +228,46 @@ def ttc_from_flow(
 def ttc_from_depth_delta(
     track_id: int,
     bbox: tuple[int, int, int, int],
-    near_map: np.ndarray,
+    depth_m: np.ndarray,
     timestamp_sec: float,
     history: dict[int, tuple[float, float]],
     *,
     update_history: bool,
-) -> TtcComponent:
-    """TTC from change in median nearness inside the bbox.
+) -> tuple[TtcComponent, float | None, float | None]:
+    """TTC from change in metric distance inside the bbox.
 
-    history is the per-track ``(timestamp, depth)`` map maintained by
+    History is the per-track ``(timestamp, distance_m)`` map maintained by
     :class:`DepthDeltaSmoother`. Stale depth frames intentionally return an
     empty component without mutating history.
     """
 
+    distance_now = distance_m_for_bbox(depth_m, bbox)
     if not update_history:
-        return TtcComponent("depth", None, 0.0)
-
-    h_full, w_full = near_map.shape
-    x1, y1, x2, y2 = bbox
-    x1 = max(0, min(w_full, x1))
-    x2 = max(0, min(w_full, x2))
-    y1 = max(0, min(h_full, y1))
-    y2 = max(0, min(h_full, y2))
-    if x2 <= x1 or y2 <= y1:
-        return TtcComponent("depth", None, 0.0)
-
-    crop = near_map[y1:y2, x1:x2]
-    if crop.size == 0:
-        return TtcComponent("depth", None, 0.0)
-    near_now = float(np.clip(np.median(crop), 0.0, 1.0))
+        return TtcComponent("depth", None, 0.0), distance_now, None
+    if distance_now is None:
+        return TtcComponent("depth", None, 0.0), None, None
 
     prev = history.get(track_id)
-    history[track_id] = (timestamp_sec, near_now)
+    history[track_id] = (timestamp_sec, distance_now)
     if prev is None:
-        return TtcComponent("depth", None, 0.0)
-    prev_t, prev_near = prev
+        return TtcComponent("depth", None, 0.0), distance_now, None
+    prev_t, prev_distance = prev
     dt = float(timestamp_sec - prev_t)
     if dt <= 0.0:
-        return TtcComponent("depth", None, 0.0)
+        return TtcComponent("depth", None, 0.0), distance_now, None
 
-    near_rate = (near_now - prev_near) / dt
-    if near_rate <= 0.005:
-        return TtcComponent("depth", None, 0.0)
+    closing_mps = (prev_distance - distance_now) / dt
+    if closing_mps <= 0.30:
+        return TtcComponent("depth", None, 0.0), distance_now, closing_mps
 
-    distance_proxy = max(0.05, 1.0 - near_now)
-    ttc_sec = distance_proxy / near_rate
+    ttc_sec = distance_now / closing_mps
     if ttc_sec < _TTC_FLOOR_SEC:
         ttc_sec = _TTC_FLOOR_SEC
     if ttc_sec > _TTC_MAX_REPORTED_SEC:
-        return TtcComponent("depth", None, 0.0)
+        return TtcComponent("depth", None, 0.0), distance_now, closing_mps
 
-    confidence = float(np.clip(near_rate / 0.20, 0.0, 1.0))
-    return TtcComponent("depth", round(float(ttc_sec), 2), confidence)
+    confidence = float(np.clip((closing_mps - 0.30) / 8.0, 0.0, 1.0))
+    return TtcComponent("depth", round(float(ttc_sec), 2), confidence), distance_now, closing_mps
 
 
 # ── Weighted-median fusion ───────────────────────────────────────────────────
@@ -456,7 +447,7 @@ class ExpansionSmoother:
 
 
 class DepthDeltaSmoother:
-    """Per-track previous (timestamp, near_score) entries for depth-delta TTC."""
+    """Per-track previous (timestamp, distance_m) entries for depth-delta TTC."""
 
     def __init__(self) -> None:
         self._state: dict[int, tuple[float, float]] = {}
@@ -593,19 +584,44 @@ def _risk_reason(state: str, ttc_sec: Optional[float], lane_pos: float) -> str:
     return "no immediate closing risk"
 
 
-def _depth_score_for_bbox(near_map: np.ndarray, bbox: tuple[int, int, int, int]) -> float:
-    height, width = near_map.shape
+def distance_m_for_bbox(depth_m: np.ndarray, bbox: tuple[int, int, int, int]) -> float | None:
+    """Robust object distance from the bbox lower-center crop, in meters."""
+
+    height, width = depth_m.shape
     x1, y1, x2, y2 = bbox
     x1 = max(0, min(width, x1))
     x2 = max(0, min(width, x2))
     y1 = max(0, min(height, y1))
     y2 = max(0, min(height, y2))
     if x2 <= x1 or y2 <= y1:
-        return 0.0
-    crop = near_map[y1:y2, x1:x2]
+        return None
+
+    bbox_w = x2 - x1
+    bbox_h = y2 - y1
+    cx1 = x1 + int(round(bbox_w * 0.15))
+    cx2 = x2 - int(round(bbox_w * 0.15))
+    cy1 = y1 + int(round(bbox_h * 0.30))
+    cy2 = y2
+    if cx2 <= cx1 or cy2 <= cy1:
+        return None
+
+    crop = depth_m[cy1:cy2, cx1:cx2]
     if crop.size == 0:
+        return None
+    valid = crop[np.isfinite(crop) & (crop > 0.0)]
+    if valid.size == 0:
+        return None
+    return round(float(np.percentile(valid, 25)), 2)
+
+
+def near_score_from_distance(distance_m: float | None) -> float:
+    if distance_m is None:
         return 0.0
-    return float(np.clip(np.median(crop), 0.0, 1.0))
+    if distance_m <= 8.0:
+        return 1.0
+    if distance_m >= 60.0:
+        return 0.0
+    return float(np.clip((60.0 - distance_m) / 52.0, 0.0, 1.0))
 
 
 def _flow_magnitude_for_bbox(magnitude_norm: np.ndarray, bbox: tuple[int, int, int, int]) -> float:
@@ -629,6 +645,7 @@ def _flow_magnitude_for_bbox(magnitude_norm: np.ndarray, bbox: tuple[int, int, i
 def calculate_track_risk(
     *,
     track: Track,
+    depth_m: np.ndarray,
     near_map: np.ndarray,
     flow: np.ndarray,
     magnitude_norm: np.ndarray,
@@ -652,21 +669,24 @@ def calculate_track_risk(
 
     bbox = track.bbox
 
-    near_score = _depth_score_for_bbox(near_map, bbox)
+    distance_m = distance_m_for_bbox(depth_m, bbox)
+    near_score = near_score_from_distance(distance_m)
     velocity_magnitude = _flow_magnitude_for_bbox(magnitude_norm, bbox)
     pos = lane_position(bbox, lane)
 
     # Three independent TTC estimators.
     expansion_component = ttc_from_expansion(expansion_rate, history_age=len(track.history))
     flow_component = ttc_from_flow(bbox, flow, lane.vanishing_point, flow_dt_sec)
-    depth_component = ttc_from_depth_delta(
+    depth_component, depth_distance_m, depth_closing_mps = ttc_from_depth_delta(
         track.track_id,
         bbox,
-        near_map,
+        depth_m,
         track.timestamp_sec,
         depth_history,
         update_history=depth_is_fresh,
     )
+    if distance_m is None:
+        distance_m = depth_distance_m
 
     fused_ttc, components = fuse_ttc([expansion_component, flow_component, depth_component])
     crossing = lane_crossing_risk(track, lane, fused_ttc)
@@ -753,6 +773,9 @@ def calculate_track_risk(
         lane_position=round(float(pos), 3),
         ttc_components=tuple(components),
         brake_score=round(float(brake), 3),
+        distance_m=None if distance_m is None else round(float(distance_m), 2),
+        closing_mps=None if depth_closing_mps is None else round(float(depth_closing_mps), 2),
+        depth_ttc_sec=depth_component.value,
     )
 
 
@@ -895,10 +918,10 @@ def build_object_events(
                 fields.lane.vanishing_point,
                 fields.flow_dt_sec,
             )
-            depth_component = ttc_from_depth_delta(
+            depth_component, _distance_m, _closing_mps = ttc_from_depth_delta(
                 track.track_id,
                 track.bbox,
-                fields.depth.near_map,
+                fields.depth.depth_m,
                 track.timestamp_sec,
                 depth_smoother.state,
                 update_history=False,
@@ -912,6 +935,7 @@ def build_object_events(
 
         event = calculate_track_risk(
             track=track,
+            depth_m=fields.depth.depth_m,
             near_map=fields.depth.near_map,
             flow=fields.flow.flow,
             magnitude_norm=fields.flow.magnitude_norm,

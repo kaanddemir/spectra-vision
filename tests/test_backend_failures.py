@@ -71,7 +71,7 @@ def test_get_depth_model_raises_and_caches_load_failure(monkeypatch):
     monkeypatch.setattr(models, "is_depth_available", lambda: True)
     monkeypatch.setattr(models, "DepthAnythingONNX", BrokenDepthModel)
 
-    with pytest.raises(RuntimeError, match="Depth Anything ONNX model failed to load"):
+    with pytest.raises(RuntimeError, match="Depth Anything metric ONNX model failed to load"):
         models.get_depth_model()
     with pytest.raises(RuntimeError, match="bad depth graph"):
         models.get_depth_model()
@@ -164,7 +164,7 @@ def test_vehicle_detection_above_class_confidence_gate_is_kept():
         _FakeBoxes(
             xyxy=[[4, 5, 24, 25]],
             cls=[7],
-            conf=[0.45],
+            conf=[0.55],
         )
     )
     detector._device = "cpu"
@@ -173,7 +173,7 @@ def test_vehicle_detection_above_class_confidence_gate_is_kept():
 
     assert len(detections) == 1
     assert detections[0].class_name == "truck"
-    assert detections[0].confidence == pytest.approx(0.45)
+    assert detections[0].confidence == pytest.approx(0.55)
 
 
 def test_yolo_unloaded_detector_raises_runtime_error():
