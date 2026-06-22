@@ -140,8 +140,8 @@
     <input type="hidden" name="resize_max_side" value="512">
     <input type="hidden" name="depth_every" value="10">
     <input type="hidden" name="adaptive_depth" value="1">
-    <input type="hidden" name="detect_every" value="3">
-    <input type="hidden" name="lane_every" value="5">
+    <input type="hidden" name="detect_every" value="1">
+    <input type="hidden" name="lane_every" value="1">
     <input type="hidden" name="flow_every" value="1">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
@@ -625,9 +625,9 @@
           <label class="drawer-row">
             <span>YOLO Detection</span>
             <div class="segmented-control" data-param="detect_every">
-              <button type="button" class="segmented-btn" data-value="1">1x</button>
+              <button type="button" class="segmented-btn active" data-value="1">1x</button>
               <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn active" data-value="3">3x</button>
+              <button type="button" class="segmented-btn" data-value="3">3x</button>
               <button type="button" class="segmented-btn" data-value="5">5x</button>
               <button type="button" class="segmented-btn" data-value="10">10x</button>
             </div>
@@ -635,10 +635,10 @@
           <label class="drawer-row">
             <span>Lane Detection</span>
             <div class="segmented-control" data-param="lane_every">
-              <button type="button" class="segmented-btn" data-value="1">1x</button>
+              <button type="button" class="segmented-btn active" data-value="1">1x</button>
               <button type="button" class="segmented-btn" data-value="2">2x</button>
               <button type="button" class="segmented-btn" data-value="3">3x</button>
-              <button type="button" class="segmented-btn active" data-value="5">5x</button>
+              <button type="button" class="segmented-btn" data-value="5">5x</button>
               <button type="button" class="segmented-btn" data-value="10">10x</button>
             </div>
           </label>
