@@ -331,44 +331,70 @@ class IoUTracker:
         # relabel the same physical object (e.g. #1 -> #7).
         self._expire_lost_tracks(timestamp_sec)
         revived_ids: set[int] = set()
-        if self._lost_tracks and unmatched_dets:
-            reassoc_candidates: list[tuple[float, int, int]] = []
-            for det_idx in unmatched_dets:
-                det = detections[det_idx]
-                for lost_id, lost in self._lost_tracks.items():
-                    if lost.class_name != det.class_name:
+        reassoc_updated_ids: set[int] = set()
+        if unmatched_dets:
+            # Loose second pass over leftover detections, before minting new IDs.
+            # The pool is confirmed tracks that did NOT match this frame —
+            # coasting live tracks (a YOLO miss or a corridor-filter drop froze
+            # their bbox) plus the lost pool. When such a track reappears at a
+            # jumped position the tight live matcher misses it, so without this
+            # it would spawn a fresh ID (e.g. truck #2 -> #4). The full-gap
+            # scorer reconnects the detection to the original ID instead.
+            pool: list[tuple[int, Track, bool]] = []  # (id, track, is_lost)
+            for tid, track in self._tracks.items():
+                if tid in matched_track_ids or not track.confirmed:
+                    continue
+                pool.append((tid, track, False))
+            for lid, lost in self._lost_tracks.items():
+                pool.append((lid, lost, True))
+
+            if pool:
+                is_lost_by_id = {tid: is_lost for tid, _t, is_lost in pool}
+                reassoc_candidates: list[tuple[float, int, int]] = []
+                for det_idx in unmatched_dets:
+                    det = detections[det_idx]
+                    for tid, track, _is_lost in pool:
+                        if track.class_name != det.class_name:
+                            continue
+                        score = self._reassoc_score(track, det, timestamp_sec=timestamp_sec)
+                        if score is not None:
+                            reassoc_candidates.append((score, det_idx, tid))
+                reassoc_candidates.sort(reverse=True)
+                used_reassoc_dets: set[int] = set()
+                assigned_ids: set[int] = set()
+                for _, det_idx, tid in reassoc_candidates:
+                    if det_idx in used_reassoc_dets or tid in assigned_ids:
                         continue
-                    score = self._reassoc_score(lost, det, timestamp_sec=timestamp_sec)
-                    if score is not None:
-                        reassoc_candidates.append((score, det_idx, lost_id))
-            reassoc_candidates.sort(reverse=True)
-            used_reassoc_dets: set[int] = set()
-            for _, det_idx, lost_id in reassoc_candidates:
-                if det_idx in used_reassoc_dets or lost_id in revived_ids:
-                    continue
-                track = self._lost_tracks.pop(lost_id, None)
-                if track is None:
-                    continue
-                det = detections[det_idx]
-                track.history.append(
-                    TrackSample(
-                        frame_index=track.frame_index,
-                        timestamp_sec=track.timestamp_sec,
-                        bbox=track.bbox,
+                    if is_lost_by_id[tid]:
+                        track = self._lost_tracks.pop(tid, None)
+                        if track is None:
+                            continue
+                        self._tracks[tid] = track
+                        revived_ids.add(tid)
+                    else:
+                        track = self._tracks.get(tid)
+                        if track is None:
+                            continue
+                        reassoc_updated_ids.add(tid)
+                    det = detections[det_idx]
+                    track.history.append(
+                        TrackSample(
+                            frame_index=track.frame_index,
+                            timestamp_sec=track.timestamp_sec,
+                            bbox=track.bbox,
+                        )
                     )
-                )
-                track.bbox = det.bbox
-                track.confidence = det.confidence
-                track.frame_index = frame_index
-                track.timestamp_sec = timestamp_sec
-                track.age += 1
-                track.hits += 1
-                track.misses = 0
-                track.confirmed = True  # only confirmed tracks enter the pool
-                self._tracks[lost_id] = track
-                revived_ids.add(lost_id)
-                used_reassoc_dets.add(det_idx)
-            unmatched_dets = [i for i in unmatched_dets if i not in used_reassoc_dets]
+                    track.bbox = det.bbox
+                    track.confidence = det.confidence
+                    track.frame_index = frame_index
+                    track.timestamp_sec = timestamp_sec
+                    track.age += 1
+                    track.hits += 1
+                    track.misses = 0
+                    track.confirmed = True  # only confirmed tracks enter the pool
+                    assigned_ids.add(tid)
+                    used_reassoc_dets.add(det_idx)
+                unmatched_dets = [i for i in unmatched_dets if i not in used_reassoc_dets]
 
         new_track_ids: set[int] = set()
         for det_idx in unmatched_dets:
@@ -394,7 +420,7 @@ class IoUTracker:
         # Age out tracks that were not updated this frame. Confirmed tracks that
         # exhaust ``max_misses`` are demoted to the lost pool (for re-id) rather
         # than deleted; unconfirmed tracks are dropped outright.
-        updated_ids = matched_track_ids | new_track_ids | revived_ids
+        updated_ids = matched_track_ids | new_track_ids | revived_ids | reassoc_updated_ids
         for track_id, track in list(self._tracks.items()):
             if track_id in updated_ids:
                 continue
