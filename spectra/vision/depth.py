@@ -62,4 +62,4 @@ def _depth_from_model(rgb: np.ndarray) -> DepthResult:
 def estimate_frame_depth(frame: PreprocessedFrame) -> DepthResult:
     """Estimate metric depth plus a normalized nearness compatibility map."""
 
-    return _depth_from_model(frame.denoised_rgb)
+    return _depth_from_model(frame.rgb)

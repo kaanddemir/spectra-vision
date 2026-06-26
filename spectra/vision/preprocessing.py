@@ -12,8 +12,7 @@ import numpy as np
 class PreprocessedFrame:
     bgr: np.ndarray
     gray: np.ndarray
-    enhanced_gray: np.ndarray
-    denoised_rgb: np.ndarray
+    rgb: np.ndarray
 
 
 def resize_preserving_aspect(frame_bgr: np.ndarray, max_side: int) -> np.ndarray:
@@ -42,6 +41,5 @@ def preprocess_frame(frame_bgr: np.ndarray, max_side: int = 640) -> Preprocessed
     return PreprocessedFrame(
         bgr=resized_bgr,
         gray=gray,
-        enhanced_gray=gray,
-        denoised_rgb=rgb,
+        rgb=rgb,
     )

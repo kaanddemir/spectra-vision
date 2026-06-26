@@ -190,7 +190,6 @@ def ttc_from_expansion(expansion_rate: float, *, history_age: int) -> TtcCompone
         return TtcComponent("expansion", None, 0.0)
     # Confidence grows with how many samples back the history goes (a one-
     # sample history can be a single-frame jitter; >3 samples is reliable).
-    # Confidence grows with how many samples back the history goes.
     # We allow a baseline confidence even for new tracks so the UI shows data early.
     confidence = float(np.clip(0.15 + (history_age / 4.0), 0.0, 1.0))
     return TtcComponent("expansion", round(float(ttc), 2), confidence)

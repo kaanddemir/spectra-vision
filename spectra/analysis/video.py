@@ -576,7 +576,7 @@ class SpatialFrameAnalyzer:
         # the rest of the video.
         fi = frame_index
         did_lane = fi % max(self.lane_every, 1) == 0
-        frame_w = frame.bgr.shape[1]
+        frame_h, frame_w = frame.gray.shape
         if did_lane:
             new_roi = _detect_lanes(frame.bgr, self.lanenet)
             if new_roi.detected:
@@ -601,7 +601,6 @@ class SpatialFrameAnalyzer:
         else:
             road_roi = default_road_roi(frame.bgr.shape)
 
-        frame_h, frame_w = frame.gray.shape
         lane = build_lane_frame(road_roi, width=frame_w, height=frame_h)
         # Temporal smoothing of the lane confidence scalar (rise faster than it
         # falls) so brief detection dips don't sharply drop lane trust.

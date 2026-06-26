@@ -208,8 +208,7 @@ The output is a `PreprocessedFrame`:
 
 - `bgr`: frame used by OpenCV drawing and detection
 - `gray`: grayscale frame
-- `enhanced_gray`: alias of `gray` for compatibility
-- `denoised_rgb`: alias of plain RGB for compatibility and depth input
+- `rgb`: plain RGB view consumed by the depth model
 
 ### 6. Road and Lane Geometry
 
