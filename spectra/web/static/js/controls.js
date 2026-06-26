@@ -776,10 +776,6 @@ export function initializeSpectra() {
               <span class="lbl">LANE</span>
               <span class="val">${laneWithPosition(ev.lane, ev.lanePosition)}</span>
             </div>
-            <div class="box-item">
-              <span class="lbl">DIST</span>
-              <span class="val">${distanceLabel(ev.distanceM)}</span>
-            </div>
           </div>
 
           <div class="card-bars">
