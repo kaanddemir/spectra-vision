@@ -179,45 +179,6 @@
   line-height: 1.4;
 }
 
-.risk-legend {
-  list-style: none;
-  margin: 0;
-  padding: 16px;
-  display: grid;
-  gap: 10px;
-  align-content: center;
-  border-radius: 4px;
-  border: 1px solid var(--border-soft);
-  background: var(--panel-2);
-  min-width: 168px;
-}
-.risk-legend li {
-  display: grid;
-  grid-template-columns: 10px 1fr auto;
-  align-items: center;
-  gap: 8px;
-}
-.risk-legend i {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-}
-.risk-legend span {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-.risk-legend small {
-  font-size: 10.5px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.leg-danger i { background: var(--danger); }
-.leg-caution i { background: var(--caution); }
-.leg-safe i { background: var(--safe); }
-.leg-danger span { color: var(--danger); }
-.leg-caution span { color: var(--caution); }
-.leg-safe span { color: var(--safe); }
 
 /* ─── Most dangerous object ──────────────────────────────── */
 .event-detail-section {
@@ -615,14 +576,6 @@
   color: var(--text);
   font-variant-numeric: tabular-nums;
   margin-left: 4px;
-}
-
-.modern-legend {
-  background: rgba(0,0,0,0.2);
-  border: 1px solid rgba(255,255,255,0.05);
-  padding: 12px;
-  border-radius: 6px;
-  min-width: 130px;
 }
 
 .modern-metrics-grid {

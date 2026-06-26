@@ -565,11 +565,6 @@
     gap: 12px;
     padding: 16px;
   }
-  .modern-legend {
-    grid-column: 1 / -1;
-    display: flex;
-    justify-content: space-around;
-  }
   .modern-metrics-grid {
     grid-template-columns: 1fr;
   }
