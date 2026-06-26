@@ -155,11 +155,11 @@ Depth Anything V2 Metric VKITTI produces estimated metric depth in meters (`dept
 
 Metric depth usage:
 
-- Object distance is read from the lower-center portion of each bbox using a 25th-percentile distance sample.
-- Depth TTC uses metric closing speed: `(previous_distance_m - current_distance_m) / dt`.
-- The UI exposes estimated object distance in meters while preserving normalized proximity bars.
+- Object distance is read from the lower-center portion of each bbox using a 25th-percentile distance sample. This raw sample is the *measurement* fed to the longitudinal Kalman filter (section 11.3); the distance and closing speed exposed to the UI come from the filtered state, not the raw sample.
+- Depth TTC is the physical backbone: distance and closing speed are estimated by a per-track constant-velocity Kalman, and `TTC = distance / closing_speed`. Because TTC is the ratio `d / (-ṡ)`, it is invariant to a constant scale error in the (uncalibrated) monocular depth.
+- The UI exposes the filtered object distance in meters while preserving normalized proximity bars.
 
-Metric monocular depth is still an estimate, not a calibrated sensor measurement, so expansion and optical-flow TTC remain part of the final fusion.
+Metric monocular depth is still an estimate, not a calibrated sensor measurement, so expansion and optical-flow TTC remain part of the final fusion as corroborating image-space cues.
 
 Performance notes:
 
@@ -254,18 +254,19 @@ Logic:
 
 This provides additional evidence when bounding-box size changes are weak.
 
-### 11.3 Depth Delta TTC
+### 11.3 Longitudinal Kinematic TTC (the physical backbone)
 
-Code: `ttc_from_depth_delta()`
+Code: `ttc_from_depth_delta()` (a per-track constant-velocity Kalman; the `DepthDeltaSmoother` bank holds one `_LonState` per track id).
 
 Logic:
 
-- Compute median nearness inside the object's bounding box.
-- Compare it with the previous nearness for the same track.
-- If nearness increases, the object may be approaching.
-- Estimate TTC from nearness growth rate and remaining-distance proxy.
+- The metric distance sampled from the bbox lower-center (section 8) is the measurement.
+- A 2-state Kalman filters it into a smooth `(distance, range-rate)` state. Range-rate `ṡ` is `d(distance)/dt` (negative while approaching); closing speed is `-ṡ`.
+- `TTC = distance / closing_speed`, read from the filtered state **every frame** — the filter predicts (coasts) between depth refreshes, so the estimate is continuous rather than intermittent.
+- **Innovation gating:** a depth sample whose error exceeds ~3σ of the predicted distance is rejected (the filter coasts on prediction instead), so a single-step metric glitch cannot whip the velocity to a non-physical value. This is what removes the old ±20–30 m/s `closing_mps` artifacts.
+- The exposed `distance_m` and `closing_mps` come from the filtered state (closing clamped to a physical range); a velocity estimate is only trusted after ≥2 measurements.
 
-This component updates history only when depth is fresh. If an old depth map is reused, history is not mutated, preventing false deltas.
+The filter is committed (advanced + corrected) only on a fresh-depth frame with a valid measurement. The imminence peek and stale-depth frames predict-and-return without mutating state, so the filter is never stepped twice per frame. Because `TTC = d / (-ṡ)`, a constant scale bias in the monocular depth cancels in the ratio.
 
 ## 12. TTC Fusion
 
@@ -278,6 +279,8 @@ Why weighted median:
 - A single bad signal cannot dominate the final TTC.
 - Expansion, flow, and depth can fail under different conditions.
 - Higher-confidence components have more influence.
+
+The kinematic (depth) component is the continuous backbone — once a track has two depth measurements it contributes a TTC on every frame, so the fused result has a stable anchor instead of collapsing to whichever single visual cue happened to fire. Expansion and flow corroborate and can outvote it when they agree with higher confidence.
 
 Each component has:
 

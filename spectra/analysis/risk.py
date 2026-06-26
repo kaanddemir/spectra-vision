@@ -87,13 +87,28 @@ _TTC_MAX_REPORTED_SEC = 15.0
 _EXPANSION_MIN_BBOX_PX = 12.0
 _EXPANSION_MAX_SCALE_RATIO = 2.0
 _EXPANSION_MIN_SCALE_RATIO = 0.5
-# Depth-delta TTC loses reliability as the previous distance sample ages: a
-# closing speed averaged over a long gap misrepresents recent dynamics. Rather
-# than discard it, we keep the estimate but decay its fusion confidence with
-# the gap (full trust up to ~0.5s, decaying to a floor for multi-second gaps).
+# Kinematic (depth) TTC loses reliability as the last measurement ages: the
+# filter coasts on prediction between depth refreshes, so its fusion confidence
+# decays with the gap (full trust up to ~0.5s, decaying to a floor for
+# multi-second gaps).
 _DEPTH_TTC_FRESH_DT_SEC = 0.5
 _DEPTH_TTC_STALE_DECAY_SEC = 2.0
 _DEPTH_TTC_MIN_FRESHNESS = 0.3
+
+# ── Longitudinal constant-velocity Kalman (the physical TTC backbone) ─────────
+# Each track's metric distance is filtered into a smooth (distance, range-rate)
+# state. Range-rate ``s`` is d(distance)/dt (negative = approaching), so
+# closing speed is ``-s`` and TTC = distance / closing. Because TTC is the
+# ratio d/(-s), it is invariant to a constant scale error in the (uncalibrated)
+# monocular depth — the right backbone even when absolute metres are biased.
+_LON_PROCESS_ACCEL_STD = 4.0        # m/s^2 range-rate process noise (manoeuvre)
+_LON_MEAS_REL_STD = 0.05            # measurement std as fraction of distance
+_LON_MEAS_ABS_STD = 0.5             # measurement std floor, metres
+_LON_INIT_VEL_VAR = 15.0 ** 2       # (m/s)^2 initial range-rate variance
+_LON_GATE_SQ = 9.0                  # 3-sigma innovation gate (reject depth jumps)
+_LON_MIN_CLOSING_MPS = 0.30         # below this closing we report no TTC
+_LON_MAX_CLOSING_MPS = 60.0         # physical clamp on the exposed closing speed
+_LON_MIN_UPDATES_FOR_TTC = 2        # need 2 measurements before trusting velocity
 
 # State thresholds. Tuned for highway/urban dashcam: 1 s gives a driver one
 # reaction-time before impact, 3 s is roughly the recommended following gap.
@@ -265,7 +280,87 @@ def ttc_from_flow(
     return TtcComponent("flow", round(float(ttc_sec), 2), confidence)
 
 
-# ── TTC source 3: depth delta ────────────────────────────────────────────────
+# ── TTC source 3: longitudinal kinematic (constant-velocity Kalman) ──────────
+
+
+@dataclass
+class _LonState:
+    """Per-track longitudinal Kalman state: distance ``d`` and range-rate ``s``.
+
+    ``s`` is d(distance)/dt, so it is negative while the object approaches and
+    closing speed is ``-s``. ``t`` is the timestamp of the last committed
+    measurement; the filter coasts (predict-only) on frames between depth
+    refreshes. ``P`` is the 2x2 state covariance; ``n`` counts measurements.
+    """
+
+    t: float
+    d: float
+    s: float
+    P: np.ndarray
+    n: int
+
+
+def _lon_predict(state: _LonState, timestamp_sec: float) -> tuple[float, float, np.ndarray, float]:
+    """Predict the state forward to ``timestamp_sec`` without committing.
+
+    Returns ``(d_pred, s, P_pred, dt)``. Range-rate is constant under the CV
+    model, so ``s`` is returned unchanged.
+    """
+
+    dt = max(0.0, float(timestamp_sec - state.t))
+    d_pred = state.d + (state.s * dt)
+    # F = [[1, dt], [0, 1]]; covariance propagation P' = F P F^T + Q.
+    f01 = dt
+    P = state.P
+    fp00 = P[0, 0] + (f01 * P[1, 0])
+    fp01 = P[0, 1] + (f01 * P[1, 1])
+    p_pred = np.array(
+        [
+            [fp00 + (f01 * fp01), fp01],
+            [P[1, 0] + (f01 * P[1, 1]), P[1, 1]],
+        ],
+        dtype=np.float64,
+    )
+    # Continuous white-acceleration process noise injected over dt.
+    q = _LON_PROCESS_ACCEL_STD ** 2
+    dt2 = dt * dt
+    dt3 = dt2 * dt
+    dt4 = dt2 * dt2
+    p_pred[0, 0] += q * dt4 / 4.0
+    p_pred[0, 1] += q * dt3 / 2.0
+    p_pred[1, 0] += q * dt3 / 2.0
+    p_pred[1, 1] += q * dt2
+    return d_pred, float(state.s), p_pred, dt
+
+
+def _ttc_from_lon(d: float, s: float, dt_since_meas: float, p_ss: float, n: int) -> TtcComponent:
+    """Build the kinematic TTC component from a (filtered) longitudinal state."""
+
+    closing = -s
+    if n < _LON_MIN_UPDATES_FOR_TTC or closing < _LON_MIN_CLOSING_MPS or d <= 0.0:
+        return TtcComponent("depth", None, 0.0)
+    ttc_sec = d / closing
+    if ttc_sec < _TTC_FLOOR_SEC:
+        ttc_sec = _TTC_FLOOR_SEC
+    if ttc_sec > _TTC_MAX_REPORTED_SEC:
+        return TtcComponent("depth", None, 0.0)
+
+    # Confidence: clear closing speed, recent measurement, and a velocity
+    # estimate the filter is actually confident about (small range-rate
+    # variance) all raise trust.
+    freshness = float(
+        np.clip(
+            1.0
+            - max(0.0, dt_since_meas - _DEPTH_TTC_FRESH_DT_SEC)
+            / _DEPTH_TTC_STALE_DECAY_SEC,
+            _DEPTH_TTC_MIN_FRESHNESS,
+            1.0,
+        )
+    )
+    vel_certainty = float(np.clip(1.0 - (p_ss / _LON_INIT_VEL_VAR), 0.0, 1.0))
+    speed_term = float(np.clip((closing - _LON_MIN_CLOSING_MPS) / 8.0, 0.0, 1.0))
+    confidence = speed_term * freshness * vel_certainty
+    return TtcComponent("depth", round(float(ttc_sec), 2), confidence)
 
 
 def ttc_from_depth_delta(
@@ -273,53 +368,97 @@ def ttc_from_depth_delta(
     bbox: tuple[int, int, int, int],
     depth_m: np.ndarray,
     timestamp_sec: float,
-    history: dict[int, tuple[float, float]],
+    history: dict[int, "_LonState"],
     *,
     update_history: bool,
 ) -> tuple[TtcComponent, float | None, float | None]:
-    """TTC from change in metric distance inside the bbox.
+    """Physical TTC from a per-track constant-velocity longitudinal Kalman.
 
-    History is the per-track ``(timestamp, distance_m)`` map maintained by
-    :class:`DepthDeltaSmoother`. Stale depth frames intentionally return an
-    empty component without mutating history.
+    The metric distance sampled from the bbox is filtered into a smooth
+    (distance, range-rate) state, and TTC = distance / closing-speed is read
+    from that state every frame — coasting on prediction between depth
+    refreshes, so the estimate is continuous instead of intermittent.
+
+    ``history`` maps ``track_id`` to its :class:`_LonState`. The state is
+    committed (advanced + corrected) only when ``update_history`` is True and a
+    valid measurement is available — i.e. on a fresh-depth frame. Peek calls and
+    stale-depth frames predict-and-return without mutating state, so the filter
+    is never stepped twice per frame.
+
+    Returns ``(component, filtered_distance_m, closing_mps)``.
     """
 
-    distance_now = distance_m_for_bbox(depth_m, bbox)
-    if not update_history:
-        return TtcComponent("depth", None, 0.0), distance_now, None
-    if distance_now is None:
-        return TtcComponent("depth", None, 0.0), None, None
+    state = history.get(track_id)
 
-    prev = history.get(track_id)
-    history[track_id] = (timestamp_sec, distance_now)
-    if prev is None:
-        return TtcComponent("depth", None, 0.0), distance_now, None
-    prev_t, prev_distance = prev
-    dt = float(timestamp_sec - prev_t)
-    if dt <= 0.0:
-        return TtcComponent("depth", None, 0.0), distance_now, None
-
-    closing_mps = (prev_distance - distance_now) / dt
-    if closing_mps <= 0.30:
-        return TtcComponent("depth", None, 0.0), distance_now, closing_mps
-
-    ttc_sec = distance_now / closing_mps
-    if ttc_sec < _TTC_FLOOR_SEC:
-        ttc_sec = _TTC_FLOOR_SEC
-    if ttc_sec > _TTC_MAX_REPORTED_SEC:
-        return TtcComponent("depth", None, 0.0), distance_now, closing_mps
-
-    # Decay confidence as the previous sample ages so a stale gap contributes
-    # less to the fused TTC without being discarded outright.
-    freshness = float(
-        np.clip(
-            1.0 - max(0.0, dt - _DEPTH_TTC_FRESH_DT_SEC) / _DEPTH_TTC_STALE_DECAY_SEC,
-            _DEPTH_TTC_MIN_FRESHNESS,
-            1.0,
+    # No committed state yet: initialise on the first valid measurement,
+    # otherwise we have nothing to report.
+    if state is None:
+        if not update_history:
+            return TtcComponent("depth", None, 0.0), None, None
+        z = distance_m_for_bbox(depth_m, bbox)
+        if z is None:
+            return TtcComponent("depth", None, 0.0), None, None
+        r = (_LON_MEAS_REL_STD * z) ** 2 + _LON_MEAS_ABS_STD ** 2
+        history[track_id] = _LonState(
+            t=float(timestamp_sec),
+            d=float(z),
+            s=0.0,
+            P=np.array([[r, 0.0], [0.0, _LON_INIT_VEL_VAR]], dtype=np.float64),
+            n=1,
         )
+        # Velocity unknown after a single sample: distance is usable, TTC is not.
+        return TtcComponent("depth", None, 0.0), float(z), None
+
+    d_pred, s_pred, p_pred, dt = _lon_predict(state, timestamp_sec)
+    closing_clamped = float(
+        np.clip(-s_pred, -_LON_MAX_CLOSING_MPS, _LON_MAX_CLOSING_MPS)
     )
-    confidence = float(np.clip((closing_mps - 0.30) / 8.0, 0.0, 1.0)) * freshness
-    return TtcComponent("depth", round(float(ttc_sec), 2), confidence), distance_now, closing_mps
+
+    # Predict-only (imminence peek, or a stale-depth frame): report the coasted
+    # estimate without committing.
+    if not update_history:
+        component = _ttc_from_lon(d_pred, s_pred, dt, float(p_pred[1, 1]), state.n)
+        return component, float(d_pred), (closing_clamped if state.n >= _LON_MIN_UPDATES_FOR_TTC else None)
+
+    z = distance_m_for_bbox(depth_m, bbox)
+    if z is None or dt <= 0.0:
+        # Nothing to correct with: coast and keep the prior commit anchor.
+        component = _ttc_from_lon(d_pred, s_pred, dt, float(p_pred[1, 1]), state.n)
+        return component, float(d_pred), (closing_clamped if state.n >= _LON_MIN_UPDATES_FOR_TTC else None)
+
+    r = (_LON_MEAS_REL_STD * z) ** 2 + _LON_MEAS_ABS_STD ** 2
+    innovation = float(z - d_pred)
+    s_innov = float(p_pred[0, 0]) + r
+    # Innovation gate: a depth glitch (e.g. a 25th-pct sample jumping several
+    # metres in one step) blows past 3-sigma; coast on prediction rather than
+    # let it whip the velocity estimate to a non-physical value.
+    if (innovation * innovation) / max(s_innov, 1e-6) > _LON_GATE_SQ:
+        history[track_id] = _LonState(
+            t=float(timestamp_sec), d=float(d_pred), s=float(s_pred), P=p_pred, n=state.n
+        )
+        component = _ttc_from_lon(d_pred, s_pred, 0.0, float(p_pred[1, 1]), state.n)
+        return component, float(d_pred), (closing_clamped if state.n >= _LON_MIN_UPDATES_FOR_TTC else None)
+
+    # Standard Kalman update with H = [1, 0].
+    k0 = float(p_pred[0, 0]) / s_innov
+    k1 = float(p_pred[1, 0]) / s_innov
+    d_post = d_pred + (k0 * innovation)
+    s_post = s_pred + (k1 * innovation)
+    p_post = np.array(
+        [
+            [(1.0 - k0) * p_pred[0, 0], (1.0 - k0) * p_pred[0, 1]],
+            [p_pred[1, 0] - (k1 * p_pred[0, 0]), p_pred[1, 1] - (k1 * p_pred[0, 1])],
+        ],
+        dtype=np.float64,
+    )
+    n_post = state.n + 1
+    history[track_id] = _LonState(
+        t=float(timestamp_sec), d=float(d_post), s=float(s_post), P=p_post, n=n_post
+    )
+
+    closing_post = float(np.clip(-s_post, -_LON_MAX_CLOSING_MPS, _LON_MAX_CLOSING_MPS))
+    component = _ttc_from_lon(d_post, s_post, 0.0, float(p_post[1, 1]), n_post)
+    return component, float(d_post), (closing_post if n_post >= _LON_MIN_UPDATES_FOR_TTC else None)
 
 
 # ── Weighted-median fusion ───────────────────────────────────────────────────
@@ -530,13 +669,17 @@ class ConfidenceSmoother:
 
 
 class DepthDeltaSmoother:
-    """Per-track previous (timestamp, distance_m) entries for depth-delta TTC."""
+    """Per-track longitudinal Kalman state bank for the kinematic TTC source.
+
+    Holds one :class:`_LonState` per track id (see ``ttc_from_depth_delta``)
+    and drops states for tracks that are no longer active.
+    """
 
     def __init__(self) -> None:
-        self._state: dict[int, tuple[float, float]] = {}
+        self._state: dict[int, _LonState] = {}
 
     @property
-    def state(self) -> dict[int, tuple[float, float]]:
+    def state(self) -> dict[int, "_LonState"]:
         return self._state
 
     def forget(self, active_track_ids: set[int]) -> None:
@@ -770,7 +913,7 @@ def calculate_track_risk(
     magnitude_norm: np.ndarray,
     lane: LaneFrame,
     expansion_rate: float,
-    depth_history: dict[int, tuple[float, float]],
+    depth_history: dict[int, "_LonState"],
     flow_dt_sec: float,
     depth_is_fresh: bool,
     frame_index: int,
@@ -789,24 +932,31 @@ def calculate_track_risk(
 
     bbox = track.bbox
 
-    distance_m = distance_m_for_bbox(depth_m, bbox)
-    near_score = near_score_from_distance(distance_m)
     velocity_magnitude = _flow_magnitude_for_bbox(magnitude_norm, bbox)
     pos = lane_position(bbox, lane)
 
     # Three independent TTC estimators.
     expansion_component = ttc_from_expansion(expansion_rate, history_age=len(track.history))
     flow_component = ttc_from_flow(bbox, flow, lane.vanishing_point, flow_dt_sec)
+    # The longitudinal Kalman is time-driven, so it must advance on the FRAME
+    # clock (which ticks every processed frame), not ``track.timestamp_sec``
+    # (which only advances on detection frames — frozen while a track coasts).
+    # Using the track clock made the predict step dt=0 between detections, so
+    # distance/closing/TTC stalled instead of coasting smoothly.
     depth_component, depth_distance_m, depth_closing_mps = ttc_from_depth_delta(
         track.track_id,
         bbox,
         depth_m,
-        track.timestamp_sec,
+        timestamp_sec,
         depth_history,
         update_history=depth_is_fresh,
     )
+    # Prefer the Kalman-filtered distance; fall back to the raw bbox sample only
+    # before the filter has been seeded (brand-new track).
+    distance_m = depth_distance_m
     if distance_m is None:
-        distance_m = depth_distance_m
+        distance_m = distance_m_for_bbox(depth_m, bbox)
+    near_score = near_score_from_distance(distance_m)
 
     fused_ttc, components = fuse_ttc([expansion_component, flow_component, depth_component])
     crossing = lane_crossing_risk(track, lane, fused_ttc)
@@ -1043,7 +1193,7 @@ def build_object_events(
                 track.track_id,
                 track.bbox,
                 fields.depth.depth_m,
-                track.timestamp_sec,
+                timestamp_sec,
                 depth_smoother.state,
                 update_history=False,
             )

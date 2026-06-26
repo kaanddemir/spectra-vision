@@ -7,6 +7,7 @@ from spectra.analysis.risk import (
     ConfidenceSmoother,
     ExpansionSmoother,
     RiskEvent,
+    _LonState,
     StateStabilizer,
     TtcComponent,
     calculate_track_risk,
@@ -471,52 +472,97 @@ class TestMetricDepth:
         assert near_score_from_distance(34.0) == pytest.approx(0.5)
         assert near_score_from_distance(None) == pytest.approx(0.0)
 
-    def test_metric_depth_ttc_uses_closing_distance_rate(self):
-        history = {1: (0.0, 30.0)}
-        depth_m = make_depth_m(distance=20.0)
-        component, distance_m, closing_mps = ttc_from_depth_delta(
-            1,
-            (20, 20, 80, 90),
-            depth_m,
-            2.0,
-            history,
-            update_history=True,
-        )
+    @staticmethod
+    def _drive_constant_closing(distance0, closing, *, steps, dt, bbox=(20, 20, 80, 90)):
+        """Feed the longitudinal Kalman a constant-closing measurement stream.
 
-        assert distance_m == pytest.approx(20.0)
-        assert closing_mps == pytest.approx(5.0)
-        assert component.value == pytest.approx(4.0)
+        Returns the final (component, filtered_distance, closing_mps).
+        """
+        history: dict = {}
+        component = distance = closing_mps = None
+        for i in range(steps):
+            t = (i + 1) * dt
+            measured = distance0 - (closing * t)
+            component, distance, closing_mps = ttc_from_depth_delta(
+                1, bbox, make_depth_m(distance=measured), t, history, update_history=True
+            )
+        return component, distance, closing_mps, history
+
+    def test_kinematic_ttc_converges_to_constant_closing(self):
+        # A track approaching at a steady 5 m/s from 30 m. After a few metric
+        # measurements the filter should recover the closing speed and a TTC
+        # close to distance / closing (physical), not a raw single-step delta.
+        component, distance, closing_mps, _ = self._drive_constant_closing(
+            30.0, 5.0, steps=8, dt=0.2
+        )
+        assert closing_mps == pytest.approx(5.0, abs=0.7)
+        assert distance == pytest.approx(30.0 - 5.0 * 1.6, abs=1.0)
+        assert component.value is not None
+        assert component.value == pytest.approx(distance / closing_mps, rel=0.15)
         assert component.confidence > 0.0
 
-    def test_metric_depth_ttc_ignores_static_or_receding_distance(self):
-        history = {1: (0.0, 20.0)}
-        component, distance_m, closing_mps = ttc_from_depth_delta(
-            1,
-            (20, 20, 80, 90),
-            make_depth_m(distance=22.0),
-            1.0,
-            history,
+    def test_kinematic_ttc_ignores_static_or_receding_distance(self):
+        # Constant distance (no closing) and receding both yield no TTC.
+        static_comp, _, static_closing, _ = self._drive_constant_closing(
+            20.0, 0.0, steps=6, dt=0.2
+        )
+        assert static_comp.value is None
+        assert static_closing is None or static_closing <= 0.30
+
+        recede_comp, _, _, _ = self._drive_constant_closing(
+            20.0, -3.0, steps=6, dt=0.2
+        )
+        assert recede_comp.value is None
+
+    def test_kinematic_ttc_rejects_depth_outlier(self):
+        # Seed a confident, steadily-approaching state, then inject one wild
+        # depth sample (a several-metre jump in one step). The innovation gate
+        # must keep the filtered distance/closing physical instead of letting
+        # the velocity whip to a non-physical value.
+        history = {
+            1: _LonState(
+                t=0.0,
+                d=20.0,
+                s=-5.0,
+                P=np.diag([0.5, 0.5]).astype(np.float64),
+                n=6,
+            )
+        }
+        # dt=0.1 → predicted distance ~19.5; a sample of 8.0 is a gross outlier.
+        component, distance, closing_mps = ttc_from_depth_delta(
+            1, (20, 20, 80, 90), make_depth_m(distance=8.0), 0.1, history,
             update_history=True,
         )
+        assert distance == pytest.approx(19.5, abs=1.0)  # not yanked to ~8
+        assert abs(closing_mps) < 12.0  # no ±25 m/s artifact
+        assert component.value is not None
 
-        assert distance_m == pytest.approx(22.0)
-        assert closing_mps == pytest.approx(-2.0)
-        assert component.value is None
-
-    def test_depth_ttc_confidence_decays_with_stale_gap(self):
-        # Same closing speed (5 m/s, ending at 20 m), different sample age.
-        # The fresh gap (0.1 s) keeps full confidence; the stale gap (2.0 s)
-        # is decayed but still emits a TTC value.
-        depth_m = make_depth_m(distance=20.0)
-        fresh, _, _ = ttc_from_depth_delta(
-            1, (20, 20, 80, 90), depth_m, 0.1, {1: (0.0, 20.5)}, update_history=True
+    def test_kinematic_ttc_coasts_between_depth_refreshes(self):
+        # Seed an approaching state, then run predict-only (stale-depth) frames.
+        # TTC must stay available and shrink as the coasted gap closes — the
+        # whole point of the filter is continuity between depth refreshes.
+        history = {
+            1: _LonState(
+                t=0.0,
+                d=20.0,
+                s=-5.0,
+                P=np.diag([0.5, 0.5]).astype(np.float64),
+                n=6,
+            )
+        }
+        early, d_early, _ = ttc_from_depth_delta(
+            1, (20, 20, 80, 90), make_depth_m(distance=20.0), 0.2, history,
+            update_history=False,
         )
-        stale, _, _ = ttc_from_depth_delta(
-            2, (20, 20, 80, 90), depth_m, 2.0, {2: (0.0, 30.0)}, update_history=True
+        late, d_late, _ = ttc_from_depth_delta(
+            1, (20, 20, 80, 90), make_depth_m(distance=20.0), 1.0, history,
+            update_history=False,
         )
-
-        assert fresh.value is not None and stale.value is not None
-        assert 0.0 < stale.confidence < fresh.confidence
+        assert early.value is not None and late.value is not None
+        assert late.value < early.value  # TTC shrinks as the gap closes
+        assert d_late < d_early  # filtered distance keeps coasting down
+        # Predict-only must NOT commit: the stored anchor timestamp stays at 0.
+        assert history[1].t == pytest.approx(0.0)
 
 
 class TestCalculateTrackRisk:
@@ -587,7 +633,7 @@ class TestCalculateTrackRisk:
         magnitude = np.zeros((height, width), dtype=np.float32)
         flow = np.zeros((height, width, 2), dtype=np.float32)
         track = make_track(1, (130, 120, 180, 190), t=1.0)
-        history = {1: (0.0, 0.2)}
+        history: dict = {}
 
         event = calculate_track_risk(
             track=track,
@@ -604,8 +650,52 @@ class TestCalculateTrackRisk:
             timestamp_sec=track.timestamp_sec,
         )
 
-        assert history == {1: (0.0, 0.2)}
+        # A stale-depth frame must not seed the filter (no measurement to trust).
+        assert history == {}
         assert next(c for c in event.ttc_components if c.name == "depth").value is None
+
+    def test_kinematic_distance_coasts_on_frame_clock_while_track_coasts(self):
+        # Regression: between detection frames the tracker freezes
+        # track.timestamp_sec, but the longitudinal Kalman must advance on the
+        # FRAME clock so distance/TTC keep coasting instead of stalling. The
+        # track is fixed at t=1.0 (its last detection); the frame clock ticks on.
+        height, width = 200, 300
+        near_map = np.full((height, width), 0.4, dtype=np.float32)
+        magnitude = np.zeros((height, width), dtype=np.float32)
+        flow = np.zeros((height, width, 2), dtype=np.float32)
+        track = make_track(1, (130, 120, 180, 190), t=1.0)
+        history = {
+            1: _LonState(
+                t=1.0,
+                d=10.0,
+                s=-5.0,
+                P=np.diag([0.5, 0.5]).astype(np.float64),
+                n=6,
+            )
+        }
+
+        def run(frame_t):
+            return calculate_track_risk(
+                track=track,
+                depth_m=make_depth_m(distance=10.0),
+                near_map=near_map,
+                flow=flow,
+                magnitude_norm=magnitude,
+                lane=make_lane(),
+                expansion_rate=0.0,
+                depth_history=history,
+                flow_dt_sec=1.0 / 30.0,
+                depth_is_fresh=False,  # stale depth → predict-only (coast)
+                frame_index=int(frame_t * 30),
+                timestamp_sec=frame_t,
+            )
+
+        early = run(1.1)
+        late = run(1.4)
+        assert early.distance_m is not None and late.distance_m is not None
+        assert late.distance_m < early.distance_m  # coasting, not frozen
+        # Predict-only must not commit: the anchor timestamp stays at 1.0.
+        assert history[1].t == pytest.approx(1.0)
 
     def test_metric_closing_mps_drives_approach_score(self):
         height, width = 200, 300
@@ -613,6 +703,18 @@ class TestCalculateTrackRisk:
         magnitude = np.zeros((height, width), dtype=np.float32)
         flow = np.zeros((height, width, 2), dtype=np.float32)
         track = make_track(1, (130, 120, 180, 190), t=1.0)
+        # Seed a confident, ~10 m/s closing state; the fresh measurement at 20 m
+        # is consistent with it, so the filtered closing stays near 10 m/s and
+        # drives the approach score.
+        history = {
+            1: _LonState(
+                t=0.5,
+                d=25.0,
+                s=-10.0,
+                P=np.diag([0.4, 0.4]).astype(np.float64),
+                n=6,
+            )
+        }
 
         event = calculate_track_risk(
             track=track,
@@ -622,15 +724,15 @@ class TestCalculateTrackRisk:
             magnitude_norm=magnitude,
             lane=make_lane(),
             expansion_rate=0.0,
-            depth_history={1: (0.0, 30.0)},
+            depth_history=history,
             flow_dt_sec=1.0 / 30.0,
             depth_is_fresh=True,
             frame_index=track.frame_index,
             timestamp_sec=track.timestamp_sec,
         )
 
-        assert event.closing_mps == pytest.approx(10.0)
-        assert event.closing_speed == pytest.approx(0.415, abs=0.001)
+        assert event.closing_mps == pytest.approx(10.0, abs=1.5)
+        assert event.closing_speed > 0.3
 
     def test_approach_falls_back_to_limited_visual_cues_without_metric_closing(self):
         height, width = 200, 300
