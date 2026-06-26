@@ -52,10 +52,8 @@ class TestKalmanInitialState:
         # the smoother stays cold if we follow that contract.
         kalman = LaneKalman()
         default = default_road_roi((720, 1280))
-        # We do NOT call apply_lane_kalman on `default`. After many "frames"
-        # where UFLDv2 fails, the Kalman remains uninitialized.
-        for _ in range(20):
-            pass
+        # We do NOT call apply_lane_kalman on `default`. The smoother stays cold
+        # and the synthetic fallback ROI is flagged as not-detected.
         assert kalman._initialized is False
         assert default.detected is False
 

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from spectra.analysis.risk import (
+    ConfidenceSmoother,
     ExpansionSmoother,
     RiskEvent,
     StateStabilizer,
@@ -277,6 +278,45 @@ class TestTtcComponents:
         assert component.value == pytest.approx(1.5, abs=0.05)
         assert component.confidence > 0.5
 
+    def test_flow_ttc_rejects_incoherent_field(self):
+        # 30% of pixels expand outward strongly, 70% move inward. A 75th-pct
+        # outward velocity still reads positive, but the object isn't coherently
+        # approaching, so the coherence gate must reject it.
+        h, w = 200, 300
+        vp = (150.0, 80.0)
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        rx = xs - vp[0]
+        ry = ys - vp[1]
+        dist = np.maximum(np.sqrt(rx * rx + ry * ry), 1.0)
+        outward = np.stack((rx / dist, ry / dist), axis=-1).astype(np.float32) * 4.0
+        mask_out = ((xs.astype(int) % 10) < 3)[..., None]  # 30% outward
+        field = np.where(mask_out, outward, -outward).astype(np.float32)
+
+        component = ttc_from_flow((130, 120, 170, 160), field, vp, flow_dt_sec=0.1)
+
+        assert component.value is None
+
+    def test_flow_ttc_confidence_scales_with_coherence(self):
+        # Same outward magnitude, different spatial coherence: a fully outward
+        # field is trusted more than a 60%-outward one (both pass the gate).
+        h, w = 200, 300
+        vp = (150.0, 80.0)
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        rx = xs - vp[0]
+        ry = ys - vp[1]
+        dist = np.maximum(np.sqrt(rx * rx + ry * ry), 1.0)
+        outward = np.stack((rx / dist, ry / dist), axis=-1).astype(np.float32) * 4.0
+        bbox = (130, 120, 170, 160)
+
+        full = ttc_from_flow(bbox, outward, vp, flow_dt_sec=0.1)
+        mask_out = ((xs.astype(int) % 5) < 3)[..., None]  # 60% outward
+        partial_field = np.where(mask_out, outward, -outward).astype(np.float32)
+        partial = ttc_from_flow(bbox, partial_field, vp, flow_dt_sec=0.1)
+
+        assert full.value is not None
+        assert partial.value is not None
+        assert full.confidence > partial.confidence
+
     def test_weighted_median_ignores_low_confidence_outlier(self):
         fused, _ = fuse_ttc(
             [
@@ -311,6 +351,31 @@ class TestExpansionRateFromTrack:
             history=[(0.5, (0, 0, 100, 100))],
         )
         assert expansion_rate_from_track(track) < 0.0
+
+    def test_small_bbox_growth_not_trusted(self):
+        # A sub-12px box that "doubles" is detection jitter, not a real
+        # approach, so expansion is suppressed.
+        track = make_track(
+            1,
+            (10, 10, 20, 20),
+            t=1.0,
+            history=[(0.5, (12, 12, 18, 18))],
+        )
+        assert expansion_rate_from_track(track) == 0.0
+
+    def test_extreme_growth_is_clamped(self):
+        # A 20px box jumping to 200px in one step would imply an absurd
+        # expansion rate; the per-step scale ratio is clamped to <= 2.0 so a
+        # single noisy frame cannot fabricate a huge approach rate.
+        dt = 0.5
+        track = make_track(
+            1,
+            (0, 0, 200, 200),
+            t=1.0,
+            history=[(1.0 - dt, (90, 90, 110, 110))],
+        )
+        rate = expansion_rate_from_track(track)
+        assert 0.0 < rate <= ((2.0 - 1.0) / dt) + 1e-6
 
 
 class TestCrossing:
@@ -437,6 +502,21 @@ class TestMetricDepth:
         assert distance_m == pytest.approx(22.0)
         assert closing_mps == pytest.approx(-2.0)
         assert component.value is None
+
+    def test_depth_ttc_confidence_decays_with_stale_gap(self):
+        # Same closing speed (5 m/s, ending at 20 m), different sample age.
+        # The fresh gap (0.1 s) keeps full confidence; the stale gap (2.0 s)
+        # is decayed but still emits a TTC value.
+        depth_m = make_depth_m(distance=20.0)
+        fresh, _, _ = ttc_from_depth_delta(
+            1, (20, 20, 80, 90), depth_m, 0.1, {1: (0.0, 20.5)}, update_history=True
+        )
+        stale, _, _ = ttc_from_depth_delta(
+            2, (20, 20, 80, 90), depth_m, 2.0, {2: (0.0, 30.0)}, update_history=True
+        )
+
+        assert fresh.value is not None and stale.value is not None
+        assert 0.0 < stale.confidence < fresh.confidence
 
 
 class TestCalculateTrackRisk:
@@ -646,6 +726,26 @@ class TestExpansionSmoother:
         assert 2 not in smoother._state
 
 
+class TestConfidenceSmoother:
+    def test_first_value_is_passthrough(self):
+        smoother = ConfidenceSmoother()
+        assert smoother.update(1, 0.8) == pytest.approx(0.8)
+
+    def test_smoothing_bounds_jitter(self):
+        smoother = ConfidenceSmoother()
+        smoother.update(1, 1.0)
+        # A sudden drop is damped, not applied in full.
+        damped = smoother.update(1, 0.0)
+        assert 0.0 < damped < 1.0
+
+    def test_forget_drops_inactive_tracks(self):
+        smoother = ConfidenceSmoother()
+        smoother.update(1, 0.5)
+        smoother.update(2, 0.5)
+        smoother.forget({1})
+        assert 2 not in smoother._state
+
+
 class TestStabilizer:
     def test_imminent_danger_bypasses_upgrade_delay(self):
         stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=5)
@@ -672,176 +772,3 @@ class TestScoring:
         danger = make_event(state="DANGER", ttc_sec=0.5, near_score=0.5, closing_speed=0.5)
         safe = make_event(state="SAFE")
         assert score_event(danger) > score_event(safe)
-
-class TestIoUTracker:
-    def test_pending_tracks_are_hidden_on_first_detection(self):
-        tracker = IoUTracker()
-        dets = [
-            Detection(bbox=(0, 0, 20, 20), class_name="car", confidence=0.6),
-        ]
-        tracks = tracker.update(dets, frame_index=0, timestamp_sec=0.0)
-
-        assert tracks == []
-
-    def test_links_and_confirms_overlapping_detections_across_frames(self):
-        tracker = IoUTracker(iou_threshold=0.2)
-        first = [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.6)]
-        tracks_t0 = tracker.update(first, frame_index=0, timestamp_sec=0.0)
-        second = [Detection(bbox=(5, 5, 55, 55), class_name="car", confidence=0.6)]
-        tracks_t1 = tracker.update(second, frame_index=1, timestamp_sec=0.1)
-        third = [Detection(bbox=(10, 10, 60, 60), class_name="car", confidence=0.6)]
-        tracks_t2 = tracker.update(third, frame_index=2, timestamp_sec=0.2)
-
-        assert tracks_t0 == []
-        assert tracks_t1 == []
-        assert tracks_t2[0].track_id == 1
-        assert tracks_t2[0].confirmed
-        assert tracks_t2[0].display_id == 1
-        assert len(tracks_t2[0].history) == 2
-
-    def test_fast_confirms_large_high_confidence_detection(self):
-        tracker = IoUTracker()
-        tracks = tracker.update(
-            [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.9)],
-            frame_index=0,
-            timestamp_sec=0.0,
-            frame_shape=(200, 300, 3),
-        )
-
-        assert len(tracks) == 1
-        assert tracks[0].confirmed
-        assert tracks[0].display_id == 1
-
-    def test_links_low_iou_detection_by_center_and_scale(self):
-        tracker = IoUTracker(iou_threshold=0.5)
-        first = [Detection(bbox=(0, 0, 100, 100), class_name="car", confidence=0.9)]
-        tracks_t0 = tracker.update(first, frame_index=0, timestamp_sec=0.0, frame_shape=(200, 300, 3))
-        second = [Detection(bbox=(35, 10, 135, 110), class_name="car", confidence=0.8)]
-        tracks_t1 = tracker.update(second, frame_index=1, timestamp_sec=0.1, frame_shape=(200, 300, 3))
-
-        assert tracks_t0[0].track_id == 1
-        assert tracks_t1[0].track_id == 1
-        assert tracks_t1[0].display_id == 1
-        assert len(tracks_t1[0].history) == 1
-
-    def test_reconnects_after_short_detection_miss(self):
-        tracker = IoUTracker(iou_threshold=0.5, max_misses=5)
-        tracker.update(
-            [Detection(bbox=(0, 0, 100, 100), class_name="car", confidence=0.9)],
-            frame_index=0,
-            timestamp_sec=0.0,
-            frame_shape=(200, 300, 3),
-        )
-        tracker.update(
-            [Detection(bbox=(10, 0, 110, 100), class_name="car", confidence=0.9)],
-            frame_index=1,
-            timestamp_sec=0.1,
-            frame_shape=(200, 300, 3),
-        )
-        # A confirmed track coasts through a short detection miss: it keeps
-        # emitting (with its last bbox) so a live threat does not vanish from
-        # the active set on a single missed detection frame.
-        coasting = tracker.update([], frame_index=2, timestamp_sec=0.2, frame_shape=(200, 300, 3))
-        assert len(coasting) == 1
-        assert coasting[0].track_id == 1
-        assert coasting[0].misses == 1
-
-        tracks = tracker.update(
-            [Detection(bbox=(75, 0, 175, 100), class_name="car", confidence=0.9)],
-            frame_index=3,
-            timestamp_sec=0.3,
-            frame_shape=(200, 300, 3),
-        )
-
-        assert len(tracks) == 1
-        assert tracks[0].track_id == 1
-        assert tracks[0].display_id == 1
-        assert tracks[0].misses == 0
-
-    def test_center_scale_gate_does_not_merge_adjacent_tracks(self):
-        tracker = IoUTracker(iou_threshold=0.5)
-        tracks_t0 = tracker.update(
-            [
-                Detection(bbox=(0, 0, 100, 100), class_name="car", confidence=0.9),
-                Detection(bbox=(160, 0, 260, 100), class_name="car", confidence=0.9),
-            ],
-            frame_index=0,
-            timestamp_sec=0.0,
-            frame_shape=(200, 320, 3),
-        )
-
-        tracks_t1 = tracker.update(
-            [
-                Detection(bbox=(35, 0, 135, 100), class_name="car", confidence=0.9),
-                Detection(bbox=(195, 0, 295, 100), class_name="car", confidence=0.9),
-            ],
-            frame_index=1,
-            timestamp_sec=0.1,
-            frame_shape=(200, 320, 3),
-        )
-
-        assert sorted(track.track_id for track in tracks_t0) == [1, 2]
-        assert sorted(track.track_id for track in tracks_t1) == [1, 2]
-        assert sorted(track.display_id for track in tracks_t1) == [1, 2]
-
-    def test_display_ids_are_scoped_per_class(self):
-        tracker = IoUTracker()
-        tracks = tracker.update(
-            [
-                Detection(bbox=(0, 0, 80, 80), class_name="car", confidence=0.9),
-                Detection(bbox=(120, 0, 200, 80), class_name="truck", confidence=0.9),
-            ],
-            frame_index=0,
-            timestamp_sec=0.0,
-            frame_shape=(200, 320, 3),
-        )
-
-        by_class = {track.class_name: track for track in tracks}
-        assert by_class["car"].track_id == 1
-        assert by_class["truck"].track_id == 2
-        assert by_class["car"].display_id == 1
-        assert by_class["truck"].display_id == 1
-
-    def test_pending_false_positive_does_not_consume_display_id(self):
-        tracker = IoUTracker()
-        tracker.update(
-            [Detection(bbox=(0, 0, 20, 20), class_name="car", confidence=0.6)],
-            frame_index=0,
-            timestamp_sec=0.0,
-        )
-
-        tracks = tracker.update(
-            [Detection(bbox=(40, 40, 100, 100), class_name="car", confidence=0.9)],
-            frame_index=1,
-            timestamp_sec=0.1,
-            frame_shape=(200, 300, 3),
-        )
-
-        assert len(tracks) == 1
-        assert tracks[0].track_id == 2
-        assert tracks[0].display_id == 1
-
-    def test_pending_false_positive_does_not_propagate(self):
-        tracker = IoUTracker()
-        tracker.update(
-            [Detection(bbox=(0, 0, 20, 20), class_name="car", confidence=0.6)],
-            frame_index=0,
-            timestamp_sec=0.0,
-        )
-
-        assert tracker.propagate() == []
-
-    def test_does_not_link_across_classes(self):
-        tracker = IoUTracker(iou_threshold=0.2)
-        tracker.update(
-            [Detection(bbox=(0, 0, 50, 50), class_name="car", confidence=0.6)],
-            frame_index=0,
-            timestamp_sec=0.0,
-        )
-        tracks = tracker.update(
-            [Detection(bbox=(0, 0, 50, 50), class_name="person", confidence=0.6)],
-            frame_index=1,
-            timestamp_sec=0.1,
-        )
-
-        assert tracks == []

@@ -10,6 +10,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque
 
+import cv2
+import numpy as np
+
 from ..vision.detection import Detection
 
 
@@ -33,6 +36,10 @@ class Track:
     confirmed: bool = False
     display_id: int | None = None
     misses: int = 0
+    # Normalized HS colour histogram of the last seen crop, EMA-smoothed. Used
+    # as an appearance gate during re-identification so a longer lost-track
+    # window does not relabel a different object onto an existing ID.
+    appearance: np.ndarray | None = None
     history: Deque[TrackSample] = field(default_factory=lambda: deque(maxlen=12))
 
     def previous_sample(self, min_dt: float = 0.05) -> TrackSample | None:
@@ -44,6 +51,66 @@ class Track:
             if (self.timestamp_sec - sample.timestamp_sec) >= min_dt:
                 return sample
         return self.history[0]
+
+
+_APPEARANCE_EMA_ALPHA = 0.3
+_REASSOC_APPEARANCE_MIN = 0.30
+
+
+def _appearance_descriptor(
+    frame_bgr: np.ndarray | None,
+    bbox: tuple[int, int, int, int],
+) -> np.ndarray | None:
+    """Normalized 8x8 Hue-Saturation histogram of the bbox crop.
+
+    A cheap, illumination-tolerant colour signature. Returns ``None`` when no
+    frame is available or the crop is degenerate, in which case appearance is
+    simply not used (the geometric matcher still runs).
+    """
+
+    if frame_bgr is None:
+        return None
+    h_full, w_full = frame_bgr.shape[:2]
+    x1, y1, x2, y2 = bbox
+    x1 = max(0, min(w_full - 1, int(x1)))
+    x2 = max(0, min(w_full, int(x2)))
+    y1 = max(0, min(h_full - 1, int(y1)))
+    y2 = max(0, min(h_full, int(y2)))
+    if x2 - x1 < 2 or y2 - y1 < 2:
+        return None
+    crop = frame_bgr[y1:y2, x1:x2]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [8, 8], [0, 180, 0, 256])
+    cv2.normalize(hist, hist, alpha=1.0, norm_type=cv2.NORM_L1)
+    return hist.astype(np.float32)
+
+
+def _appearance_similarity(
+    a: np.ndarray | None,
+    b: np.ndarray | None,
+) -> float | None:
+    """Colour similarity in ``[0, 1]`` (1 == identical), or ``None`` if unknown."""
+
+    if a is None or b is None:
+        return None
+    dist = float(cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA))
+    return max(0.0, 1.0 - dist)
+
+
+def _blend_appearance(track: Track, new_desc: np.ndarray | None) -> None:
+    """EMA-update a track's appearance signature with a fresh observation."""
+
+    if new_desc is None:
+        return
+    if track.appearance is None:
+        track.appearance = new_desc
+        return
+    blended = (
+        (1.0 - _APPEARANCE_EMA_ALPHA) * track.appearance
+        + _APPEARANCE_EMA_ALPHA * new_desc
+    )
+    cv2.normalize(blended, blended, alpha=1.0, norm_type=cv2.NORM_L1)
+    track.appearance = blended.astype(np.float32)
 
 
 def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
@@ -178,7 +245,7 @@ class IoUTracker:
         fast_confirm_confidence: float = 0.70,
         fast_confirm_height_ratio: float = 0.18,
         coast_limit: int = 2,
-        max_lost_sec: float = 1.0,
+        max_lost_sec: float = 2.5,
         reassoc_gap_gain: float = 0.8,
     ) -> None:
         self.iou_threshold = float(iou_threshold)
@@ -196,6 +263,9 @@ class IoUTracker:
         # pool instead of deleted, so a re-appearing detection within
         # ``max_lost_sec`` is re-associated to the original ID rather than
         # minting a new one (prevents #1 -> #7 relabeling across short gaps).
+        # The window is generous (2.5s) because re-id is appearance-gated: a
+        # colour-mismatched detection cannot hijack a stale ID even if its
+        # predicted position happens to line up.
         self.max_lost_sec = float(max_lost_sec)
         self.reassoc_gap_gain = float(reassoc_gap_gain)
         self._next_id = 1
@@ -277,8 +347,16 @@ class IoUTracker:
         frame_index: int,
         timestamp_sec: float,
         frame_shape: tuple[int, int] | tuple[int, int, int] | None = None,
+        frame_bgr: np.ndarray | None = None,
     ) -> list[Track]:
+        if frame_bgr is not None and frame_shape is None:
+            frame_shape = frame_bgr.shape
         frame_height = int(frame_shape[0]) if frame_shape is not None and len(frame_shape) >= 1 else None
+        # Appearance signatures for every detection (None when no frame given),
+        # reused across the match, re-id and new-track passes below.
+        det_descriptors: list[np.ndarray | None] = [
+            _appearance_descriptor(frame_bgr, det.bbox) for det in detections
+        ]
         active_tracks = list(self._tracks.values())
         unmatched_dets = list(range(len(detections)))
         matched_track_ids: set[int] = set()
@@ -320,6 +398,7 @@ class IoUTracker:
             track.timestamp_sec = timestamp_sec
             track.age += 1
             track.hits += 1
+            _blend_appearance(track, det_descriptors[det_idx])
             self._confirm_if_ready(track, det, frame_height)
             track.misses = 0
             matched_track_ids.add(track_id)
@@ -357,7 +436,12 @@ class IoUTracker:
                     for tid, track, _is_lost in pool:
                         if track.class_name != det.class_name:
                             continue
-                        score = self._reassoc_score(track, det, timestamp_sec=timestamp_sec)
+                        score = self._reassoc_score(
+                            track,
+                            det,
+                            timestamp_sec=timestamp_sec,
+                            det_appearance=det_descriptors[det_idx],
+                        )
                         if score is not None:
                             reassoc_candidates.append((score, det_idx, tid))
                 reassoc_candidates.sort(reverse=True)
@@ -393,6 +477,7 @@ class IoUTracker:
                     track.hits += 1
                     track.misses = 0
                     track.confirmed = True  # only confirmed tracks enter the pool
+                    _blend_appearance(track, det_descriptors[det_idx])
                     assigned_ids.add(tid)
                     used_reassoc_dets.add(det_idx)
                 unmatched_dets = [i for i in unmatched_dets if i not in used_reassoc_dets]
@@ -413,6 +498,7 @@ class IoUTracker:
                 hits=1,
                 confirmed=False,
                 misses=0,
+                appearance=det_descriptors[det_idx],
             )
             self._confirm_if_ready(track, det, frame_height)
             self._tracks[track_id] = track
@@ -442,13 +528,15 @@ class IoUTracker:
         det: Detection,
         *,
         timestamp_sec: float,
+        det_appearance: np.ndarray | None = None,
     ) -> float | None:
         """Score a lost track against a fresh detection for re-identification.
 
         IoU is ~0 across a multi-frame gap, so the signal is constant-velocity
-        predicted-center proximity plus scale compatibility. Returns ``None``
-        when the pair is incompatible; otherwise a higher score is a better
-        match (negated center distance).
+        predicted-center proximity plus scale compatibility, gated by colour
+        appearance. Returns ``None`` when the pair is incompatible; otherwise a
+        higher score is a better match (negated center distance plus an
+        appearance bonus).
         """
 
         predicted = _predict_bbox_full(lost, timestamp_sec)
@@ -461,6 +549,14 @@ class IoUTracker:
         )
         if center_ratio > threshold:
             return None
+        # Appearance gate: when both signatures exist, a clearly different
+        # colour profile rejects the match outright (protects the long re-id
+        # window), and a closer match earns a score bonus.
+        similarity = _appearance_similarity(lost.appearance, det_appearance)
+        if similarity is not None:
+            if similarity < _REASSOC_APPEARANCE_MIN:
+                return None
+            return -center_ratio + (0.5 * similarity)
         return -center_ratio
 
     def _expire_lost_tracks(self, timestamp_sec: float) -> None:

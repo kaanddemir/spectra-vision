@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from .risk import (
+    ConfidenceSmoother,
     DepthDeltaSmoother,
     ExpansionSmoother,
     RiskEvent,
@@ -435,6 +436,22 @@ def _endpoint_drift_px(a: RoadROI, b: RoadROI) -> float:
     return float(max(diffs))
 
 
+def _smooth_lane_confidence(prev: float | None, raw: float) -> float:
+    """Asymmetric EMA of the lane-geometry confidence scalar.
+
+    The Kalman filter smooths lane *geometry* but not the scalar confidence,
+    which otherwise swings frame-to-frame and makes corridor/lane-trust gating
+    jittery. Rises faster than it falls so a brief detection dip doesn't sharply
+    drop lane trust. ``prev is None`` (first frame) passes ``raw`` through.
+    """
+
+    raw = float(np.clip(raw, 0.0, 1.0))
+    if prev is None:
+        return raw
+    alpha = 0.5 if raw >= prev else 0.3
+    return float(alpha * raw + (1.0 - alpha) * prev)
+
+
 @dataclass
 class FrameAnalysis:
     """Per-frame risk output plus the inputs needed to render or preview it.
@@ -502,6 +519,10 @@ class SpatialFrameAnalyzer:
         self.last_flow = None
         self.cached_road_roi: RoadROI | None = None
         self.lane_miss_streak = 0
+        # EMA of lane-geometry confidence. The Kalman filter smooths the lane
+        # geometry but not the scalar confidence, which otherwise swings
+        # frame-to-frame and makes corridor/lane-trust gating jittery.
+        self.lane_confidence_ema: float | None = None
         self.previous_timestamp_sec: float | None = None
         self.last_motion_depth_frame: int | None = None
         # Advisory traffic-light colour, refreshed on detection frames and
@@ -512,6 +533,7 @@ class SpatialFrameAnalyzer:
         self.expansion_smoother = ExpansionSmoother()
         self.depth_smoother = DepthDeltaSmoother()
         self.ttc_imminence_smoother = TtcImminenceSmoother()
+        self.confidence_smoother = ConfidenceSmoother()
         self.lane_kalman = LaneKalman()
         self.stabilizer = StateStabilizer(upgrade_frames=3, downgrade_frames=7)
         self.tracker = IoUTracker(iou_threshold=0.25)
@@ -581,6 +603,12 @@ class SpatialFrameAnalyzer:
 
         frame_h, frame_w = frame.gray.shape
         lane = build_lane_frame(road_roi, width=frame_w, height=frame_h)
+        # Temporal smoothing of the lane confidence scalar (rise faster than it
+        # falls) so brief detection dips don't sharply drop lane trust.
+        self.lane_confidence_ema = _smooth_lane_confidence(
+            self.lane_confidence_ema, float(lane.confidence)
+        )
+        lane = replace(lane, confidence=self.lane_confidence_ema)
         t_lane = time.perf_counter()
 
         if self.previous_timestamp_sec is None:
@@ -657,6 +685,7 @@ class SpatialFrameAnalyzer:
                 frame_index=fi,
                 timestamp_sec=timestamp_sec,
                 frame_shape=frame.bgr.shape,
+                frame_bgr=frame.bgr,
             )
         else:
             active_tracks = self.tracker.propagate()
@@ -695,6 +724,7 @@ class SpatialFrameAnalyzer:
             expansion_smoother=self.expansion_smoother,
             depth_smoother=self.depth_smoother,
             ttc_imminence_smoother=self.ttc_imminence_smoother,
+            confidence_smoother=self.confidence_smoother,
         )
 
         # 4. Smooth State Transitions (Hysteresis)

@@ -80,6 +80,21 @@ _TTC_MIN_EXPANSION_RATE = 0.01  # per-second; below this we treat as "stable"
 _TTC_FLOOR_SEC = 0.15
 _TTC_MAX_REPORTED_SEC = 15.0
 
+# Expansion guards: tiny bboxes make the scale ratio jitter wildly (a 1-2 px
+# size change is a huge relative change), so we don't trust expansion below
+# this size, and we clamp the per-step scale ratio so single-frame detection
+# noise cannot fabricate a giant approach rate.
+_EXPANSION_MIN_BBOX_PX = 12.0
+_EXPANSION_MAX_SCALE_RATIO = 2.0
+_EXPANSION_MIN_SCALE_RATIO = 0.5
+# Depth-delta TTC loses reliability as the previous distance sample ages: a
+# closing speed averaged over a long gap misrepresents recent dynamics. Rather
+# than discard it, we keep the estimate but decay its fusion confidence with
+# the gap (full trust up to ~0.5s, decaying to a floor for multi-second gaps).
+_DEPTH_TTC_FRESH_DT_SEC = 0.5
+_DEPTH_TTC_STALE_DECAY_SEC = 2.0
+_DEPTH_TTC_MIN_FRESHNESS = 0.3
+
 # State thresholds. Tuned for highway/urban dashcam: 1 s gives a driver one
 # reaction-time before impact, 3 s is roughly the recommended following gap.
 _DANGER_TTC_SEC = 1.0
@@ -88,6 +103,13 @@ _CAUTION_TTC_SEC = 3.0
 # Smoothing constants for per-track expansion rate.
 _EXPANSION_EMA_RISE = 0.55
 _EXPANSION_EMA_FALL = 0.30
+
+# Smoothing for the displayed per-track fused confidence. Display stability
+# only — classify_state still uses raw detection confidence, so this never
+# changes a risk decision. Rises fast so a newly-confident detection isn't
+# held back; falls slower to ride out one-frame YOLO confidence dips.
+_CONFIDENCE_EMA_RISE = 0.60
+_CONFIDENCE_EMA_FALL = 0.30
 
 # Maximum lateral velocity in lane-units per second that we still treat as
 # real path-cross. Above this is bbox jitter or detection swap.
@@ -147,7 +169,15 @@ def expansion_rate_from_track(track: Track, *, min_dt: float = 0.06) -> float:
     curr_w = max(1.0, float(cx2 - cx1))
     curr_h = max(1.0, float(cy2 - cy1))
 
+    # Too small to trust: a couple-pixel size change dominates the ratio.
+    if min(prev_w, prev_h, curr_w, curr_h) < _EXPANSION_MIN_BBOX_PX:
+        return 0.0
+
     scale_ratio = math.sqrt((curr_w / prev_w) * (curr_h / prev_h))
+    # Clamp so one noisy detection frame can't fabricate a huge approach rate.
+    scale_ratio = float(
+        np.clip(scale_ratio, _EXPANSION_MIN_SCALE_RATIO, _EXPANSION_MAX_SCALE_RATIO)
+    )
     return float((scale_ratio - 1.0) / dt)
 
 
@@ -209,6 +239,14 @@ def ttc_from_flow(
     if radial_p75 <= 0.1:
         return TtcComponent("flow", None, 0.0)
 
+    # Coherence gate: a genuinely approaching object expands outward across
+    # most of its bbox. A receding or mixed object can still leave a positive
+    # p75 from noise, so require a majority of pixels to flow outward and let
+    # that fraction temper the confidence.
+    outward_fraction = float(np.mean(radial_velocity > 0.0))
+    if outward_fraction < 0.5:
+        return TtcComponent("flow", None, 0.0)
+
     bbox_cx = (x1 + x2) / 2.0
     bbox_cy = (y1 + y2) / 2.0
     distance_from_vp = float(math.sqrt((bbox_cx - vx) ** 2 + (bbox_cy - vy) ** 2))
@@ -222,8 +260,9 @@ def ttc_from_flow(
     if ttc_sec > _TTC_MAX_REPORTED_SEC:
         return TtcComponent("flow", None, 0.0)
 
-    # Confidence: higher when the radial signal stands well clear of zero.
-    confidence = float(np.clip(radial_p75 / 6.0, 0.0, 1.0))
+    # Confidence: higher when the radial signal stands well clear of zero and
+    # the outward motion is spatially coherent across the bbox.
+    confidence = float(np.clip(radial_p75 / 6.0, 0.0, 1.0)) * outward_fraction
     return TtcComponent("flow", round(float(ttc_sec), 2), confidence)
 
 
@@ -271,7 +310,16 @@ def ttc_from_depth_delta(
     if ttc_sec > _TTC_MAX_REPORTED_SEC:
         return TtcComponent("depth", None, 0.0), distance_now, closing_mps
 
-    confidence = float(np.clip((closing_mps - 0.30) / 8.0, 0.0, 1.0))
+    # Decay confidence as the previous sample ages so a stale gap contributes
+    # less to the fused TTC without being discarded outright.
+    freshness = float(
+        np.clip(
+            1.0 - max(0.0, dt - _DEPTH_TTC_FRESH_DT_SEC) / _DEPTH_TTC_STALE_DECAY_SEC,
+            _DEPTH_TTC_MIN_FRESHNESS,
+            1.0,
+        )
+    )
+    confidence = float(np.clip((closing_mps - 0.30) / 8.0, 0.0, 1.0)) * freshness
     return TtcComponent("depth", round(float(ttc_sec), 2), confidence), distance_now, closing_mps
 
 
@@ -442,6 +490,37 @@ class ExpansionSmoother:
             value = float(raw_rate)
         else:
             value = _ema(prev, float(raw_rate), _EXPANSION_EMA_RISE, _EXPANSION_EMA_FALL)
+        self._state[track_id] = value
+        return value
+
+    def forget(self, active_track_ids: set[int]) -> None:
+        for track_id in list(self._state.keys()):
+            if track_id not in active_track_ids:
+                self._state.pop(track_id, None)
+
+
+class ConfidenceSmoother:
+    """Per-track EMA of the displayed fused confidence.
+
+    Smooths the confidence value shown in the UI / telemetry so it doesn't jump
+    frame-to-frame with raw YOLO confidence. Purely cosmetic — the raw
+    detection confidence still drives ``classify_state``.
+    """
+
+    def __init__(self) -> None:
+        self._state: dict[int, float] = {}
+
+    def update(self, track_id: int, raw_confidence: float) -> float:
+        prev = self._state.get(track_id)
+        if prev is None:
+            value = float(raw_confidence)
+        else:
+            value = _ema(
+                prev,
+                float(raw_confidence),
+                _CONFIDENCE_EMA_RISE,
+                _CONFIDENCE_EMA_FALL,
+            )
         self._state[track_id] = value
         return value
 
@@ -699,6 +778,7 @@ def calculate_track_risk(
     timestamp_sec: float,
     ttc_imminent_streak: int = 2,
     bgr: "np.ndarray | None" = None,
+    confidence_smoother: "ConfidenceSmoother | None" = None,
 ) -> RiskEvent:
     """Build a RiskEvent for a single tracked object using fused TTC.
 
@@ -755,6 +835,8 @@ def calculate_track_risk(
             1.0,
         )
     )
+    if confidence_smoother is not None:
+        fused_confidence = confidence_smoother.update(track.track_id, fused_confidence)
 
     state = classify_state(
         fused_ttc=fused_ttc,
@@ -917,6 +999,7 @@ def build_object_events(
     expansion_smoother: ExpansionSmoother,
     depth_smoother: DepthDeltaSmoother,
     ttc_imminence_smoother: TtcImminenceSmoother | None = None,
+    confidence_smoother: ConfidenceSmoother | None = None,
 ) -> tuple[RiskEvent, list[RiskEvent]]:
     """Build per-object risk events plus a primary event for the frame."""
 
@@ -925,6 +1008,8 @@ def build_object_events(
         depth_smoother.forget(set())
         if ttc_imminence_smoother is not None:
             ttc_imminence_smoother.forget(set())
+        if confidence_smoother is not None:
+            confidence_smoother.forget(set())
         safe = make_safe_event(
             frame_index=frame_index,
             timestamp_sec=timestamp_sec,
@@ -985,6 +1070,7 @@ def build_object_events(
             timestamp_sec=timestamp_sec,
             ttc_imminent_streak=streak,
             bgr=fields.bgr,
+            confidence_smoother=confidence_smoother,
         )
         events.append(event)
 
@@ -992,6 +1078,8 @@ def build_object_events(
     depth_smoother.forget(active_ids)
     if ttc_imminence_smoother is not None:
         ttc_imminence_smoother.forget(active_ids)
+    if confidence_smoother is not None:
+        confidence_smoother.forget(active_ids)
 
     # Intent gate: off-corridor tracks (|lane_position| > 1.0) are admitted by
     # the depth-gated corridor filter so the tracker can build history before

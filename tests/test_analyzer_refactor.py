@@ -145,6 +145,27 @@ def test_saved_events_get_deferred_rgb(monkeypatch):
     assert isinstance(saved["original_rgb"], np.ndarray)
 
 
+def test_smooth_lane_confidence_passthrough_on_first_frame():
+    # No prior state -> the raw confidence passes through unchanged.
+    assert video._smooth_lane_confidence(None, 0.7) == 0.7
+
+
+def test_smooth_lane_confidence_rises_faster_than_it_falls():
+    prev = 0.5
+    rose = video._smooth_lane_confidence(prev, 1.0)
+    fell = video._smooth_lane_confidence(prev, 0.0)
+    # Both move toward the raw value but stay between prev and raw, and a rise
+    # of the same magnitude covers more ground than a fall (asymmetric alpha).
+    assert prev < rose < 1.0
+    assert 0.0 < fell < prev
+    assert (rose - prev) > (prev - fell)
+
+
+def test_smooth_lane_confidence_clamps_to_unit_range():
+    assert video._smooth_lane_confidence(0.5, 5.0) <= 1.0
+    assert video._smooth_lane_confidence(0.5, -3.0) >= 0.0
+
+
 def test_analyzer_init_sets_cross_frame_state(monkeypatch):
     monkeypatch.setattr(video, "_ensure_required_models", lambda: None)
     monkeypatch.setattr(video, "get_lanenet_model", lambda: object())
