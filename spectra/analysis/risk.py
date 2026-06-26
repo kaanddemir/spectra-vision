@@ -1,15 +1,14 @@
-"""Object-centric risk with fused TTC (expansion + flow + depth) and lane-relative crossing.
+"""Object-centric collision ETA and risk evaluation.
 
-Three independent TTC estimators are computed per tracked object:
+Spectra keeps two outputs separate:
 
-    1. Scale expansion    — bbox area grows over time (track history required)
-    2. Flow expansion     — radial optical flow from the vanishing point
-    3. Depth delta        — change in median depth inside the bbox
+    1. Collision ETA — physical time-to-collision from depth + longitudinal
+       Kalman only.
+    2. Risk evaluation — proximity, approach, lane crossing, detector
+       confidence, brake lights and visual motion cues.
 
-Each TTC carries a confidence in [0, 1]; the final TTC is the **weighted
-median** so a single bad signal cannot dominate. Lane membership and crossing
-prediction are expressed in lane-relative units (half-lane offsets) using the
-detected road geometry, so thresholds stay valid across cameras.
+Expansion and optical flow can still influence risk, but they are not exposed
+as user-facing collision time.
 """
 
 from __future__ import annotations
@@ -40,6 +39,9 @@ class RiskEvent:
     frame_index: int
     timestamp_sec: float
     state: str
+    # Physical collision ETA from depth + Kalman only. Visual TTC hints may
+    # still be used internally for risk classification, but they must not be
+    # surfaced through this field.
     ttc_sec: float | None
     direction: str
     lane: str
@@ -61,6 +63,9 @@ class RiskEvent:
     distance_m: float | None = None
     closing_mps: float | None = None
     depth_ttc_sec: float | None = None
+    detection_confidence: float = 0.0
+    tracking_confidence: float = 0.0
+    depth_confidence: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -958,8 +963,9 @@ def calculate_track_risk(
         distance_m = distance_m_for_bbox(depth_m, bbox)
     near_score = near_score_from_distance(distance_m)
 
-    fused_ttc, components = fuse_ttc([expansion_component, flow_component, depth_component])
-    crossing = lane_crossing_risk(track, lane, fused_ttc)
+    risk_time_hint, components = fuse_ttc([expansion_component, flow_component, depth_component])
+    physical_ttc = depth_component.value
+    crossing = lane_crossing_risk(track, lane, risk_time_hint)
     lateral_v = lane_lateral_velocity(track, lane)
 
     class_weight = CLASS_RISK_WEIGHT.get(track.class_name, 1.0)
@@ -988,7 +994,7 @@ def calculate_track_risk(
         fused_confidence = confidence_smoother.update(track.track_id, fused_confidence)
 
     state = classify_state(
-        fused_ttc=fused_ttc,
+        fused_ttc=risk_time_hint,
         crossing=crossing,
         near_score=near_score,
         expansion_rate=expansion_rate,
@@ -1008,22 +1014,33 @@ def calculate_track_risk(
     if braking_lead:
         if state == "SAFE":
             state = "CAUTION"
-        elif state == "CAUTION" and fused_ttc is not None and fused_ttc < _CAUTION_TTC_SEC:
+        elif state == "CAUTION" and risk_time_hint is not None and risk_time_hint < _CAUTION_TTC_SEC:
             state = "DANGER"
 
-    reason = _risk_reason(state, fused_ttc, pos)
+    reason = _risk_reason(state, risk_time_hint, pos)
     if braking_lead and state != "SAFE":
         reason = (
-            f"lead vehicle braking: TTC {fused_ttc:.1f}s"
-            if fused_ttc is not None
+            f"lead vehicle braking: approach hint {risk_time_hint:.1f}s"
+            if risk_time_hint is not None
             else "lead vehicle braking ahead"
         )
+
+    tracking_confidence = float(
+        np.clip(
+            (0.55 if track.confirmed else 0.30)
+            + (0.10 * min(max(track.hits, 0), 4))
+            - (0.18 * max(track.misses, 0)),
+            0.0,
+            1.0,
+        )
+    )
+    depth_confidence = float(np.clip(depth_component.confidence, 0.0, 1.0))
 
     return RiskEvent(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
         state=state,
-        ttc_sec=fused_ttc,
+        ttc_sec=physical_ttc,
         direction=direction_from_lateral(lateral_v),
         lane=lane_bucket_from_position(pos),
         object_type=track.class_name,
@@ -1043,6 +1060,9 @@ def calculate_track_risk(
         brake_score=round(float(brake), 3),
         distance_m=None if distance_m is None else round(float(distance_m), 2),
         closing_mps=None if depth_closing_mps is None else round(float(depth_closing_mps), 2),
+        detection_confidence=round(float(detection_confidence), 3),
+        tracking_confidence=round(float(tracking_confidence), 3),
+        depth_confidence=round(float(depth_confidence), 3),
         depth_ttc_sec=depth_component.value,
     )
 

@@ -23,33 +23,67 @@ def test_compute_velocity_runs_without_neural_flow_model():
     assert result.magnitude_norm.shape == previous.gray.shape
 
 
-def test_serialized_result_uses_v2_schema():
-    """``_serialize_result`` must emit the v2 schema:
-       - ``schemaVersion: 2``
-       - ``frames`` (renamed from ``timelineRows``)
-       - top-level ``primary*`` pointers + ``stabilizedRiskState`` only;
-         per-object metrics live in ``objects[]``
-       - per-object ``rawRiskState`` (not ``riskState``) and ``confidence``
-         (0..1, not ``confidencePct`` 0..100)
-       - ``imageRef`` on events + separate ``images`` dict
-    """
-
-    objects = [{
+def _v3_object(**overrides):
+    obj = {
         "objectId": 7,
+        "displayId": 7,
         "objectType": "car",
         "rawRiskState": "CAUTION",
         "riskScore": 0.42,
         "lane": "center",
-        "ttcSec": 2.2,
-        "nearScore": 0.4,
-        "closingSpeed": 0.3,
-        "crossingRisk": 0.2,
         "lanePosition": 0.0,
-        "confidence": 0.67,
-        "distanceM": 18.5,
-        "closingMps": 2.4,
-        "depthTtcSec": 7.7,
-    }]
+        "overallConfidence": 0.67,
+        "confidence": {
+            "detection": 0.72,
+            "tracking": 0.81,
+            "depth": 0.64,
+        },
+        "collisionEta": {
+            "status": "closing",
+            "display": "2.2s",
+            "source": "depth_kalman",
+            "sec": 2.2,
+        },
+        "kinematics": {
+            "distanceM": 18.5,
+            "closingMps": 8.4,
+        },
+        "riskFactors": {
+            "proximity": 0.4,
+            "approach": 0.3,
+            "crossing": 0.2,
+            "brake": 0.0,
+        },
+        "evidence": {
+            "detector": {"source": "yolo", "class": "car", "confidence": 0.72},
+            "depth": {
+                "source": "depth_kalman",
+                "status": "tracked",
+                "confidence": 0.64,
+                "distanceM": 18.5,
+                "closingMps": 8.4,
+            },
+            "flow": {"expansionScore": 0.1, "radialScore": 0.2},
+            "lane": {"bucket": "center", "position": 0.0, "crossingRisk": 0.2},
+        },
+    }
+    obj.update(overrides)
+    return obj
+
+
+def test_serialized_result_uses_v3_schema():
+    """``_serialize_result`` must emit the v3 schema:
+       - ``schemaVersion: 3``
+       - ``frames`` (renamed from ``timelineRows``)
+       - top-level ``primary*`` pointers + ``stabilizedRiskState`` only;
+       per-object metrics live in ``objects[]``
+       - per-object ``rawRiskState`` (not ``riskState``), ``overallConfidence``
+         and source-specific ``confidence``
+       - collision ETA, kinematics, risk factors, and evidence are nested
+       - ``imageRef`` on events + separate ``images`` dict
+    """
+
+    objects = [_v3_object()]
     event = {
         "frame_index": 1,
         "timestamp_sec": 0.1,
@@ -57,9 +91,9 @@ def test_serialized_result_uses_v2_schema():
         "primary_object_id": 7,
         "primary_risk_score": 0.42,
         "primary_lane": "center",
-        "ttc_sec": 2.2,
-        "near_score": 0.4,
-        "closing_speed": 0.3,
+        "collision_eta_sec": 2.2,
+        "proximity_score": 0.4,
+        "approach_score": 0.3,
         "objects": objects,
         # RGB attached fields are absent — exercises the no-image path
     }
@@ -84,7 +118,7 @@ def test_serialized_result_uses_v2_schema():
     payload = _serialize_result(result, elapsed_sec=0.01, source_name="sample.mp4")["payload"]
 
     # Schema version + top-level shape
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == 3
     assert "frames" in payload and "timelineRows" not in payload
     assert "images" in payload and isinstance(payload["images"], dict)
 
@@ -119,10 +153,33 @@ def test_serialized_result_uses_v2_schema():
     # Per-object schema
     obj = peak["objects"][0]
     assert obj["rawRiskState"] == "CAUTION"
-    assert obj["confidence"] == 0.67
-    assert obj["distanceM"] == 18.5
-    assert obj["closingMps"] == 2.4
-    assert obj["depthTtcSec"] == 7.7
+    assert obj["overallConfidence"] == 0.67
+    assert obj["confidence"] == {
+        "detection": 0.72,
+        "tracking": 0.81,
+        "depth": 0.64,
+    }
+    assert obj["collisionEta"]["status"] == "closing"
+    assert obj["collisionEta"]["display"] == "2.2s"
+    assert obj["collisionEta"]["source"] == "depth_kalman"
+    assert obj["collisionEta"]["sec"] == 2.2
+    assert obj["kinematics"]["distanceM"] == 18.5
+    assert obj["kinematics"]["closingMps"] == 8.4
+    for removed_kinematic in ("rangeStatus", "distanceDisplay", "closingDisplay"):
+        assert removed_kinematic not in obj["kinematics"]
+    assert obj["riskFactors"] == {
+        "proximity": 0.4,
+        "approach": 0.3,
+        "crossing": 0.2,
+        "brake": 0.0,
+    }
+    for value in obj["riskFactors"].values():
+        assert 0.0 <= value <= 1.0
+    assert obj["evidence"]["detector"]["confidence"] == obj["confidence"]["detection"]
+    assert obj["evidence"]["depth"]["confidence"] == obj["confidence"]["depth"]
+    assert "riskReason" not in obj
+    for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
+        assert removed not in obj
     assert "riskState" not in obj or obj["riskState"] == obj["rawRiskState"]  # objects[].riskState removed
     assert "confidencePct" not in obj
 
@@ -141,19 +198,16 @@ def test_serialized_result_separates_images_via_imageref():
     def _stub_rgb():
         return np.zeros((4, 4, 3), dtype=np.uint8)
 
-    objects = [{
-        "objectId": 1,
-        "objectType": "car",
-        "rawRiskState": "DANGER",
-        "riskScore": 0.9,
-        "lane": "left",
-        "ttcSec": 0.8,
-        "nearScore": 0.7,
-        "closingSpeed": 0.8,
-        "crossingRisk": 0.9,
-        "lanePosition": -0.5,
-        "confidence": 0.95,
-    }]
+    objects = [_v3_object(
+        objectId=1,
+        displayId=1,
+        rawRiskState="DANGER",
+        riskScore=0.9,
+        lane="left",
+        lanePosition=-0.5,
+        overallConfidence=0.95,
+        confidence={"detection": 0.95, "tracking": 0.9, "depth": 0.85},
+    )]
     peak = {
         "frame_index": 42,
         "timestamp_sec": 1.4,
@@ -161,9 +215,9 @@ def test_serialized_result_separates_images_via_imageref():
         "primary_object_id": 1,
         "primary_risk_score": 0.9,
         "primary_lane": "left",
-        "ttc_sec": 0.8,
-        "near_score": 0.7,
-        "closing_speed": 0.8,
+        "collision_eta_sec": 0.8,
+        "proximity_score": 0.7,
+        "approach_score": 0.8,
         "objects": objects,
         "original_rgb": _stub_rgb(),
         "overlay_rgb": _stub_rgb(),
@@ -192,19 +246,28 @@ def test_primary_risk_score_matches_objects_entry():
     raw primary event so hysteresis lag never leaks into the value.
     """
 
-    objects = [{
-        "objectId": 4,
-        "objectType": "car",
-        "rawRiskState": "CAUTION",
-        "riskScore": 0.558,  # raw classifier output
-        "lane": "left",
-        "ttcSec": 0.87,
-        "nearScore": 0.704,
-        "closingSpeed": 0.055,
-        "crossingRisk": 0.5,
-        "lanePosition": -1.4,
-        "confidence": 0.54,
-    }]
+    objects = [_v3_object(
+        objectId=4,
+        displayId=4,
+        rawRiskState="CAUTION",
+        riskScore=0.558,  # raw classifier output
+        lane="left",
+        lanePosition=-1.4,
+        overallConfidence=0.54,
+        confidence={"detection": 0.54, "tracking": 0.76, "depth": 0.33},
+        collisionEta={
+            "status": "closing",
+            "display": "0.9s",
+            "source": "depth_kalman",
+            "sec": 0.87,
+        },
+        riskFactors={
+            "proximity": 0.704,
+            "approach": 0.055,
+            "crossing": 0.5,
+            "brake": 0.0,
+        },
+    )]
     # Hysteresis hasn't upgraded yet, so the FRAME's stabilized state is SAFE
     # while the primary object's RAW state is CAUTION. Without the fix,
     # primary_risk_score would be ~0.188 (computed from stabilized=SAFE)
@@ -225,9 +288,9 @@ def test_primary_risk_score_matches_objects_entry():
         "primary_object_id": 4,
         "primary_risk_score": 0.558,
         "primary_lane": "left",
-        "ttc_sec": 0.87,
-        "near_score": 0.704,
-        "closing_speed": 0.055,
+        "collision_eta_sec": 0.87,
+        "proximity_score": 0.704,
+        "approach_score": 0.055,
         "objects": objects,
     }
     result = {
@@ -295,7 +358,7 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
 
     response = asyncio.run(call_endpoint())
 
-    assert response["payload"]["schemaVersion"] == 2
+    assert response["payload"]["schemaVersion"] == 3
     assert captured["max_processed_frames"] == 1
     assert captured["max_saved_events"] == 50
     assert captured["resize_max_side"] == 1024

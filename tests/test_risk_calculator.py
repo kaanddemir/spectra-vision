@@ -594,7 +594,7 @@ class TestCalculateTrackRisk:
         )
 
         assert event.state == "DANGER"
-        assert event.ttc_sec is not None
+        assert event.ttc_sec is None
         assert event.bbox == track.bbox
 
     def test_no_expansion_safe(self):

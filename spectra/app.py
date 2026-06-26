@@ -131,7 +131,7 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
     ]
 
     payload: dict[str, Any] = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "metadata": {
             "sourceName": source_name,
             "fps": result.get("fps"),

@@ -79,21 +79,8 @@ export function initializeSpectra() {
     const s = Math.floor(Math.max(0, n) % 60);
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
-  const ttcLabel = (v) => {
-    const n = num(v, null);
-    return n === null ? MISSING : `${n.toFixed(1)}s`;
-  };
-  const normalizeDisplayTtc = (stateOrBand, ttc) => {
-    const n = num(ttc, null);
-    if (n === null || n <= 0.05) return null;
-    // TTC remains available to the temporal chart even when the scene is SAFE,
-    // so the chart can stay continuous while the banner stays calm.
-    return n;
-  };
-  const normalizeBannerTtc = (stateOrBand, ttc) => {
-    if (stateClass(stateOrBand) === "safe") return null;
-    return normalizeDisplayTtc(stateOrBand, ttc);
-  };
+  const etaDisplay = (eta) => eta?.display || MISSING;
+  const etaSeconds = (eta) => eta?.status === "closing" ? num(eta?.sec, null) : null;
   const laneWithPosition = (lane, lanePosition) => {
     const laneText = lane ? shortLane(lane) : MISSING;
     const pos = num(lanePosition, null);
@@ -117,10 +104,8 @@ export function initializeSpectra() {
     return t === null ? "" : t.toFixed(2);
   };
 
-  // Lift the primary object's fields onto the row so existing consumers
-  // (chart, banner, panel) can keep using flat ``row.ttcSec``/``row.lane``
-  // access. The backend now serialises the v2 schema, where these live
-  // inside ``objects[primaryObjectId]``; we resolve them once on entry.
+  // Lift the primary object's v3 fields onto the row so chart, banner and
+  // panel consumers can read the selected object's ETA/risk data directly.
   const getPrimaryObject = (row) => {
     if (!row || !Array.isArray(row.objects)) return null;
     const id = row.primaryObjectId;
@@ -128,9 +113,9 @@ export function initializeSpectra() {
     return row.objects.find((o) => o && o.objectId === id) || null;
   };
 
-  const flattenObjectV2 = (obj) => {
+  const flattenObjectV3 = (obj) => {
     if (!obj) return obj;
-    const conf = num(obj.confidence, null);
+    const conf = num(obj.overallConfidence, null);
     return {
       ...obj,
       riskState: obj.rawRiskState ?? obj.riskState,
@@ -138,11 +123,13 @@ export function initializeSpectra() {
     };
   };
 
-  const flattenFrameV2 = (frame) => {
+  const flattenFrameV3 = (frame) => {
     if (!frame) return frame;
-    const objs = Array.isArray(frame.objects) ? frame.objects.map(flattenObjectV2) : [];
+    const objs = Array.isArray(frame.objects) ? frame.objects.map(flattenObjectV3) : [];
     const primary = objs.find((o) => o && o.objectId === frame.primaryObjectId) || null;
     const ts = num(frame.timestampSec, null);
+    const riskFactors = primary?.riskFactors || {};
+    const kinematics = primary?.kinematics || {};
     return {
       ...frame,
       objects: objs,
@@ -152,21 +139,23 @@ export function initializeSpectra() {
       displayId: primary?.displayId ?? frame.primaryDisplayId ?? frame.primaryObjectId ?? null,
       objectType: primary?.objectType ?? null,
       lane: primary ? (frame.primaryLane ?? null) : null,
-      ttcSec: primary?.ttcSec ?? null,
-      nearScore: primary?.nearScore ?? null,
-      closingSpeed: primary?.closingSpeed ?? null,
-      distanceM: primary?.distanceM ?? null,
-      closingMps: primary?.closingMps ?? null,
-      depthTtcSec: primary?.depthTtcSec ?? null,
-      crossingRisk: primary?.crossingRisk ?? null,
+      collisionEta: primary?.collisionEta ?? null,
+      riskFactors: primary?.riskFactors ?? null,
+      kinematics: primary?.kinematics ?? null,
+      evidence: primary?.evidence ?? null,
+      proximityScore: riskFactors.proximity ?? null,
+      approachScore: riskFactors.approach ?? null,
+      crossingScore: riskFactors.crossing ?? null,
+      distanceM: kinematics.distanceM ?? null,
+      closingMps: kinematics.closingMps ?? null,
       lanePosition: primary?.lanePosition ?? null,
-      confidencePct: primary ? (num(primary.confidence, 0) * 100) : null,
+      confidencePct: primary ? (num(primary.overallConfidence, 0) * 100) : null,
     };
   };
 
-  const flattenEventV2 = (event, imagesByRef) => {
+  const flattenEventV3 = (event, imagesByRef) => {
     if (!event) return event;
-    const flat = flattenFrameV2(event);
+    const flat = flattenFrameV3(event);
     const ref = event.imageRef;
     const images = ref && imagesByRef && imagesByRef[ref] ? imagesByRef[ref] : null;
     return {
@@ -186,11 +175,13 @@ export function initializeSpectra() {
   const eventSeverityScore = (ev) => {
     const sc = stateClass(ev?.riskState);
     const stateWeight = sc === "danger" ? 2 : sc === "caution" ? 1 : 0;
-    const ttc = num(ev?.ttcSec, null);
-    const ttcWeight = ttc === null ? 0 : clamp((3 - ttc) / 3, 0, 1);
-    const near = num(ev?.nearScore, 0);
-    const closing = num(ev?.closingSpeed, 0);
-    return stateWeight + ttcWeight + near + closing;
+    const eta = etaSeconds(ev?.collisionEta);
+    const etaWeight = eta === null ? 0 : clamp((3 - eta) / 3, 0, 1);
+    const factors = ev?.riskFactors || {};
+    const near = num(factors.proximity, 0);
+    const approach = num(factors.approach, 0);
+    const crossing = num(factors.crossing, 0);
+    return stateWeight + etaWeight + near + approach + (0.5 * crossing);
   };
   const eventStateClass = (ev) => stateClass(ev?.riskState);
   const isActionableObject = (obj) => {
@@ -198,9 +189,6 @@ export function initializeSpectra() {
     return sc === "caution" || sc === "danger";
   };
   const eventTimestamp = (ev) => num(ev?.timestampSec, null);
-  const eventDisplayTtc = (ev) => {
-    return normalizeDisplayTtc(ev?.riskState, ev?.ttcSec);
-  };
   const eventLane = (ev) => titleCase(ev?.lane);
   const eventItemsFromEvents = (events) => (Array.isArray(events) ? events : [])
     .map((ev, sourceIndex) => ({
@@ -208,7 +196,7 @@ export function initializeSpectra() {
       index: sourceIndex,
       sc: eventStateClass(ev),
       ts: eventTimestamp(ev),
-      ttc: eventDisplayTtc(ev),
+      eta: ev?.collisionEta || null,
     }))
     .filter((item) => item.ts !== null && (item.sc === "caution" || item.sc === "danger"));
   const timelineEventItems = (source = state) => {
@@ -219,7 +207,7 @@ export function initializeSpectra() {
   };
   const eventTooltip = (item) => {
     const parts = [`#${(item.displayIndex ?? item.index) + 1}`, formatSeconds(item.ts), item.sc.toUpperCase()];
-    if (item.ttc !== null) parts.push(`TTC ${item.ttc.toFixed(1)}s`);
+    parts.push(`ETA ${etaDisplay(item.eta)}`);
     const lane = eventLane(item.ev);
     if (lane) parts.push(lane);
     return parts.join(" | ");
@@ -230,30 +218,26 @@ export function initializeSpectra() {
     if (sc === "caution") return 1;
     return 0;
   };
-  const validTimelineTtc = (value) => {
-    const ttc = num(value, null);
-    return ttc === null || ttc < 0 ? null : ttc;
-  };
   const preferTimelineRow = (candidate, current) => {
     if (!current) return true;
     const candidateSeverity = timelineSeverity(candidate);
     const currentSeverity = timelineSeverity(current);
     if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity;
 
-    const candidateTtc = validTimelineTtc(candidate?.ttcSec);
-    const currentTtc = validTimelineTtc(current?.ttcSec);
-    if (candidateTtc !== null && currentTtc !== null && candidateTtc !== currentTtc) {
-      return candidateTtc < currentTtc;
+    const candidateEta = etaSeconds(candidate?.collisionEta);
+    const currentEta = etaSeconds(current?.collisionEta);
+    if (candidateEta !== null && currentEta !== null && candidateEta !== currentEta) {
+      return candidateEta < currentEta;
     }
-    if (candidateTtc !== null && currentTtc === null) return true;
-    if (candidateTtc === null && currentTtc !== null) return false;
+    if (candidateEta !== null && currentEta === null) return true;
+    if (candidateEta === null && currentEta !== null) return false;
 
-    const candidateClosing = num(candidate?.closingSpeed, null);
-    const currentClosing = num(current?.closingSpeed, null);
-    if (candidateClosing !== null && currentClosing !== null && candidateClosing !== currentClosing) {
-      return candidateClosing > currentClosing;
+    const candidateApproach = num(candidate?.riskFactors?.approach, null);
+    const currentApproach = num(current?.riskFactors?.approach, null);
+    if (candidateApproach !== null && currentApproach !== null && candidateApproach !== currentApproach) {
+      return candidateApproach > currentApproach;
     }
-    if (candidateClosing !== null && currentClosing === null) return true;
+    if (candidateApproach !== null && currentApproach === null) return true;
     return false;
   };
   const normalizeTimelineRowsForChart = (rows) => {
@@ -270,7 +254,6 @@ export function initializeSpectra() {
     return Array.from(grouped.values()).sort((a, b) => a.timeSec - b.timeSec);
   };
   const timelinePointTooltip = (point) => {
-    const ttc = point.ttc === null ? MISSING : `${point.ttc.toFixed(1)}s`;
     const type = shortType(point.objectType);
     const displayId = point.displayId ?? point.objectId;
     const id = isReal(displayId) ? ` #${displayId}` : "";
@@ -278,7 +261,7 @@ export function initializeSpectra() {
     return [
       `Time: ${point.timeSec.toFixed(2).replace(/\.?0+$/, "")}s`,
       `State: ${point.riskState}`,
-      `TTC: ${ttc}`,
+      `ETA: ${etaDisplay(point.collisionEta)}`,
       `Object: ${object}`,
       `Lane: ${shortLane(point.lane)}`,
     ].join("\n");
@@ -390,7 +373,7 @@ export function initializeSpectra() {
     const metadata = payload?.metadata || {};
     const imagesByRef = (payload?.images && typeof payload.images === "object") ? payload.images : {};
     const peakEventRaw = payload?.peakEvent || null;
-    const peakEvent = peakEventRaw ? flattenEventV2(peakEventRaw, imagesByRef) : null;
+    const peakEvent = peakEventRaw ? flattenEventV3(peakEventRaw, imagesByRef) : null;
     const peakImages = peakEvent?.images || {};
 
     const eventKey = (ev) => `${ev?.frameIndex ?? ""}:${num(ev?.timestampSec, null) ?? ""}`;
@@ -402,7 +385,7 @@ export function initializeSpectra() {
     }
     if (Array.isArray(payload?.events)) {
       payload.events.forEach((evRaw) => {
-        const flat = flattenEventV2(evRaw, imagesByRef);
+        const flat = flattenEventV3(evRaw, imagesByRef);
         const key = eventKey(flat);
         if (seenEvents.has(key)) return;
         events.push(flat);
@@ -410,7 +393,7 @@ export function initializeSpectra() {
       });
     }
 
-    const frames = Array.isArray(payload?.frames) ? payload.frames.map(flattenFrameV2) : [];
+    const frames = Array.isArray(payload?.frames) ? payload.frames.map(flattenFrameV3) : [];
 
     return {
       images: {
@@ -524,11 +507,13 @@ export function initializeSpectra() {
     const n = num(value, null);
     return n === null ? MISSING : `${n.toFixed(n < 10 ? 1 : 0)}m`;
   };
-
-  function objectTtcLabel(value) {
+  const closingLabel = (value) => {
     const n = num(value, null);
-    return n === null ? "-" : `${n.toFixed(1)}s`;
-  }
+    if (n === null) return "Estimating";
+    if (n > 0.30) return `${n.toFixed(1)} m/s`;
+    if (n < -0.30) return "Receding";
+    return "Parallel";
+  };
 
   function focusSummaryFrame(source) {
     if (state.uiMode !== "summary") return;
@@ -582,10 +567,10 @@ export function initializeSpectra() {
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
     banner.classList.add(riskClass(riskState));
     byId("risk-band-main").textContent = riskState ? String(riskState).toUpperCase() : MISSING;
-    byId("alert-ttc").textContent = ttcLabel(normalizeBannerTtc(riskState, source?.ttcSec));
+    byId("alert-ttc").textContent = etaDisplay(source?.collisionEta);
     byId("risk-object").textContent = objectLabel(source);
-    byId("risk-lane").textContent = laneWithPosition(source?.lane, source?.lanePosition);
-    byId("risk-confidence").textContent = percentLabel(source?.confidencePct);
+    byId("risk-lane").textContent = distanceLabel(source?.kinematics?.distanceM);
+    byId("risk-confidence").textContent = closingLabel(source?.kinematics?.closingMps);
     const tag = byId("risk-time-tag");
     if (tag) {
       if (timeTag) { tag.innerHTML = timeTag; tag.hidden = false; }
@@ -633,7 +618,7 @@ export function initializeSpectra() {
           button.innerHTML = `
             <span class="status-dot is-${sClass}"></span>
             <span class="detection-main">${objectLabel(item)}</span>
-            <span class="detection-ttc"><span style="color:var(--muted); margin-right:4px; font-size:10.5px; font-weight:600;">TTC:</span>${objectTtcLabel(item.ttcSec)}</span>
+            <span class="detection-ttc"><span style="color:var(--muted); margin-right:4px; font-size:10.5px; font-weight:600;">ETA:</span>${etaDisplay(item.collisionEta)}</span>
           `;
           list.appendChild(button);
         });
@@ -674,11 +659,13 @@ export function initializeSpectra() {
       }
     }
 
-    setSignalBar("near", activeObject?.nearScore);
+    const factors = activeObject?.riskFactors || {};
+    const kinematics = activeObject?.kinematics || {};
+    setSignalBar("near", factors.proximity);
     const distanceValue = byId("signal-near-value");
-    if (distanceValue) distanceValue.textContent = distanceLabel(activeObject?.distanceM);
-    setSignalBar("closing", activeObject?.closingSpeed);
-    setSignalBar("crossing", activeObject?.crossingRisk);
+    if (distanceValue) distanceValue.textContent = distanceLabel(kinematics.distanceM);
+    setSignalBar("closing", factors.approach);
+    setSignalBar("crossing", factors.crossing);
     const conf = num(activeObject?.confidencePct, null);
     setSignalBar("confidence", conf === null ? null : conf / 100);
   }
@@ -742,10 +729,11 @@ export function initializeSpectra() {
       card.addEventListener("click", () => focusEvent(idx));
 
       const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || resultImages.original || resultImages.blend);
-      const displayTtcVal = item.ttc;
-      const nearVal = num(ev.nearScore, null);
-      const speedVal = num(ev.closingSpeed, null);
-      const crossVal = num(ev.crossingRisk, null);
+      const factors = ev.riskFactors || {};
+      const kinematics = ev.kinematics || {};
+      const nearVal = num(factors.proximity, null);
+      const speedVal = num(factors.approach, null);
+      const crossVal = num(factors.crossing, null);
       const confPct = num(ev.confidencePct, null);
       const confVal = confPct === null ? null : confPct / 100;
 
@@ -769,8 +757,8 @@ export function initializeSpectra() {
               <span class="val">${shortType(ev.objectType)}</span>
             </div>
             <div class="box-item">
-              <span class="lbl">TTC</span>
-              <span class="val">${ttcLabel(displayTtcVal)}</span>
+              <span class="lbl">ETA</span>
+              <span class="val">${etaDisplay(ev.collisionEta)}</span>
             </div>
             <div class="box-item">
               <span class="lbl">LANE</span>
@@ -782,7 +770,7 @@ export function initializeSpectra() {
             <div class="bar-row bar-proximity">
               <span class="lbl">Proximity</span>
               <div class="bar-outer"><div class="bar-inner" style="width: ${(nearVal || 0) * 100}%"></div></div>
-              <span class="val">${distanceLabel(ev.distanceM)}</span>
+              <span class="val">${distanceLabel(kinematics.distanceM)}</span>
             </div>
             <div class="bar-row bar-approach">
               <span class="lbl">Approach</span>
@@ -878,9 +866,10 @@ export function initializeSpectra() {
           timeSec: row.timeSec,
           sc: sc === "none" ? "safe" : sc,
           riskState,
-          ttc: validTimelineTtc(row.ttcSec),
+          collisionEta: row.collisionEta,
           objectType: row.objectType,
           objectId: row.objectId,
+          displayId: row.displayId,
           lane: row.lane,
         };
       });
@@ -1255,8 +1244,8 @@ export function initializeSpectra() {
       showPreviewOverlay(msg.frameImage);
     }
 
-    const flatFrame = msg.frame ? flattenFrameV2(msg.frame) : null;
-    const flatFrames = Array.isArray(msg.frames) ? msg.frames.map(flattenFrameV2) : null;
+    const flatFrame = msg.frame ? flattenFrameV3(msg.frame) : null;
+    const flatFrames = Array.isArray(msg.frames) ? msg.frames.map(flattenFrameV3) : null;
     const ts = num(flatFrame?.timestampSec, 0);
 
     const status = byId("ap-status");

@@ -48,7 +48,7 @@ def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
         label_parts.append(f"#{display_id}")
     label_parts.append(event.object_type.upper())
     if event.ttc_sec is not None:
-        label_parts.append(f"{event.ttc_sec:.1f}s")
+        label_parts.append(f"ETA {event.ttc_sec:.1f}s")
     if event.brake_score >= 0.5:
         label_parts.append("BRAKE")
     label = " ".join(label_parts)
@@ -251,7 +251,7 @@ def annotate_frame(
     for event in sorted(object_events, key=lambda e: state_order.get(e.state, 0)):
         _draw_bbox(output, event)
 
-    ttc_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
+    eta_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
     lane_lbl = _readable_lane(primary_event.lane)
     obj_lbl = (primary_event.object_type or "scene").upper()
 
@@ -270,7 +270,7 @@ def annotate_frame(
         cv2.addWeighted(panel, 0.78, output, 0.22, 0, output)
         cv2.rectangle(output, (card_x, card_y), (card_x + card_w, card_y2), (40, 50, 65), 1, cv2.LINE_AA)
 
-        # row 1 — state pill + TTC
+        # row 1 — state pill + physical ETA
         pill_h = 18
         state_text = primary_event.state
         (stw, sth), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
@@ -287,7 +287,7 @@ def annotate_frame(
             1,
             cv2.LINE_AA,
         )
-        ttc_label = f"TTC {ttc_str}"
+        ttc_label = f"ETA {eta_str}"
         cv2.putText(
             output,
             ttc_label,

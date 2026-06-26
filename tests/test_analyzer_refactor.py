@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import spectra.analysis.video as video
-from spectra.analysis.risk import RiskEvent
+from spectra.analysis.risk import RiskEvent, TtcComponent
 
 # Per-frame script shared between the fake loader and fake analyzer.
 _SPECS: list[dict] = []
@@ -109,6 +109,124 @@ def test_result_shape_and_processed_count(monkeypatch):
     assert set(result["frames"][0]) >= {
         "frameIndex", "timestampSec", "stabilizedRiskState", "primaryObjectId",
         "primaryRiskScore", "primaryLane", "objects",
+    }
+
+
+def test_object_metric_emits_v3_collision_eta_contract():
+    event = RiskEvent(
+        frame_index=1,
+        timestamp_sec=0.1,
+        state="DANGER",
+        ttc_sec=0.5,
+        direction="center",
+        lane="left",
+        object_type="car",
+        confidence=0.82,
+        near_score=1.0,
+        velocity_magnitude=0.31,
+        closing_speed=0.83,
+        bbox=(1, 1, 3, 3),
+        reason="",
+        object_id=9,
+        display_id=2,
+        expansion_rate=0.42,
+        crossing_risk=0.51,
+        lane_position=-10.0,
+        brake_score=0.2,
+        distance_m=4.0,
+        closing_mps=8.0,
+        detection_confidence=0.76,
+        tracking_confidence=0.66,
+        depth_confidence=0.8,
+        ttc_components=(TtcComponent("depth", 0.5, 0.8),),
+    )
+
+    obj = video._object_metric(event)
+
+    assert obj["collisionEta"] == {
+        "status": "closing",
+        "display": "0.5s",
+        "source": "depth_kalman",
+        "sec": 0.5,
+    }
+    assert obj["kinematics"]["distanceM"] == 4.0
+    assert obj["kinematics"]["closingMps"] == 8.0
+    for removed_kinematic in ("rangeStatus", "distanceDisplay", "closingDisplay"):
+        assert removed_kinematic not in obj["kinematics"]
+    assert obj["overallConfidence"] == 0.82
+    assert obj["confidence"] == {
+        "detection": 0.76,
+        "tracking": 0.66,
+        "depth": 0.8,
+    }
+    assert obj["riskFactors"]["approach"] == 0.83
+    assert all(0.0 <= value <= 1.0 for value in obj["riskFactors"].values())
+    assert obj["evidence"]["detector"]["confidence"] == obj["confidence"]["detection"]
+    assert obj["evidence"]["depth"]["confidence"] == obj["confidence"]["depth"]
+    assert obj["evidence"]["flow"] == {"expansionScore": 0.42, "radialScore": 0.31}
+    assert obj["lanePosition"] == -1.5
+    assert "riskReason" not in obj
+    for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
+        assert removed not in obj
+
+
+def test_object_metric_uses_status_instead_of_null_user_eta():
+    event = RiskEvent(
+        frame_index=1,
+        timestamp_sec=0.1,
+        state="CAUTION",
+        ttc_sec=None,
+        direction="center",
+        lane="center",
+        object_type="truck",
+        confidence=0.7,
+        near_score=0.8,
+        velocity_magnitude=0.0,
+        closing_speed=0.2,
+        bbox=(1, 1, 3, 3),
+        reason="",
+        object_id=3,
+        distance_m=8.0,
+        closing_mps=-1.2,
+        detection_confidence=0.7,
+        tracking_confidence=0.5,
+        depth_confidence=0.0,
+        ttc_components=(TtcComponent("depth", None, 0.0),),
+    )
+
+    eta = video._object_metric(event)["collisionEta"]
+    assert eta["status"] == "not_closing"
+    assert eta["display"] == "No closing"
+    assert "sec" not in eta
+
+
+def test_object_metric_clamps_risk_factors_to_unit_interval():
+    event = RiskEvent(
+        frame_index=1,
+        timestamp_sec=0.1,
+        state="DANGER",
+        ttc_sec=None,
+        direction="center",
+        lane="center",
+        object_type="car",
+        confidence=2.0,
+        near_score=1.8,
+        velocity_magnitude=0.0,
+        closing_speed=2.4,
+        bbox=(1, 1, 3, 3),
+        reason="",
+        object_id=4,
+        crossing_risk=-0.5,
+        brake_score=3.0,
+    )
+
+    obj = video._object_metric(event)
+    assert obj["overallConfidence"] == 1.0
+    assert obj["riskFactors"] == {
+        "proximity": 1.0,
+        "approach": 1.0,
+        "crossing": 0.0,
+        "brake": 1.0,
     }
 
 

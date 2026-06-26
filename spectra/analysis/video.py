@@ -292,6 +292,11 @@ def _to_rgb(image_bgr: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
 
+_ETA_HORIZON_SEC = 10.0
+_ETA_LOW_CONFIDENCE = 0.12
+_MIN_CLOSING_FOR_DISPLAY_MPS = 0.30
+
+
 def _risk_score(event: RiskEvent) -> float:
     state_floor = {
         "SAFE": 0.06,
@@ -299,8 +304,8 @@ def _risk_score(event: RiskEvent) -> float:
         "DANGER": 0.68,
     }.get(event.state, 0.0)
     signal = min(1.0, (0.52 * event.near_score) + (0.48 * event.closing_speed))
-    # TTC pressure only contributes when the stabilized state is non-SAFE; a
-    # calm scene with a far TTC reading should not inflate the risk score.
+    # ETA pressure only contributes when the stabilized state is non-SAFE; a
+    # calm scene with a far physical ETA should not inflate the risk score.
     if event.state == "SAFE" or event.ttc_sec is None:
         ttc_pressure = 0.0
     else:
@@ -308,7 +313,118 @@ def _risk_score(event: RiskEvent) -> float:
     return round(float(max(state_floor, (0.48 * signal) + (0.52 * ttc_pressure))), 3)
 
 
+def _display_lane_position(lane_position: float) -> float:
+    return round(float(np.clip(lane_position, -1.5, 1.5)), 3)
+
+
+def _depth_component(event: RiskEvent) -> Any | None:
+    for component in event.ttc_components:
+        if component.name == "depth":
+            return component
+    return None
+
+
+def _collision_eta_metric(event: RiskEvent) -> dict[str, Any]:
+    depth_component = _depth_component(event)
+    distance_m = event.distance_m
+    closing_mps = event.closing_mps
+    status = "estimating"
+    display = "Estimating"
+    sec: float | None = None
+
+    if distance_m is None or closing_mps is None:
+        status = "estimating"
+        display = "Estimating"
+    elif float(closing_mps) <= _MIN_CLOSING_FOR_DISPLAY_MPS:
+        status = "not_closing"
+        display = "No closing"
+    else:
+        raw_eta = float(distance_m) / max(float(closing_mps), 1e-6)
+        confidence = float(getattr(depth_component, "confidence", 0.0) or 0.0)
+        if raw_eta > _ETA_HORIZON_SEC:
+            status = "beyond_horizon"
+            display = f">{_ETA_HORIZON_SEC:.0f}s"
+        elif confidence < _ETA_LOW_CONFIDENCE:
+            status = "low_confidence"
+            display = "Low confidence"
+        else:
+            status = "closing"
+            sec = event.ttc_sec if event.ttc_sec is not None else raw_eta
+            display = f"{float(sec):.1f}s"
+
+    eta: dict[str, Any] = {
+        "status": status,
+        "display": display,
+        "source": "depth_kalman",
+    }
+    if sec is not None:
+        eta["sec"] = round(float(sec), 2)
+    return eta
+
+
+def _kinematics_metric(event: RiskEvent) -> dict[str, Any]:
+    kinematics: dict[str, Any] = {}
+    if event.distance_m is not None:
+        kinematics["distanceM"] = round(float(event.distance_m), 2)
+    if event.closing_mps is not None:
+        kinematics["closingMps"] = round(float(event.closing_mps), 2)
+    return kinematics
+
+
+def _unit_score(value: float | int | None) -> float:
+    return round(float(np.clip(0.0 if value is None else float(value), 0.0, 1.0)), 3)
+
+
+def _risk_factors_metric(event: RiskEvent) -> dict[str, float]:
+    return {
+        "proximity": _unit_score(event.near_score),
+        "approach": _unit_score(event.closing_speed),
+        "crossing": _unit_score(event.crossing_risk),
+        "brake": _unit_score(event.brake_score),
+    }
+
+
+def _confidence_metric(event: RiskEvent) -> dict[str, float]:
+    return {
+        "detection": _unit_score(event.detection_confidence),
+        "tracking": _unit_score(event.tracking_confidence),
+        "depth": _unit_score(event.depth_confidence),
+    }
+
+
+def _evidence_metric(event: RiskEvent, lane_position: float, confidence: dict[str, float]) -> dict[str, Any]:
+    depth: dict[str, Any] = {
+        "source": "depth_kalman",
+        "status": "tracked" if event.distance_m is not None else "estimating",
+        "confidence": confidence["depth"],
+    }
+    if event.distance_m is not None:
+        depth["distanceM"] = round(float(event.distance_m), 2)
+    if event.closing_mps is not None:
+        depth["closingMps"] = round(float(event.closing_mps), 2)
+
+    return {
+        "detector": {
+            "source": "yolo",
+            "class": event.object_type,
+            "confidence": confidence["detection"],
+        },
+        "depth": depth,
+        "flow": {
+            "expansionScore": round(float(np.clip(event.expansion_rate, 0.0, 1.0)), 3),
+            "radialScore": round(float(np.clip(event.velocity_magnitude, 0.0, 1.0)), 3),
+        },
+        "lane": {
+            "bucket": event.lane,
+            "position": lane_position,
+            "crossingRisk": round(float(event.crossing_risk), 3),
+        },
+    }
+
+
 def _object_metric(event: RiskEvent) -> dict[str, Any]:
+    lane_position = _display_lane_position(event.lane_position)
+    confidence = _confidence_metric(event)
     return {
         "objectId": event.object_id,
         "displayId": event.display_id,
@@ -316,16 +432,13 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
         "rawRiskState": event.state,
         "riskScore": _risk_score(event),
         "lane": event.lane,
-        "ttcSec": event.ttc_sec,
-        "nearScore": event.near_score,
-        "closingSpeed": event.closing_speed,
-        "crossingRisk": event.crossing_risk,
-        "lanePosition": event.lane_position,
-        "confidence": round(event.confidence, 4),
-        "brakeScore": event.brake_score,
-        "distanceM": event.distance_m,
-        "closingMps": event.closing_mps,
-        "depthTtcSec": event.depth_ttc_sec,
+        "lanePosition": lane_position,
+        "overallConfidence": _unit_score(event.confidence),
+        "confidence": confidence,
+        "collisionEta": _collision_eta_metric(event),
+        "kinematics": _kinematics_metric(event),
+        "riskFactors": _risk_factors_metric(event),
+        "evidence": _evidence_metric(event, lane_position, confidence),
     }
 
 
@@ -337,11 +450,11 @@ def _event_payload_base(
 ) -> dict[str, Any]:
     """Build the metadata-only event payload. RGB views are attached later.
 
-    Client-facing fields use the v2 schema names (``stabilized_risk_state``,
-    ``primary_*``). The primary event's raw metrics (``ttc_sec``,
-    ``near_score``, ``closing_speed``) are kept on the payload too because
-    ``score_event_payload`` ranks saved events by them; ``_serialize_event``
-    drops these internal scratch fields before the JSON leaves the server.
+    Client-facing fields use schema names (``stabilized_risk_state``,
+    ``primary_*``). The primary event's raw scoring inputs are kept on the
+    payload as internal scratch fields because ``score_event_payload`` ranks
+    saved events by them; ``_serialize_event`` drops these before the JSON
+    leaves the server.
 
     ``primary_risk_score`` is computed from the **raw** primary event (before
     hysteresis stabilization) so it stays consistent with the matching entry
@@ -357,9 +470,10 @@ def _event_payload_base(
         "primary_object_id": event.object_id,
         "primary_risk_score": primary_risk_score,
         "primary_lane": event.lane,
-        "ttc_sec": event.ttc_sec,
-        "near_score": event.near_score,
-        "closing_speed": event.closing_speed,
+        "risk_score": _risk_score(event),
+        "collision_eta_sec": event.ttc_sec,
+        "proximity_score": event.near_score,
+        "approach_score": event.closing_speed,
         "objects": [_object_metric(item) for item in all_events if item.object_id is not None],
     }
 
@@ -659,7 +773,7 @@ class SpatialFrameAnalyzer:
         t_depth = time.perf_counter()
 
         # 2. Detect objects every N frames; between detections the tracker
-        # propagates existing tracks so IDs and TTC history stay continuous.
+        # propagates existing tracks so IDs and depth-Kalman history stay continuous.
         should_detect = fi % max(self.detect_every, 1) == 0
         if should_detect:
             # Pass the latest near_map so the corridor filter can admit
@@ -707,7 +821,7 @@ class SpatialFrameAnalyzer:
             )
             self.performance_sample_logs.append(log_line)
 
-        # 3. Per-object risk via scale-expansion TTC + lateral crossing.
+        # 3. Per-object collision ETA + risk evaluation.
         primary_event, all_events = build_object_events(
             frame_index=frame_index,
             timestamp_sec=timestamp_sec,
@@ -727,9 +841,8 @@ class SpatialFrameAnalyzer:
         )
 
         # 4. Smooth State Transitions (Hysteresis)
-        # Note: TTC is preserved through SAFE stabilization so the timeline
-        # chart stays continuous and the UI can still show a TTC reading
-        # while the scene is calm.
+        # Note: physical ETA is preserved through SAFE stabilization so the
+        # timeline can stay continuous while the scene is calm.
         # The primary's RAW risk score is captured before stabilization
         # mutates the event, so it stays consistent with the entry in
         # ``all_events`` (and therefore with ``objects[primaryObjectId]``).
@@ -957,7 +1070,7 @@ def analyze_spatial_video(
 def score_event_payload(payload: dict[str, Any]) -> float:
     return score_raw(
         state=str(payload.get("stabilized_risk_state") or "").upper(),
-        ttc_sec=payload.get("ttc_sec"),
-        near_score=float(payload.get("near_score") or 0.0),
-        closing_speed=float(payload.get("closing_speed") or 0.0),
+        ttc_sec=payload.get("collision_eta_sec"),
+        near_score=float(payload.get("proximity_score") or 0.0),
+        closing_speed=float(payload.get("approach_score") or 0.0),
     )

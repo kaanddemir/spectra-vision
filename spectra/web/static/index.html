@@ -338,7 +338,7 @@
                 </div>
                 <div class="modern-risk-info">
                   <h1 id="risk-band-main" class="modern-risk-title">—</h1>
-                  <div class="modern-ttc">TTC: <strong id="alert-ttc">—</strong></div>
+                  <div class="modern-ttc">Collision ETA: <strong id="alert-ttc">—</strong></div>
                 </div>
               </div>
 
@@ -348,11 +348,11 @@
                   <span class="metric-val" id="risk-object">—</span>
                 </div>
                 <div class="metric-box">
-                  <span class="metric-lbl">Lane Tracking</span>
+                  <span class="metric-lbl">Distance</span>
                   <span class="metric-val" id="risk-lane">—</span>
                 </div>
                 <div class="metric-box">
-                  <span class="metric-lbl">Confidence Level</span>
+                  <span class="metric-lbl">Closing</span>
                   <span class="metric-val" id="risk-confidence">—</span>
                 </div>
               </div>
@@ -793,12 +793,12 @@
                 <div class="step-num">06</div>
               </div>
               <h5>Risk Fusion</h5>
-              <p>Fuses TTC from bbox expansion, radial flow, and metric depth delta. Approach stays a normalized
-                percentage score led by estimated closing speed, with bbox growth and optical flow as supporting cues.
+              <p>Separates physical Collision ETA from risk evidence. Depth + Kalman estimates range motion, while
+                bbox growth, optical flow, lane crossing and brake cues explain the risk evaluation.
               </p>
               <div class="step-tags">
-                <span>TTC Fusion</span>
-                <span>Median Filter</span>
+                <span>Collision ETA</span>
+                <span>Risk Evidence</span>
               </div>
             </div>
 
