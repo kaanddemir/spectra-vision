@@ -20,8 +20,30 @@
   border: 1px solid var(--border-soft);
   overflow: visible;
 }
+.timeline-risk-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  min-width: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  opacity: 0.84;
+}
+.timeline-risk-segment.seg-safe {
+  background: linear-gradient(90deg, rgba(var(--safe-rgb), 0.42), rgba(var(--safe-rgb), 0.28));
+}
+.timeline-risk-segment.seg-caution {
+  background: linear-gradient(90deg, rgba(var(--caution-rgb), 0.78), rgba(var(--caution-rgb), 0.5));
+}
+.timeline-risk-segment.seg-danger {
+  background: linear-gradient(90deg, rgba(var(--danger-rgb), 0.9), rgba(var(--danger-rgb), 0.58));
+}
 .timeline-events {
   position: absolute; inset: 0;
+  z-index: 8;
+  pointer-events: none;
 }
 .timeline-event {
   appearance: none;
@@ -37,6 +59,7 @@
   border-radius: 50%;
   transform: translate(-50%, -50%);
   cursor: pointer;
+  pointer-events: auto;
   transition: transform 200ms ease, border-color 200ms ease, background 200ms ease;
 }
 .timeline-event:hover {
@@ -62,7 +85,7 @@
   background: var(--text);
   pointer-events: none;
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: 12;
 }
 
 .event-strip {

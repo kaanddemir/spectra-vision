@@ -99,6 +99,44 @@ def test_timeline_uses_backend_risk_score():
     assert "riskFactors" not in score_fn
 
 
+def test_video_risk_analysis_player_controls_are_present():
+    index = read_static("index.html")
+    controls = read_static("js/controls.js")
+    timeline_css = read_static("css/timeline.css")
+    preview_css = read_static("css/preview.css")
+
+    for element_id in (
+        "playback-mode-normal",
+        "playback-mode-risk",
+        "playback-mode-pause-risk",
+        "playback-mode-button",
+        "playback-mode-menu",
+        "export-snapshot",
+        "export-evidence-json",
+        "export-evidence-image",
+        "player-risk-segments",
+    ):
+        assert f'id="{element_id}"' in index
+
+    for contract in (
+        'playbackMode: "normal"',
+        "function riskSegmentsFromTimelineRows",
+        "function exportSnapshot",
+        "function exportEvidenceJson",
+        "function exportEvidenceImage",
+        "canvas.toBlob",
+        "selectedEvidenceSource",
+    ):
+        assert contract in controls
+
+    assert ".timeline-risk-segment.seg-danger" in timeline_css
+    assert ".player-mode-picker" in preview_css
+    assert ".mode-picker-button" in preview_css
+    assert ".mode-picker-menu" in preview_css
+    assert ".player-risk-segments" in preview_css
+    assert ".side-bar-btn:disabled" in preview_css
+
+
 def test_banner_metrics_have_no_duplicated_data():
     """Each datum appears exactly once: measurements, score contributors,
     multipliers, and advanced diagnostics never repeat the same value."""

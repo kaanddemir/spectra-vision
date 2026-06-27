@@ -49,6 +49,8 @@ export function initializeSpectra() {
     suppressVideoSyncCount: 0,
     selectedObjectId: null,
     objectsMenuCollapsed: false,
+    playbackMode: "normal",
+    pauseRiskLastKey: null,
   };
 
   const byId = (id) => document.getElementById(id);
@@ -222,6 +224,10 @@ export function initializeSpectra() {
     if (sc === "caution") return 1;
     return 0;
   };
+  const isRiskRow = (row) => {
+    const sc = stateClass(row?.riskState);
+    return sc === "caution" || sc === "danger";
+  };
   const preferTimelineRow = (candidate, current) => {
     if (!current) return true;
     const candidateScore = eventSeverityScore(candidate);
@@ -282,6 +288,34 @@ export function initializeSpectra() {
     return "risk-low";
   };
 
+  function safeFileStem(value) {
+    const raw = isReal(value) ? String(value) : "spectra";
+    return raw.replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "spectra";
+  }
+
+  function downloadBlob(blob, filename) {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadDataUrl(dataUrl, filename) {
+    if (!dataUrl) return;
+    try {
+      const response = await fetch(dataUrl);
+      downloadBlob(await response.blob(), filename);
+    } catch {
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = filename;
+      a.click();
+    }
+  }
+
   const shortLane = (lane) => {
     if (!isReal(lane)) return MISSING;
     const v = String(lane).toLowerCase();
@@ -312,6 +346,7 @@ export function initializeSpectra() {
       seekBar.style.setProperty("--fill", "0%");
       hidePreviewOverlay();
       refreshEmptyStates();
+      updateEvidenceControls();
       return;
     }
     previewVideo.src = resolved;
@@ -322,6 +357,7 @@ export function initializeSpectra() {
       const el = byId(id);
       if (el) el.hidden = true;
     });
+    updateEvidenceControls();
   }
 
   function refreshEmptyStates() {
@@ -784,6 +820,7 @@ export function initializeSpectra() {
   function renderTimeline(result) {
     const eventItems = timelineEventItems(result);
     const resultImages = result?.images || {};
+    const timelineRows = Array.isArray(result?.timelineRows) ? result.timelineRows : [];
     // Scale the strip to the analyzed window so the data fills the timeline.
     const { start: winStart, span: winSpan } = winBounds();
 
@@ -801,6 +838,7 @@ export function initializeSpectra() {
 
     const track = byId("timeline-events");
     track.replaceChildren();
+    renderFrameRiskSegments(timelineRows);
     const strip = byId("event-strip");
     strip.replaceChildren();
 
@@ -871,6 +909,65 @@ export function initializeSpectra() {
         </div>
       `;
       strip.appendChild(card);
+    });
+  }
+
+  function frameSegmentsFromTimelineRows(rows) {
+    const normalized = normalizeTimelineRowsForChart(rows)
+      .filter((row) => num(row.timeSec, null) !== null)
+      .sort((a, b) => a.timeSec - b.timeSec);
+    if (!normalized.length) return [];
+    const { start: winStart, end: winEnd } = winBounds();
+    return normalized.map((row, index) => {
+      const prev = normalized[index - 1] || null;
+      const next = normalized[index + 1] || null;
+      const rowTime = num(row.timeSec, winStart);
+      const start = index === 0 ? winStart : (num(prev?.timeSec, rowTime) + rowTime) / 2;
+      const end = next ? (rowTime + num(next.timeSec, rowTime)) / 2 : winEnd;
+      return {
+        start: clamp(start, winStart, winEnd),
+        end: clamp(Math.max(end, start), winStart, winEnd),
+        sc: stateClass(row.riskState) === "none" ? "safe" : stateClass(row.riskState),
+        row,
+      };
+    }).filter((segment) => segment.end > segment.start);
+  }
+
+  function riskSegmentsFromTimelineRows(rows) {
+    const frameSegments = frameSegmentsFromTimelineRows(rows);
+    const segments = [];
+    frameSegments.forEach((segment) => {
+      if (segment.sc !== "caution" && segment.sc !== "danger") return;
+      const last = segments[segments.length - 1] || null;
+      if (last && segment.start <= last.end + 0.06) {
+        last.end = Math.max(last.end, segment.end);
+        last.sc = last.sc === "danger" || segment.sc === "danger" ? "danger" : "caution";
+        return;
+      }
+      segments.push({ start: segment.start, end: segment.end, sc: segment.sc });
+    });
+    return segments;
+  }
+
+  function renderFrameRiskSegments(rows) {
+    const layer = byId("player-risk-segments");
+    if (!layer) return;
+    layer.replaceChildren();
+    const { start: winStart, span: winSpan } = winBounds();
+    const segments = frameSegmentsFromTimelineRows(rows);
+    if (!segments.length) return;
+
+    segments.forEach((segment) => {
+      const left = clamp(((segment.start - winStart) / winSpan) * 100, 0, 100);
+      const right = clamp(((segment.end - winStart) / winSpan) * 100, 0, 100);
+      const width = Math.max(0.18, right - left);
+      const el = document.createElement("span");
+      el.className = `timeline-risk-segment seg-${segment.sc}`;
+      el.style.left = `${left}%`;
+      el.style.width = `${width}%`;
+      el.title = `${segment.sc.toUpperCase()} ${formatSeconds(segment.start)} - ${formatSeconds(segment.end)}`;
+      el.setAttribute("aria-label", el.title);
+      layer.appendChild(el);
     });
   }
 
@@ -1199,11 +1296,94 @@ export function initializeSpectra() {
     if (previewVideo.hidden || !previewVideo.src) return;
     hidePreviewOverlay();
     const { start, end } = winBounds();
+    if (state.playbackMode === "risk") {
+      const segments = riskSegmentsFromTimelineRows(state.timelineRows);
+      if (!segments.length) return;
+      const current = previewVideo.currentTime;
+      const active = segments.find((segment) => current >= segment.start - 0.04 && current < segment.end - 0.04);
+      const next = active || segments.find((segment) => segment.start >= current - 0.04) || segments[0];
+      if (!active) {
+        try { previewVideo.currentTime = next.start; } catch {}
+      }
+    }
     // If parked at (or past) the window end, restart from the window start.
     if (previewVideo.currentTime >= end - 0.04 || previewVideo.currentTime < start - 0.04) {
       try { previewVideo.currentTime = start; } catch {}
     }
     previewVideo.play().catch(() => {});
+  }
+
+  function updatePlaybackModeButtons() {
+    document.querySelectorAll("[data-playback-mode]").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.playbackMode === state.playbackMode);
+    });
+    const label = byId("playback-mode-label");
+    if (label) {
+      label.textContent = state.playbackMode === "risk"
+        ? "Risk Only"
+        : state.playbackMode === "pause-risk"
+          ? "Pause On Risk"
+          : "Normal";
+    }
+  }
+
+  function setPlaybackMode(mode) {
+    state.playbackMode = mode === "risk" || mode === "pause-risk" ? mode : "normal";
+    state.pauseRiskLastKey = null;
+    updatePlaybackModeButtons();
+    closePlaybackModeMenu();
+  }
+
+  function setPlaybackModeMenuOpen(open) {
+    const menu = byId("playback-mode-menu");
+    const button = byId("playback-mode-button");
+    if (!menu || !button) return;
+    menu.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function closePlaybackModeMenu() {
+    setPlaybackModeMenuOpen(false);
+  }
+
+  function togglePlaybackModeMenu() {
+    const menu = byId("playback-mode-menu");
+    setPlaybackModeMenuOpen(!!menu?.hidden);
+  }
+
+  function handlePlaybackModeTick(currentTime) {
+    if (!previewVideo || previewVideo.paused) return;
+    if (state.playbackMode === "normal") return;
+
+    if (state.playbackMode === "risk") {
+      const segments = riskSegmentsFromTimelineRows(state.timelineRows);
+      if (!segments.length) {
+        previewVideo.pause();
+        return;
+      }
+      const active = segments.find((segment) => currentTime >= segment.start - 0.04 && currentTime < segment.end - 0.04);
+      if (active) return;
+      const next = segments.find((segment) => segment.start > currentTime + 0.04);
+      if (next) {
+        try { previewVideo.currentTime = next.start; } catch {}
+      } else {
+        previewVideo.pause();
+      }
+      return;
+    }
+
+    if (state.playbackMode === "pause-risk") {
+      const row = findTimelineRowAt(currentTime);
+      if (!isRiskRow(row)) return;
+      const key = timelineKey(row) || String(Math.round(currentTime * 10) / 10);
+      if (state.pauseRiskLastKey === key) return;
+      state.pauseRiskLastKey = key;
+      previewVideo.pause();
+      const target = num(row?.timeSec, currentTime);
+      state.suppressVideoSyncCount = 1;
+      seekPreviewVideo(target);
+      applyTimelineStateAt(target, { switchMode: true });
+    }
   }
 
   function applyTimelineStateAt(timeSec, { switchMode = true } = {}) {
@@ -1224,6 +1404,7 @@ export function initializeSpectra() {
     state.currentTimelineRow = row;
     if (switchMode) setUiMode("live", { timeSec: t });
     else renderRiskPanel();
+    updateEvidenceControls();
 
   }
 
@@ -1275,6 +1456,7 @@ export function initializeSpectra() {
     seekPreviewVideo(winStart);
     state.currentTimelineRow = findTimelineRowAt(winStart) || null;
     setUiMode("summary");
+    updateEvidenceControls();
   }
 
   function renderEmptyState() {
@@ -1291,6 +1473,7 @@ export function initializeSpectra() {
     setUiMode("live");
     renderTimeline({ events: [] });
     renderRiskTimeline({ timelineRows: [] });
+    updateEvidenceControls();
 
     updateChartCursor(0);
     const fMin = byId("frames-min"), fMax = byId("frames-max");
@@ -1750,7 +1933,10 @@ export function initializeSpectra() {
   // ─── preview controls ────────────────────────────────────
   function setupPreviewControls() {
     if (!previewVideo) return;
-    previewVideo.addEventListener("loadedmetadata", updateSourceMetaFromVideo);
+    previewVideo.addEventListener("loadedmetadata", () => {
+      updateSourceMetaFromVideo();
+      updateEvidenceControls();
+    });
     previewVideo.addEventListener("timeupdate", () => {
       const cur = previewVideo.currentTime;
       const { start, end } = winBounds();
@@ -1764,6 +1950,7 @@ export function initializeSpectra() {
       }
       updateVideoTimeControls(previewVideo.currentTime);
       syncToVideoTime();
+      handlePlaybackModeTick(previewVideo.currentTime);
     });
     previewVideo.addEventListener("seeked", syncToVideoTime);
     previewVideo.addEventListener("play", () => {
@@ -1822,6 +2009,100 @@ export function initializeSpectra() {
       if (e.target === overlay || e.target.closest(".close-btn")) overlay.remove();
     });
     document.body.appendChild(overlay);
+  }
+
+  function selectedEventAtCurrentTime() {
+    const selectedTs = eventTimestamp(state.selectedSummaryEvent);
+    if (selectedTs !== null) {
+      const exact = timelineEventItems().find((item) => Math.abs(item.ts - selectedTs) <= 0.05);
+      if (exact) return exact.ev;
+      return state.selectedSummaryEvent;
+    }
+    const idx = nearestEventIndexAt(previewVideo?.currentTime ?? 0, 0.35);
+    const item = timelineEventItemByIndex(idx);
+    return item?.ev || null;
+  }
+
+  function selectedEvidenceSource() {
+    return selectedEventAtCurrentTime()
+      || state.currentTimelineRow
+      || findTimelineRowAt(previewVideo?.currentTime ?? 0)
+      || state.currentResult?.peakEvent
+      || null;
+  }
+
+  function evidenceExportPayload() {
+    const source = selectedEvidenceSource();
+    if (!source) return null;
+    const primaryObject = getPrimaryObject(source) || source;
+    return {
+      sourceName: state.currentResult?.sourceName || fileInput.files[0]?.name || null,
+      frameIndex: source.frameIndex ?? null,
+      timestampSec: num(source.timestampSec ?? source.timeSec, null),
+      riskState: source.riskState || source.stabilizedRiskState || null,
+      riskScore: num(source.riskScore ?? source.primaryRiskScore, null),
+      primaryObject: primaryObject ? {
+        objectId: primaryObject.objectId ?? null,
+        displayId: primaryObject.displayId ?? null,
+        objectType: primaryObject.objectType ?? null,
+        collisionEta: primaryObject.collisionEta ?? source.collisionEta ?? null,
+        lane: primaryObject.lane ?? source.lane ?? null,
+        lanePosition: primaryObject.lanePosition ?? source.lanePosition ?? null,
+        riskFactors: primaryObject.riskFactors ?? source.riskFactors ?? null,
+        kinematics: primaryObject.kinematics ?? source.kinematics ?? null,
+        confidence: primaryObject.confidence ?? source.confidence ?? null,
+      } : null,
+    };
+  }
+
+  function updateEvidenceControls() {
+    const hasVideo = !!(previewVideo?.src && !previewVideo.hidden && previewVideo.readyState >= 1);
+    const hasEvidence = !!selectedEvidenceSource();
+    const imageEvent = selectedEventAtCurrentTime();
+    const hasImage = !!(imageEvent?.images?.blend);
+    const snapshot = byId("export-snapshot");
+    const image = byId("export-evidence-image");
+    const json = byId("export-evidence-json");
+    if (snapshot) snapshot.disabled = !hasVideo;
+    if (image) image.disabled = !hasImage;
+    if (json) json.disabled = !hasEvidence;
+  }
+
+  function exportSnapshot() {
+    if (!previewVideo || !previewVideo.src || previewVideo.readyState < 2) return;
+    const width = previewVideo.videoWidth;
+    const height = previewVideo.videoHeight;
+    if (!width || !height) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(previewVideo, 0, 0, width, height);
+    canvas.toBlob((blob) => {
+      const base = safeFileStem(state.currentResult?.sourceName || fileInput.files[0]?.name);
+      const stamp = Math.round((previewVideo.currentTime || 0) * 1000);
+      downloadBlob(blob, `${base}_snapshot_${stamp}ms.png`);
+    }, "image/png");
+  }
+
+  async function exportEvidenceImage() {
+    const event = selectedEventAtCurrentTime();
+    if (!event) return;
+    const blend = event?.images?.blend;
+    if (!blend) return;
+    const base = safeFileStem(state.currentResult?.sourceName || fileInput.files[0]?.name);
+    const ts = Math.round(num(event?.timestampSec ?? event?.timeSec, previewVideo?.currentTime ?? 0) * 1000);
+    await downloadDataUrl(mediaSrc(blend), `${base}_evidence_${ts}ms.jpg`);
+  }
+
+  function exportEvidenceJson() {
+    const payload = evidenceExportPayload();
+    if (!payload) return;
+    const base = safeFileStem(payload.sourceName);
+    const ts = Math.round(num(payload.timestampSec, previewVideo?.currentTime ?? 0) * 1000);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    downloadBlob(blob, `${base}_evidence_${ts}ms.json`);
   }
 
   function telemetryExportPayload() {
@@ -1967,6 +2248,19 @@ export function initializeSpectra() {
     byId("view-json-btn")?.addEventListener("click", openJsonView);
     byId("download-json-btn")?.addEventListener("click", downloadJson);
     byId("copy-json-btn")?.addEventListener("click", copyJson);
+    byId("export-snapshot")?.addEventListener("click", exportSnapshot);
+    byId("export-evidence-image")?.addEventListener("click", exportEvidenceImage);
+    byId("export-evidence-json")?.addEventListener("click", exportEvidenceJson);
+    byId("playback-mode-button")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      togglePlaybackModeMenu();
+    });
+    document.querySelectorAll("[data-playback-mode]").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setPlaybackMode(btn.dataset.playbackMode);
+      });
+    });
     
     byId("view-logs-btn")?.addEventListener("click", openLogsView);
     byId("copy-logs-btn")?.addEventListener("click", copyLogs);
@@ -1999,6 +2293,9 @@ export function initializeSpectra() {
 
     document.querySelectorAll("[data-drawer-close]").forEach((el) => el.addEventListener("click", closeDrawer));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+    document.addEventListener("click", (event) => {
+      if (!event.target?.closest?.(".player-mode-picker")) closePlaybackModeMenu();
+    });
 
     document.querySelectorAll("[data-help-close]").forEach(el => {
       el.addEventListener("click", closeHelpModal);
@@ -2007,6 +2304,7 @@ export function initializeSpectra() {
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         closeHelpModal();
+        closePlaybackModeMenu();
       }
     });
 
@@ -2014,6 +2312,7 @@ export function initializeSpectra() {
     setupSegmentedControls();
     setupAnalysisWindowMode();
     setupMaxSavedEventsClamp();
+    updatePlaybackModeButtons();
 
     document.querySelectorAll(".side-bar-btn").forEach((btn) => {
       btn.addEventListener("click", () => {

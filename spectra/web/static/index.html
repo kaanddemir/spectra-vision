@@ -224,6 +224,21 @@
                     <use href="#icon-info"></use>
                   </svg>
                 </button>
+                <button class="side-bar-btn" type="button" id="export-snapshot" title="Export current frame snapshot" disabled>
+                  <svg>
+                    <use href="#icon-download"></use>
+                  </svg>
+                </button>
+                <button class="side-bar-btn" type="button" id="export-evidence-image" title="Export overlay evidence image" disabled>
+                  <svg>
+                    <use href="#icon-download"></use>
+                  </svg>
+                </button>
+                <button class="side-bar-btn" type="button" id="export-evidence-json" title="Export selected frame evidence JSON" disabled>
+                  <svg>
+                    <use href="#icon-file-text"></use>
+                  </svg>
+                </button>
               </div>
               <div class="side-bar-panels">
                 <div class="side-bar-panel" id="side-panel-info" hidden>
@@ -246,7 +261,21 @@
                   <use href="#icon-pause"></use>
                 </svg>
               </button>
+              <div class="player-mode-picker">
+                <button class="mode-picker-button" type="button" id="playback-mode-button" aria-haspopup="true" aria-expanded="false" title="Playback mode">
+                  <span id="playback-mode-label">Normal</span>
+                  <svg>
+                    <use href="#icon-chevron-down"></use>
+                  </svg>
+                </button>
+                <div class="playback-mode-control mode-picker-menu" id="playback-mode-menu" hidden>
+                  <button type="button" id="playback-mode-normal" class="playback-mode-btn is-active" data-playback-mode="normal" title="Normal playback">Normal</button>
+                  <button type="button" id="playback-mode-risk" class="playback-mode-btn" data-playback-mode="risk" title="Play only caution and danger moments">Risk Only</button>
+                  <button type="button" id="playback-mode-pause-risk" class="playback-mode-btn" data-playback-mode="pause-risk" title="Pause when the next risk frame is reached">Pause On Risk</button>
+                </div>
+              </div>
               <div class="seek-track">
+                <div class="player-risk-segments" id="player-risk-segments"></div>
                 <input id="seek-bar" type="range" min="0" max="1000" value="0" step="1" aria-label="Video progress">
               </div>
               <span class="time-readout"><span id="time-current">00:00</span> / <span
