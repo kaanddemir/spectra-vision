@@ -331,7 +331,10 @@
 
               <div class="risk-sub-panel-head">
                 <h3 id="risk-panel-title">Current Risk</h3>
-                <span id="risk-time-tag" class="detail-ts" hidden></span>
+                <div class="risk-head-right">
+                  <span id="traffic-light-dot" class="tl-chip" hidden><span class="tl-dot"></span><span class="tl-label"></span></span>
+                  <span id="risk-time-tag" class="detail-ts" hidden></span>
+                </div>
               </div>
 
               <div class="modern-risk-main">
@@ -475,13 +478,24 @@
                   <summary>Advanced signals</summary>
                   <div class="evidence-grid">
                     <div class="evidence-group">
+                      <span class="evidence-group-lbl">Detector (YOLO)</span>
+                      <div class="evidence-row"><span>Class</span><span id="ev-detector-class">—</span></div>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-detector-conf">—</span></div>
+                    </div>
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Depth (Kalman)</span>
+                      <div class="evidence-row"><span>Status</span><span id="ev-depth-status">—</span></div>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-depth-conf">—</span></div>
+                    </div>
+                    <div class="evidence-group">
                       <span class="evidence-group-lbl">Flow</span>
                       <div class="evidence-row"><span>Expansion</span><span id="ev-flow-expansion">—</span></div>
                       <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
                     </div>
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Depth</span>
-                      <div class="evidence-row"><span>Status</span><span id="ev-depth-status">—</span></div>
+                      <span class="evidence-group-lbl">Lane</span>
+                      <div class="evidence-row"><span>Bucket</span><span id="ev-lane-bucket">—</span></div>
+                      <div class="evidence-row"><span>Position</span><span id="ev-lane-pos">—</span></div>
                     </div>
                   </div>
                 </details>

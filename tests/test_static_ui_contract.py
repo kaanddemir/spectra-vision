@@ -135,11 +135,15 @@ def test_banner_metrics_have_no_duplicated_data():
     assert 'id="signal-confidence"' in index
     assert 'id="mult-relevance"' not in index
 
-    # Advanced section holds only non-duplicated diagnostics (no distance /
-    # closing / crossing / confidence repeats).
-    for removed_ev in ("ev-depth-distance", "ev-depth-closing", "ev-lane-position", "ev-conf-detection"):
+    # Advanced section is the evidence drill-down (detector, depth, flow, lane).
+    # distance / closing stay out of it (they live in the Collision-ETA section)
+    # and crossing stays the Lane-relevance bar.
+    for removed_ev in ("ev-depth-distance", "ev-depth-closing", "ev-lane-crossing"):
         assert f'id="{removed_ev}"' not in index
-    for kept_ev in ("ev-flow-expansion", "ev-flow-radial", "ev-depth-status"):
+    for kept_ev in (
+        "ev-detector-class", "ev-detector-conf", "ev-depth-status", "ev-depth-conf",
+        "ev-flow-expansion", "ev-flow-radial", "ev-lane-bucket", "ev-lane-pos",
+    ):
         assert f'id="{kept_ev}"' in index
 
     # ETA pressure is derived client-side from the collision ETA seconds.

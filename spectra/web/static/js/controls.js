@@ -586,18 +586,40 @@ export function initializeSpectra() {
 
   // Advanced (non-duplicated) diagnostics only: flow signals + depth freshness.
   function renderAdvanced(source) {
+    // Detector / depth-confidence / lane read from canonical top-level fields;
+    // evidence only carries the unique diagnostics (depth.status, flow.*).
     const ev = source?.evidence || null;
+    const conf = source?.confidence || {};
+    setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
+    setText("ev-detector-conf", pctLabel(conf.detection));
+    const depth = ev?.depth || {};
+    setText("ev-depth-status", isReal(depth.status) ? titleCase(depth.status) : MISSING);
+    setText("ev-depth-conf", pctLabel(conf.depth));
     const flow = ev?.flow || {};
     setText("ev-flow-expansion", pctLabel(flow.expansionScore));
     setText("ev-flow-radial", pctLabel(flow.radialScore));
-    const depth = ev?.depth || {};
-    setText("ev-depth-status", isReal(depth.status) ? titleCase(depth.status) : MISSING);
+    setText("ev-lane-bucket", isReal(source?.lane) ? titleCase(source.lane) : MISSING);
+    const pos = num(source?.lanePosition, null);
+    setText("ev-lane-pos", pos === null ? MISSING : pos.toFixed(2));
   }
 
   const confidenceBreakdown = (conf) => {
     if (!conf) return "Detection / tracking / depth reliability.";
     return `Detection ${pctLabel(conf.detection)} · Tracking ${pctLabel(conf.tracking)} · Depth ${pctLabel(conf.depth)}`;
   };
+
+  // Frame-level traffic-light advisory (red/yellow/green); hidden otherwise.
+  function renderTrafficLight(source) {
+    const chip = byId("traffic-light-dot");
+    if (!chip) return;
+    const tl = source?.trafficLight;
+    const show = tl === "red" || tl === "yellow" || tl === "green";
+    chip.hidden = !show;
+    if (!show) return;
+    chip.dataset.state = tl;
+    const label = chip.querySelector(".tl-label");
+    if (label) label.textContent = titleCase(tl);
+  }
 
   function applyRiskBannerState({ source, timeTag }) {
     const hasObject = source?.objectId !== null && source?.objectId !== undefined;
@@ -715,6 +737,7 @@ export function initializeSpectra() {
     });
 
     renderObjectList(source);
+    renderTrafficLight(source);
     const activeObject = selectedObject || source;
       
     // Title text + info icon are static; only the (object) suffix is dynamic

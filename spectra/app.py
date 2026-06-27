@@ -79,6 +79,7 @@ def _serialize_event(
         "primaryObjectId": event.get("primary_object_id"),
         "primaryRiskScore": event.get("primary_risk_score"),
         "primaryLane": event.get("primary_lane"),
+        "trafficLight": event.get("traffic_light_state"),
         "objects": event.get("objects") or [],
     }
     if image_ref is not None:
@@ -131,7 +132,7 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
     ]
 
     payload: dict[str, Any] = {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "metadata": {
             "sourceName": source_name,
             "fps": result.get("fps"),

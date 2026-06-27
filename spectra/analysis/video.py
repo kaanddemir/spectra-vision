@@ -343,7 +343,6 @@ def _collision_eta_metric(event: RiskEvent) -> dict[str, Any]:
     eta: dict[str, Any] = {
         "status": status,
         "display": display,
-        "source": "depth_kalman",
     }
     if sec is not None:
         eta["sec"] = round(float(sec), 2)
@@ -380,32 +379,20 @@ def _confidence_metric(event: RiskEvent) -> dict[str, float]:
     }
 
 
-def _evidence_metric(event: RiskEvent, lane_position: float, confidence: dict[str, float]) -> dict[str, Any]:
-    depth: dict[str, Any] = {
-        "source": "depth_kalman",
-        "status": "tracked" if event.distance_m is not None else "estimating",
-        "confidence": confidence["depth"],
-    }
-    if event.distance_m is not None:
-        depth["distanceM"] = round(float(event.distance_m), 2)
-    if event.closing_mps is not None:
-        depth["closingMps"] = round(float(event.closing_mps), 2)
+def _evidence_metric(event: RiskEvent) -> dict[str, Any]:
+    """Diagnostic signals that are NOT already exposed at the top level.
 
+    Everything else the old ``evidence`` block carried (detector class/confidence,
+    depth distance/closing/confidence, lane bucket/position, crossing) duplicated
+    canonical fields (``objectType``, ``kinematics``, ``confidence``, ``lane``,
+    ``lanePosition``, ``riskFactors.crossing``); the UI now reads those directly,
+    so only the genuinely-unique signals remain here.
+    """
     return {
-        "detector": {
-            "source": "yolo",
-            "class": event.object_type,
-            "confidence": confidence["detection"],
-        },
-        "depth": depth,
+        "depth": {"status": "tracked" if event.distance_m is not None else "estimating"},
         "flow": {
             "expansionScore": round(float(np.clip(event.expansion_rate, 0.0, 1.0)), 3),
             "radialScore": round(float(np.clip(event.velocity_magnitude, 0.0, 1.0)), 3),
-        },
-        "lane": {
-            "bucket": event.lane,
-            "position": lane_position,
-            "crossingRisk": round(float(event.crossing_risk), 3),
         },
     }
 
@@ -426,7 +413,7 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
         "collisionEta": _collision_eta_metric(event),
         "kinematics": _kinematics_metric(event),
         "riskFactors": _risk_factors_metric(event),
-        "evidence": _evidence_metric(event, lane_position, confidence),
+        "evidence": _evidence_metric(event),
     }
 
 
@@ -435,6 +422,7 @@ def _event_payload_base(
     event: RiskEvent,
     all_events: list[RiskEvent],
     primary_risk_score: float,
+    traffic_light_state: str = "none",
 ) -> dict[str, Any]:
     """Build the metadata-only event payload. RGB views are attached later.
 
@@ -457,6 +445,7 @@ def _event_payload_base(
         "primary_object_id": event.object_id,
         "primary_risk_score": primary_risk_score,
         "primary_lane": event.lane,
+        "traffic_light_state": traffic_light_state,
         "risk_score": _risk_score(event),
         "collision_eta_sec": event.ttc_sec,
         "proximity_score": event.near_score,
@@ -929,6 +918,7 @@ def analyze_spatial_video(
             event=primary_event,
             all_events=all_events,
             primary_risk_score=primary_risk_score,
+            traffic_light_state=analysis.traffic_light_state,
         )
         deferred = _DeferredRender(
             frame_bgr=analysis.frame_bgr,

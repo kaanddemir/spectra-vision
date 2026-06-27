@@ -41,7 +41,6 @@ def _v3_object(**overrides):
         "collisionEta": {
             "status": "closing",
             "display": "2.2s",
-            "source": "depth_kalman",
             "sec": 2.2,
         },
         "kinematics": {
@@ -55,16 +54,8 @@ def _v3_object(**overrides):
             "brake": 0.0,
         },
         "evidence": {
-            "detector": {"source": "yolo", "class": "car", "confidence": 0.72},
-            "depth": {
-                "source": "depth_kalman",
-                "status": "tracked",
-                "confidence": 0.64,
-                "distanceM": 18.5,
-                "closingMps": 8.4,
-            },
+            "depth": {"status": "tracked"},
             "flow": {"expansionScore": 0.1, "radialScore": 0.2},
-            "lane": {"bucket": "center", "position": 0.0, "crossingRisk": 0.2},
         },
     }
     obj.update(overrides)
@@ -72,8 +63,8 @@ def _v3_object(**overrides):
 
 
 def test_serialized_result_uses_v3_schema():
-    """``_serialize_result`` must emit the v3 schema:
-       - ``schemaVersion: 3``
+    """``_serialize_result`` must emit the v4 schema:
+       - ``schemaVersion: 4``
        - ``frames`` (renamed from ``timelineRows``)
        - top-level ``primary*`` pointers + ``stabilizedRiskState`` only;
        per-object metrics live in ``objects[]``
@@ -91,6 +82,7 @@ def test_serialized_result_uses_v3_schema():
         "primary_object_id": 7,
         "primary_risk_score": 0.42,
         "primary_lane": "center",
+        "traffic_light_state": "red",
         "collision_eta_sec": 2.2,
         "proximity_score": 0.4,
         "approach_score": 0.3,
@@ -118,7 +110,7 @@ def test_serialized_result_uses_v3_schema():
     payload = _serialize_result(result, elapsed_sec=0.01, source_name="sample.mp4")["payload"]
 
     # Schema version + top-level shape
-    assert payload["schemaVersion"] == 3
+    assert payload["schemaVersion"] == 4
     assert "frames" in payload and "timelineRows" not in payload
     assert "images" in payload and isinstance(payload["images"], dict)
 
@@ -142,6 +134,7 @@ def test_serialized_result_uses_v3_schema():
     assert peak["primaryObjectId"] == 7
     assert peak["primaryRiskScore"] == 0.42
     assert peak["primaryLane"] == "center"
+    assert peak["trafficLight"] == "red"
     assert peak["objects"] == objects
     # v1 keys gone from event too
     for legacy_key in ("riskState", "riskScore", "lane", "ttcSec", "objectId", "objectType", "nearScore", "closingSpeed", "crossingRisk", "lanePosition", "confidencePct"):
@@ -161,8 +154,8 @@ def test_serialized_result_uses_v3_schema():
     }
     assert obj["collisionEta"]["status"] == "closing"
     assert obj["collisionEta"]["display"] == "2.2s"
-    assert obj["collisionEta"]["source"] == "depth_kalman"
     assert obj["collisionEta"]["sec"] == 2.2
+    assert "source" not in obj["collisionEta"]  # dead constant removed
     assert obj["kinematics"]["distanceM"] == 18.5
     assert obj["kinematics"]["closingMps"] == 8.4
     for removed_kinematic in ("rangeStatus", "distanceDisplay", "closingDisplay"):
@@ -175,8 +168,15 @@ def test_serialized_result_uses_v3_schema():
     }
     for value in obj["riskFactors"].values():
         assert 0.0 <= value <= 1.0
-    assert obj["evidence"]["detector"]["confidence"] == obj["confidence"]["detection"]
-    assert obj["evidence"]["depth"]["confidence"] == obj["confidence"]["depth"]
+    # evidence is now slimmed to ONLY the unique diagnostics; everything it used
+    # to copy (detector class/confidence, depth distance/closing/confidence, lane
+    # bucket/position/crossing) lives once at the canonical top level.
+    assert obj["evidence"] == {
+        "depth": {"status": "tracked"},
+        "flow": {"expansionScore": 0.1, "radialScore": 0.2},
+    }
+    for dead_evidence_key in ("detector", "lane"):
+        assert dead_evidence_key not in obj["evidence"]
     assert "riskReason" not in obj
     for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
         assert removed not in obj
@@ -358,7 +358,7 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
 
     response = asyncio.run(call_endpoint())
 
-    assert response["payload"]["schemaVersion"] == 3
+    assert response["payload"]["schemaVersion"] == 4
     assert captured["max_processed_frames"] == 1
     assert captured["max_saved_events"] == 50
     assert captured["resize_max_side"] == 1024

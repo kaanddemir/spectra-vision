@@ -147,7 +147,6 @@ def test_object_metric_emits_v3_collision_eta_contract():
     assert obj["collisionEta"] == {
         "status": "closing",
         "display": "0.5s",
-        "source": "depth_kalman",
         "sec": 0.5,
     }
     assert obj["kinematics"]["distanceM"] == 4.0
@@ -162,9 +161,14 @@ def test_object_metric_emits_v3_collision_eta_contract():
     }
     assert obj["riskFactors"]["approach"] == 0.83
     assert all(0.0 <= value <= 1.0 for value in obj["riskFactors"].values())
-    assert obj["evidence"]["detector"]["confidence"] == obj["confidence"]["detection"]
-    assert obj["evidence"]["depth"]["confidence"] == obj["confidence"]["depth"]
-    assert obj["evidence"]["flow"] == {"expansionScore": 0.42, "radialScore": 0.31}
+    # evidence carries only the unique diagnostics; the rest lives once at the
+    # canonical top level (objectType, confidence, lane, lanePosition, kinematics).
+    assert obj["evidence"] == {
+        "depth": {"status": "tracked"},
+        "flow": {"expansionScore": 0.42, "radialScore": 0.31},
+    }
+    assert "detector" not in obj["evidence"]
+    assert "lane" not in obj["evidence"]
     assert obj["lanePosition"] == -1.5
     assert "riskReason" not in obj
     for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
