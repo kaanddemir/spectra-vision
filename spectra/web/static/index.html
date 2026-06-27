@@ -475,7 +475,7 @@
                 </div>
 
                 <details class="evidence-details" id="evidence-details">
-                  <summary>Advanced signals</summary>
+                  <summary>Detail Mode</summary>
                   <div class="evidence-grid">
                     <div class="evidence-group">
                       <span class="evidence-group-lbl">Detector (YOLO)</span>
@@ -483,19 +483,36 @@
                       <div class="evidence-row"><span>Confidence</span><span id="ev-detector-conf">—</span></div>
                     </div>
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Depth (Kalman)</span>
+                      <span class="evidence-group-lbl">Tracking (IoU)</span>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-tracking-conf">—</span></div>
+                    </div>
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Depth / Kinematics</span>
+                      <div class="evidence-row"><span>Distance</span><span id="ev-depth-distance">—</span></div>
+                      <div class="evidence-row"><span>Closing speed</span><span id="ev-depth-closing">—</span></div>
                       <div class="evidence-row"><span>Status</span><span id="ev-depth-status">—</span></div>
                       <div class="evidence-row"><span>Confidence</span><span id="ev-depth-conf">—</span></div>
                     </div>
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Flow</span>
+                      <span class="evidence-group-lbl">Flow (DIS)</span>
                       <div class="evidence-row"><span>Expansion</span><span id="ev-flow-expansion">—</span></div>
                       <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
                     </div>
-                    <div class="evidence-group">
-                      <span class="evidence-group-lbl">Lane</span>
+                    <div class="evidence-group evidence-group--lane">
+                      <span class="evidence-group-lbl">Lane (UFLDv2)</span>
                       <div class="evidence-row"><span>Bucket</span><span id="ev-lane-bucket">—</span></div>
                       <div class="evidence-row"><span>Position</span><span id="ev-lane-pos">—</span></div>
+                      <div class="evidence-row"><span>Crossing</span><span id="ev-lane-crossing">—</span></div>
+                    </div>
+                    <div class="evidence-group evidence-group--fusion">
+                      <span class="evidence-group-lbl">Fusion / Risk</span>
+                      <div class="evidence-row"><span>Collision ETA</span><span id="ev-fusion-eta">—</span></div>
+                      <div class="evidence-row"><span>Risk Score</span><span id="ev-fusion-score">—</span></div>
+                      <div class="evidence-row"><span>State</span><span id="ev-fusion-state">—</span></div>
+                      <div class="evidence-row"><span>Proximity</span><span id="ev-fusion-proximity">—</span></div>
+                      <div class="evidence-row"><span>Approach</span><span id="ev-fusion-approach">—</span></div>
+                      <div class="evidence-row"><span>Brake</span><span id="ev-fusion-brake">—</span></div>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-fusion-confidence">—</span></div>
                     </div>
                   </div>
                 </details>

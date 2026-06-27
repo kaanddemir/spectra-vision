@@ -583,16 +583,24 @@ export function initializeSpectra() {
 
   const setText = (id, value) => { const el = byId(id); if (el) el.textContent = value; };
   const pctLabel = (v) => { const n = num(v, null); return n === null ? MISSING : `${Math.round(clamp(n, 0, 1) * 100)}%`; };
+  const confidenceLabel = (source) => {
+    const overall = num(source?.overallConfidence, null);
+    if (overall !== null) return pctLabel(overall);
+    const pct = num(source?.confidencePct, null);
+    return pct === null ? MISSING : `${Math.round(clamp(pct, 0, 100))}%`;
+  };
 
-  // Advanced (non-duplicated) diagnostics only: flow signals + depth freshness.
+  // Detail Mode: a self-contained report of raw inputs and fusion outputs.
   function renderAdvanced(source) {
-    // Detector / depth-confidence / lane read from canonical top-level fields;
-    // evidence only carries the unique diagnostics (depth.status, flow.*).
     const ev = source?.evidence || null;
     const conf = source?.confidence || {};
+    const riskFactors = source?.riskFactors || {};
     setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
     setText("ev-detector-conf", pctLabel(conf.detection));
+    setText("ev-tracking-conf", pctLabel(conf.tracking));
     const depth = ev?.depth || {};
+    setText("ev-depth-distance", distanceLabel(source?.kinematics?.distanceM));
+    setText("ev-depth-closing", closingShort(source?.kinematics?.closingMps));
     setText("ev-depth-status", isReal(depth.status) ? titleCase(depth.status) : MISSING);
     setText("ev-depth-conf", pctLabel(conf.depth));
     const flow = ev?.flow || {};
@@ -601,6 +609,15 @@ export function initializeSpectra() {
     setText("ev-lane-bucket", isReal(source?.lane) ? titleCase(source.lane) : MISSING);
     const pos = num(source?.lanePosition, null);
     setText("ev-lane-pos", pos === null ? MISSING : pos.toFixed(2));
+    setText("ev-lane-crossing", pctLabel(riskFactors.crossing));
+    setText("ev-fusion-eta", etaDisplay(source?.collisionEta));
+    setText("ev-fusion-score", riskScoreLabel(source?.riskScore));
+    const rawState = source?.rawRiskState ?? source?.riskState;
+    setText("ev-fusion-state", isReal(rawState) ? titleCase(rawState) : MISSING);
+    setText("ev-fusion-proximity", pctLabel(riskFactors.proximity));
+    setText("ev-fusion-approach", pctLabel(riskFactors.approach));
+    setText("ev-fusion-brake", pctLabel(riskFactors.brake));
+    setText("ev-fusion-confidence", confidenceLabel(source));
   }
 
   const confidenceBreakdown = (conf) => {
@@ -821,13 +838,6 @@ export function initializeSpectra() {
       card.addEventListener("click", () => focusEvent(idx));
 
       const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || resultImages.original || resultImages.blend);
-      const factors = ev.riskFactors || {};
-      const kinematics = ev.kinematics || {};
-      const nearVal = num(factors.proximity, null);
-      const speedVal = num(factors.approach, null);
-      const crossVal = num(factors.crossing, null);
-      const confPct = num(ev.confidencePct, null);
-      const confVal = confPct === null ? null : confPct / 100;
 
       card.innerHTML = `
         <div class="card-visual">
@@ -835,49 +845,26 @@ export function initializeSpectra() {
         </div>
         <div class="card-info">
           <div class="card-header">
-            <span class="status">${sc.toUpperCase()}</span>
+            <span class="event-id">${shortType(ev.objectType)} ${isReal(ev.displayId ?? ev.objectId) ? `#${ev.displayId ?? ev.objectId}` : MISSING}</span>
             <span class="time">${formatSeconds(ts)}</span>
           </div>
 
           <div class="card-boxes">
             <div class="box-item">
-              <span class="lbl">ID</span>
-              <span class="val">${isReal(ev.displayId ?? ev.objectId) ? `#${ev.displayId ?? ev.objectId}` : MISSING}</span>
+              <span class="lbl">STATUS</span>
+              <span class="val status-val">${sc.toUpperCase()}</span>
             </div>
             <div class="box-item">
-              <span class="lbl">TYPE</span>
-              <span class="val">${shortType(ev.objectType)}</span>
-            </div>
-            <div class="box-item">
-              <span class="lbl">ETA</span>
+              <span class="lbl">COLLISION ETA</span>
               <span class="val">${etaDisplay(ev.collisionEta)}</span>
+            </div>
+            <div class="box-item">
+              <span class="lbl">RISK SCORE</span>
+              <span class="val">${riskScoreLabel(ev.riskScore)}</span>
             </div>
             <div class="box-item">
               <span class="lbl">LANE</span>
               <span class="val">${laneWithPosition(ev.lane, ev.lanePosition)}</span>
-            </div>
-          </div>
-
-          <div class="card-bars">
-            <div class="bar-row bar-proximity">
-              <span class="lbl">Proximity</span>
-              <div class="bar-outer"><div class="bar-inner" style="width: ${(nearVal || 0) * 100}%"></div></div>
-              <span class="val">${distanceLabel(kinematics.distanceM)}</span>
-            </div>
-            <div class="bar-row bar-approach">
-              <span class="lbl">Approach</span>
-              <div class="bar-outer"><div class="bar-inner" style="width: ${(speedVal || 0) * 100}%"></div></div>
-              <span class="val">${speedVal !== null ? (speedVal * 100).toFixed(0) + '%' : '—'}</span>
-            </div>
-            <div class="bar-row bar-crossing">
-              <span class="lbl">Crossing</span>
-              <div class="bar-outer"><div class="bar-inner" style="width: ${(crossVal || 0) * 100}%"></div></div>
-              <span class="val">${crossVal !== null ? (crossVal * 100).toFixed(0) + '%' : '—'}</span>
-            </div>
-            <div class="bar-row bar-confidence">
-              <span class="lbl">Confidence</span>
-              <div class="bar-outer"><div class="bar-inner" style="width: ${(confVal || 0) * 100}%"></div></div>
-              <span class="val">${confVal !== null ? (confVal * 100).toFixed(0) + '%' : '—'}</span>
             </div>
           </div>
         </div>

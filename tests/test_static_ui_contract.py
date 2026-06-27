@@ -135,14 +135,16 @@ def test_banner_metrics_have_no_duplicated_data():
     assert 'id="signal-confidence"' in index
     assert 'id="mult-relevance"' not in index
 
-    # Advanced section is the evidence drill-down (detector, depth, flow, lane).
-    # distance / closing stay out of it (they live in the Collision-ETA section)
-    # and crossing stays the Lane-relevance bar.
-    for removed_ev in ("ev-depth-distance", "ev-depth-closing", "ev-lane-crossing"):
-        assert f'id="{removed_ev}"' not in index
+    # Detail Mode is the full diagnostic report: raw pipeline inputs plus fusion outputs,
+    # intentionally repeating values shown elsewhere so the panel is self-contained.
     for kept_ev in (
-        "ev-detector-class", "ev-detector-conf", "ev-depth-status", "ev-depth-conf",
-        "ev-flow-expansion", "ev-flow-radial", "ev-lane-bucket", "ev-lane-pos",
+        "ev-detector-class", "ev-detector-conf", "ev-tracking-conf",
+        "ev-depth-distance", "ev-depth-closing", "ev-depth-status", "ev-depth-conf",
+        "ev-flow-expansion", "ev-flow-radial",
+        "ev-lane-bucket", "ev-lane-pos", "ev-lane-crossing",
+        "ev-fusion-eta", "ev-fusion-score", "ev-fusion-state",
+        "ev-fusion-proximity", "ev-fusion-approach", "ev-fusion-brake",
+        "ev-fusion-confidence",
     ):
         assert f'id="{kept_ev}"' in index
 
