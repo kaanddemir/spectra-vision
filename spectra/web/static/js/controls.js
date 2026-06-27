@@ -506,13 +506,13 @@ export function initializeSpectra() {
     const n = num(value, null);
     return n === null ? MISSING : `${n.toFixed(n < 10 ? 1 : 0)}m`;
   };
-  // Merges Motion (direction) + Approach Speed into one fact, e.g. "Closing · 3.1 m/s".
-  const approachFactLabel = (value) => {
+  // Compact signed closing speed for the narrow value column, e.g. "3.1 m/s"
+  // (positive = closing, negative = receding).
+  const closingShort = (value) => {
     const n = num(value, null);
     if (n === null) return MISSING;
-    if (n > 0.30) return `Closing · ${n.toFixed(1)} m/s`;
-    if (n < -0.30) return `Receding · ${Math.abs(n).toFixed(1)} m/s`;
-    return "Parallel";
+    const sign = n < -0.05 ? "−" : "";
+    return `${sign}${Math.abs(n).toFixed(1)} m/s`;
   };
   const riskScoreLabel = (value) => {
     const n = num(value, null);
@@ -612,12 +612,13 @@ export function initializeSpectra() {
     if (subtitle) {
       const label = objectLabel(source);
       const present = hasObject && label !== MISSING;
-      subtitle.textContent = present ? label : "";
+      // Lane lives here now (object · lane) rather than as a standalone box.
+      const laneText = present && source?.lane ? ` · ${laneWithPosition(source.lane, source.lanePosition)}` : "";
+      subtitle.textContent = present ? `${label}${laneText}` : "";
       subtitle.hidden = !present;
     }
     setText("risk-distance", distanceLabel(source?.kinematics?.distanceM));
-    setText("risk-approach", approachFactLabel(source?.kinematics?.closingMps));
-    setText("risk-lane", laneWithPosition(source?.lane, source?.lanePosition));
+    setText("risk-approach", closingShort(source?.kinematics?.closingMps));
     const tag = byId("risk-time-tag");
     if (tag) {
       if (timeTag) { tag.innerHTML = timeTag; tag.hidden = false; }
@@ -633,6 +634,15 @@ export function initializeSpectra() {
     if (fill) fill.style.width = `${pct}%`;
     if (label) label.textContent = n === null ? MISSING : `${pct}%`;
   }
+
+  // ETA-input gauges: visualise the raw measurement on a fixed scale (these are
+  // not 0–1 risk scores, so they get their own gauge, not proximity/approach).
+  const setFillWidth = (id, frac) => {
+    const el = byId(id);
+    if (el) el.style.width = `${Math.round(clamp(num(frac, 0), 0, 1) * 100)}%`;
+  };
+  const closenessGauge = (m) => { const n = num(m, null); return n === null ? 0 : clamp(1 - n / 60, 0, 1); };
+  const speedGauge = (mps) => { const n = num(mps, null); return n === null ? 0 : clamp(n / 12, 0, 1); };
 
   function objectsForSource(source) {
     return (Array.isArray(source?.objects) ? source.objects : []).filter((obj) => obj && isReal(obj.objectId));
@@ -707,28 +717,25 @@ export function initializeSpectra() {
     renderObjectList(source);
     const activeObject = selectedObject || source;
       
-    const riskFactorsTitle = document.querySelector(".risk-factors-title");
-    if (riskFactorsTitle) {
-      if (activeObject && isReal(activeObject.objectId)) {
-        riskFactorsTitle.innerHTML = `Risk Factors <span style="color:var(--text-soft); font-weight:600; text-transform:none; margin-left:4px;">(${objectLabel(activeObject)})</span>`;
-      } else {
-        riskFactorsTitle.textContent = "Risk Factors";
-      }
-    }
+    // Title text + info icon are static; only the (object) suffix is dynamic
+    // so the info-tip is preserved across renders.
+    setText("risk-factors-object", (activeObject && isReal(activeObject.objectId)) ? `(${objectLabel(activeObject)})` : "");
 
     const factors = activeObject?.riskFactors || {};
+    const km = activeObject?.kinematics || {};
+    // Collision-ETA input gauges (raw measurements on a fixed scale).
+    setFillWidth("fill-distance", closenessGauge(km.distanceM));
+    setFillWidth("fill-closing", speedGauge(km.closingMps));
     // Additive weighted contributors (mirror score_raw): ETA + proximity + approach + brake.
     setSignalBar("eta", etaPressure(activeObject?.collisionEta));
     setSignalBar("near", factors.proximity);
     setSignalBar("closing", factors.approach);
     setSignalBar("brake", factors.brake);
-    // Multipliers: lane relevance (crossing) and confidence gate.
-    setText("mult-relevance", pctLabel(factors.crossing));
+    // Multipliers: lane relevance (crossing) and confidence — shown as bars too.
+    setSignalBar("relevance", factors.crossing);
     const conf = num(activeObject?.confidencePct, null);
-    setText("mult-confidence", conf === null ? MISSING : `${Math.round(clamp(conf, 0, 100))}%`);
-    const breakdown = confidenceBreakdown(activeObject?.confidence);
-    setText("confidence-sub", breakdown);
-    setText("confidence-breakdown", breakdown);
+    setSignalBar("confidence", conf === null ? null : conf / 100);
+    setText("confidence-breakdown", confidenceBreakdown(activeObject?.confidence));
     renderAdvanced(activeObject);
   }
 

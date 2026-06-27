@@ -110,25 +110,30 @@ def test_banner_metrics_have_no_duplicated_data():
     for dead_id in ("risk-object", "risk-motion", "risk-approach-speed", "risk-confidence"):
         assert f'id="{dead_id}"' not in index
 
-    # Measurements strip: physical readings only, each once. Confidence is NOT here.
-    facts_start = index.index('<span class="section-cap">Measurements</span>')
-    facts_end = index.index("<!-- SUB PANEL 2", facts_start)
-    facts = index[facts_start:facts_end]
-    for label in ("Distance", "Closing speed", "Lane"):
-        assert label in facts
-    assert "Confidence" not in facts
-    for element_id in ("risk-distance", "risk-approach", "risk-lane"):
-        assert f'id="{element_id}"' in facts
+    # Collision ETA builder: its two longitudinal inputs, each once. Lane is NOT
+    # a measurement box anymore (it lives in the hero subtitle + lane relevance),
+    # and the old Measurements strip is gone.
+    assert "Measurements" not in index
+    assert 'id="risk-lane"' not in index
+    eta_start = index.index('<span class="section-cap">What builds the Collision ETA</span>')
+    eta_end = index.index("<!-- SUB PANEL 2", eta_start)
+    eta = index[eta_start:eta_end]
+    for label in ("Distance", "Closing speed"):
+        assert label in eta
+    for element_id in ("risk-distance", "risk-approach"):
+        assert f'id="{element_id}"' in eta
 
-    # Risk Score contributors mirror score_raw: four weighted bars; crossing is
-    # a multiplier (not a bar) and confidence is a multiplier (not a fact box).
+    # Risk Score contributors mirror score_raw: four weighted bars (additive),
+    # then lane relevance + confidence as two multiplier bars (no × prefix, but
+    # grouped under the dashed divider). crossing keeps no "signal-crossing" id.
     for bar_id in ("signal-eta", "signal-near", "signal-closing", "signal-brake"):
         assert f'id="{bar_id}"' in index
     assert 'id="signal-crossing"' not in index
     for weight in ("40%", "30%", "25%", "5%"):
         assert f'<span class="signal-weight">{weight}</span>' in index
-    assert 'id="mult-relevance"' in index
-    assert 'id="mult-confidence"' in index
+    assert 'id="signal-relevance"' in index
+    assert 'id="signal-confidence"' in index
+    assert 'id="mult-relevance"' not in index
 
     # Advanced section holds only non-duplicated diagnostics (no distance /
     # closing / crossing / confidence repeats).

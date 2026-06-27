@@ -568,7 +568,11 @@
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
+.risk-state-cap .info-tip { width: 18px; height: 18px; }
 
 .modern-risk-title {
   margin: 0;
@@ -602,7 +606,6 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   margin-top: 16px;
-  overflow: hidden;
 }
 
 .hero-metric {
@@ -622,7 +625,12 @@
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
+.hero-metric-lbl .info-tip { width: 16px; height: 16px; }
+.hero-metric-lbl .info-tip svg { width: 11px; height: 11px; }
 
 .hero-metric-val {
   font-size: 26px;
@@ -646,13 +654,33 @@
 }
 .hero-subtitle[hidden] { display: none; }
 
-/* One-line explanation of how Status is derived */
-.risk-explainer {
-  margin: 10px 0 0;
-  font-size: 11px;
+/* Risk-panel info tooltips open downward INSIDE the panel (never over the
+   video column to the left) and sit above everything. */
+.risk-banner .tooltip-content {
+  top: calc(100% + 8px);
+  right: auto;
+  left: 0;
+  transform: translateY(-6px);
+  z-index: 4000;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.risk-banner .info-tip:hover .tooltip-content {
+  transform: translateY(0);
+}
+.risk-banner .info-tip::before { display: none; }
+
+/* (object) suffix next to the "What builds the Risk Score" title */
+.risk-factors-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.risk-factors-object {
+  color: var(--text-soft);
   font-weight: 600;
-  color: var(--muted);
-  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 /* Small uppercase section caption (Measurements, etc.) */
@@ -666,54 +694,37 @@
   letter-spacing: 0.05em;
 }
 
-/* Compact measurements strip (Distance / Closing speed / Lane) */
-.facts-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  background: transparent;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  margin-top: 12px;
-}
-
-.fact-box {
-  padding: 10px 14px;
+/* "What builds the Collision ETA" — section header with inline info icon */
+.builder-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  border-right: 1px solid var(--border-soft);
-}
-.fact-box:last-child {
-  border-right: none;
-}
-
-.fact-lbl {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
+.builder-head .section-cap { margin-bottom: 0; }
+.builder-head .info-tip { width: 18px; height: 18px; }
 
-.fact-val {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.eta-builder { margin-top: 10px; }
+
+/* Shared 4-column grid for every contributor row (ETA inputs, score bars,
+   lane relevance + confidence): [label(+weight) 120px] · [info icon 16px] ·
+   [track 1fr] · [value 56px]. Fixed columns keep the info icons, bars and
+   values aligned across both "What builds…" sections. */
+.risk-banner .signal-row {
+  display: grid;
+  grid-template-columns: 120px 16px 1fr 56px;
+  align-items: center;
+  gap: 10px;
 }
-
-/* Risk Factors subheading */
-.risk-factors-sub {
-  margin: -6px 0 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
+.risk-banner .signal-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  overflow: visible;
+}
+.risk-banner .signal-row .info-tip {
+  width: 16px;
+  height: 16px;
 }
 
 /* Weight chip next to each contributor bar label */
@@ -728,42 +739,15 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Score multipliers (lane relevance + confidence) */
+/* Lane relevance + confidence rows: bars like the rest, kept as a separate
+   group by a dashed divider (they multiply the score rather than add to it). */
 .multipliers {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 0 2px;
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 12px;
   border-top: 1px dashed var(--border-soft);
 }
-.multiplier-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.multiplier-lbl {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-soft);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.multiplier-val {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.multiplier-sub {
-  margin: 0;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
 /* Evidence (expandable) */
 .evidence-details {
   margin-top: 12px;
