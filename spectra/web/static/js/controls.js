@@ -48,6 +48,7 @@ export function initializeSpectra() {
     currentTimelineRow: null,
     suppressVideoSyncCount: 0,
     selectedObjectId: null,
+    objectsMenuCollapsed: false,
   };
 
   const byId = (id) => document.getElementById(id);
@@ -566,10 +567,12 @@ export function initializeSpectra() {
 
     if (state.uiMode !== "objects") {
       state.selectedObjectId = null;
+      state.objectsMenuCollapsed = false;
     }
     if (state.uiMode === "summary") {
       state.selectedSummaryEvent = sourceEvent || state.currentResult?.peakEvent || null;
     } else if (state.uiMode === "objects") {
+      state.objectsMenuCollapsed = false;
       if (sourceEvent) state.selectedSummaryEvent = sourceEvent;
       if (previousMode === "summary" && !state.selectedSummaryEvent) {
         state.selectedSummaryEvent = state.currentResult?.peakEvent || null;
@@ -699,7 +702,7 @@ export function initializeSpectra() {
 
     if (list) {
       list.replaceChildren();
-      list.hidden = state.uiMode !== "objects" || !objects.length;
+      list.hidden = state.uiMode !== "objects" || state.objectsMenuCollapsed || !objects.length;
       if (objects.length) {
         const sorted = [...objects].sort((a, b) => eventSeverityScore(b) - eventSeverityScore(a));
 
@@ -711,6 +714,7 @@ export function initializeSpectra() {
           button.className = `detection-row is-${sClass} ${isSelected ? 'is-selected' : ''}`;
           button.onclick = () => {
             state.selectedObjectId = item.objectId;
+            state.objectsMenuCollapsed = true;
             focusSummaryFrame(source);
             renderRiskPanel();
           };

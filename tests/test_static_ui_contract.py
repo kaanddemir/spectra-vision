@@ -176,7 +176,9 @@ def test_risk_panel_has_objects_tab_and_unified_object_inspector():
     assert 'byId("toggle-mode-objects")' in controls
     assert 'byId("objects-menu")' in controls
     assert "highestRiskObject(objects)" in controls
-    assert 'list.hidden = state.uiMode !== "objects" || !objects.length' in controls
+    assert 'objectsMenuCollapsed: false' in controls
+    assert 'state.objectsMenuCollapsed = true' in controls
+    assert 'list.hidden = state.uiMode !== "objects" || state.objectsMenuCollapsed || !objects.length' in controls
     assert "No objects in this frame" not in controls
     assert ".objects-menu" in risk_css
     assert ".object-selector-list" not in risk_css
