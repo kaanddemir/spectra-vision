@@ -85,3 +85,83 @@ def test_active_ui_contracts_are_kept():
     assert "resetAdvancedSampling" in controls
     assert 'setSegmentedValue("adaptive_depth", 1)' in controls
     assert ".drawer-icon-btn" in drawers_css
+
+
+def test_timeline_uses_backend_risk_score():
+    controls = read_static("js/controls.js")
+    score_fn_start = controls.index("const eventSeverityScore = (ev) => {")
+    score_fn_end = controls.index("  const eventStateClass", score_fn_start)
+    score_fn = controls[score_fn_start:score_fn_end]
+
+    assert "riskScore" in score_fn
+    assert "primaryRiskScore" in score_fn
+    assert "etaSeconds" not in score_fn
+    assert "riskFactors" not in score_fn
+
+
+def test_banner_metrics_are_unambiguous():
+    index = read_static("index.html")
+    controls = read_static("js/controls.js")
+    risk_css = read_static("css/risk.css")
+
+    grid_start = index.index('<div class="modern-metrics-grid">')
+    grid_end = index.index("</div>\n            </div>", grid_start)
+    metrics_grid = index[grid_start:grid_end]
+
+    for label in ("Primary Object", "Lane", "Distance", "Motion", "Approach Speed", "Confidence"):
+        assert label in metrics_grid
+    assert '<span class="metric-lbl">Closing</span>' not in metrics_grid
+
+    for element_id in (
+        "risk-object",
+        "risk-lane",
+        "risk-distance",
+        "risk-motion",
+        "risk-approach-speed",
+        "risk-confidence",
+    ):
+        assert f'id="{element_id}"' in metrics_grid
+
+    motion_start = controls.index("const motionLabel = (value) => {")
+    motion_end = controls.index("  const approachSpeedLabel", motion_start)
+    motion_fn = controls[motion_start:motion_end]
+    assert "Closing" in motion_fn
+    assert "Estimating" not in motion_fn
+    assert "MISSING" in motion_fn
+    assert "m/s" not in motion_fn
+
+    speed_start = controls.index("const approachSpeedLabel = (value) => {")
+    speed_end = controls.index("\n\n  function focusSummaryFrame", speed_start)
+    speed_fn = controls[speed_start:speed_end]
+    assert "m/s" in speed_fn
+    assert "MISSING" in speed_fn
+    assert "repeat(auto-fit, minmax(150px, 1fr))" in risk_css
+
+
+def test_risk_panel_has_objects_tab_and_unified_object_inspector():
+    index = read_static("index.html")
+    controls = read_static("js/controls.js")
+    risk_css = read_static("css/risk.css")
+
+    for button_id in ("toggle-mode-live", "toggle-mode-summary", "toggle-mode-objects"):
+        assert f'id="{button_id}"' in index
+    assert "Objects" in index
+    assert "Active Objects" not in index
+    assert "object-inspector-panel" in index
+    assert "objects-menu" in index
+    assert "No objects in this frame" not in index
+    assert "risk-factors-title" in index
+    inspector_start = index.index('id="object-inspector-panel"')
+    inspector_end = index.index("<!-- SUB PANEL 3: Chart -->", inspector_start)
+    inspector_markup = index[inspector_start:inspector_end]
+    assert "risk-sub-panel-head" not in inspector_markup
+
+    assert 'state.uiMode === "objects"' in controls
+    assert 'setUiMode("objects"' in controls
+    assert 'byId("toggle-mode-objects")' in controls
+    assert 'byId("objects-menu")' in controls
+    assert "highestRiskObject(objects)" in controls
+    assert 'list.hidden = state.uiMode !== "objects" || !objects.length' in controls
+    assert "No objects in this frame" not in controls
+    assert ".objects-menu" in risk_css
+    assert ".object-selector-list" not in risk_css

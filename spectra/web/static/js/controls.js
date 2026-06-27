@@ -135,6 +135,7 @@ export function initializeSpectra() {
       objects: objs,
       timeSec: ts === null ? null : Math.round(ts * 100) / 100,
       riskState: frame.stabilizedRiskState ?? null,
+      riskScore: num(frame.primaryRiskScore, null),
       objectId: frame.primaryObjectId ?? null,
       displayId: primary?.displayId ?? frame.primaryDisplayId ?? frame.primaryObjectId ?? null,
       objectType: primary?.objectType ?? null,
@@ -173,15 +174,7 @@ export function initializeSpectra() {
     return "none";
   };
   const eventSeverityScore = (ev) => {
-    const sc = stateClass(ev?.riskState);
-    const stateWeight = sc === "danger" ? 2 : sc === "caution" ? 1 : 0;
-    const eta = etaSeconds(ev?.collisionEta);
-    const etaWeight = eta === null ? 0 : clamp((3 - eta) / 3, 0, 1);
-    const factors = ev?.riskFactors || {};
-    const near = num(factors.proximity, 0);
-    const approach = num(factors.approach, 0);
-    const crossing = num(factors.crossing, 0);
-    return stateWeight + etaWeight + near + approach + (0.5 * crossing);
+    return num(ev?.riskScore ?? ev?.primaryRiskScore, 0);
   };
   const eventStateClass = (ev) => stateClass(ev?.riskState);
   const isActionableObject = (obj) => {
@@ -220,6 +213,10 @@ export function initializeSpectra() {
   };
   const preferTimelineRow = (candidate, current) => {
     if (!current) return true;
+    const candidateScore = eventSeverityScore(candidate);
+    const currentScore = eventSeverityScore(current);
+    if (candidateScore !== currentScore) return candidateScore > currentScore;
+
     const candidateSeverity = timelineSeverity(candidate);
     const currentSeverity = timelineSeverity(current);
     if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity;
@@ -507,12 +504,16 @@ export function initializeSpectra() {
     const n = num(value, null);
     return n === null ? MISSING : `${n.toFixed(n < 10 ? 1 : 0)}m`;
   };
-  const closingLabel = (value) => {
+  const motionLabel = (value) => {
     const n = num(value, null);
-    if (n === null) return "Estimating";
-    if (n > 0.30) return `${n.toFixed(1)} m/s`;
+    if (n === null) return MISSING;
+    if (n > 0.30) return "Closing";
     if (n < -0.30) return "Receding";
     return "Parallel";
+  };
+  const approachSpeedLabel = (value) => {
+    const n = num(value, null);
+    return n !== null && n > 0.30 ? `${n.toFixed(1)} m/s` : MISSING;
   };
 
   function focusSummaryFrame(source) {
@@ -538,19 +539,37 @@ export function initializeSpectra() {
   function setModeButtons() {
     byId("toggle-mode-live")?.classList.toggle("is-active", state.uiMode === "live");
     byId("toggle-mode-summary")?.classList.toggle("is-active", state.uiMode === "summary");
+    byId("toggle-mode-objects")?.classList.toggle("is-active", state.uiMode === "objects");
   }
 
   function panelSource() {
     if (state.uiMode === "summary") return state.selectedSummaryEvent || state.currentResult?.peakEvent || null;
+    if (state.uiMode === "objects") {
+      if (!state.currentTimelineRow) state.currentTimelineRow = findTimelineRowAt(previewVideo?.currentTime ?? 0);
+      return state.selectedSummaryEvent || state.currentTimelineRow || null;
+    }
     if (!state.currentTimelineRow) state.currentTimelineRow = findTimelineRowAt(previewVideo?.currentTime ?? 0);
     return state.currentTimelineRow;
   }
 
   function setUiMode(mode, { sourceEvent = null, timeSec = null } = {}) {
-    state.uiMode = mode === "summary" ? "summary" : "live";
-    state.selectedObjectId = null;
+    const nextMode = mode === "summary" ? "summary" : mode === "objects" ? "objects" : "live";
+    const previousMode = state.uiMode;
+    state.uiMode = nextMode;
+
+    if (state.uiMode !== "objects") {
+      state.selectedObjectId = null;
+    }
     if (state.uiMode === "summary") {
-      state.selectedSummaryEvent = sourceEvent;
+      state.selectedSummaryEvent = sourceEvent || state.currentResult?.peakEvent || null;
+    } else if (state.uiMode === "objects") {
+      if (sourceEvent) state.selectedSummaryEvent = sourceEvent;
+      if (previousMode === "summary" && !state.selectedSummaryEvent) {
+        state.selectedSummaryEvent = state.currentResult?.peakEvent || null;
+      }
+      if (!state.currentTimelineRow) {
+        state.currentTimelineRow = findTimelineRowAt(timeSec ?? previewVideo?.currentTime ?? 0);
+      }
     } else {
       state.selectedSummaryEvent = null;
       state.currentTimelineRow = findTimelineRowAt(timeSec ?? previewVideo?.currentTime ?? 0);
@@ -569,8 +588,11 @@ export function initializeSpectra() {
     byId("risk-band-main").textContent = riskState ? String(riskState).toUpperCase() : MISSING;
     byId("alert-ttc").textContent = etaDisplay(source?.collisionEta);
     byId("risk-object").textContent = objectLabel(source);
-    byId("risk-lane").textContent = distanceLabel(source?.kinematics?.distanceM);
-    byId("risk-confidence").textContent = closingLabel(source?.kinematics?.closingMps);
+    byId("risk-lane").textContent = laneWithPosition(source?.lane, source?.lanePosition);
+    byId("risk-distance").textContent = distanceLabel(source?.kinematics?.distanceM);
+    byId("risk-motion").textContent = motionLabel(source?.kinematics?.closingMps);
+    byId("risk-approach-speed").textContent = approachSpeedLabel(source?.kinematics?.closingMps);
+    byId("risk-confidence").textContent = percentLabel(source?.confidencePct);
     const tag = byId("risk-time-tag");
     if (tag) {
       if (timeTag) { tag.innerHTML = timeTag; tag.hidden = false; }
@@ -587,22 +609,24 @@ export function initializeSpectra() {
     if (label) label.textContent = n === null ? MISSING : `${pct}%`;
   }
 
+  function objectsForSource(source) {
+    return (Array.isArray(source?.objects) ? source.objects : []).filter((obj) => obj && isReal(obj.objectId));
+  }
+
+  function highestRiskObject(objects) {
+    if (!objects.length) return null;
+    return [...objects].sort((a, b) => eventSeverityScore(b) - eventSeverityScore(a))[0] || null;
+  }
+
   function renderObjectList(source) {
-    const objects = (Array.isArray(source?.objects) ? source.objects : []).filter(isActionableObject);
-    const list = byId("detection-list");
-    const count = byId("threat-count");
-    if (count) count.innerHTML = `Objects: <span>${objects.length}</span>`;
+    const objects = objectsForSource(source);
+    const list = byId("objects-menu");
 
     if (list) {
       list.replaceChildren();
-      if (!objects.length) {
-        const empty = document.createElement("div");
-        empty.className = "detection-empty";
-        empty.textContent = state.uiMode === "live" ? "No active objects" : "No detected objects";
-        list.appendChild(empty);
-      } else {
-        // Sort by ID again as requested
-        const sorted = [...objects].sort((a, b) => (a.objectId || 0) - (b.objectId || 0));
+      list.hidden = state.uiMode !== "objects" || !objects.length;
+      if (objects.length) {
+        const sorted = [...objects].sort((a, b) => eventSeverityScore(b) - eventSeverityScore(a));
 
         sorted.forEach((item) => {
           const button = document.createElement("button");
@@ -611,7 +635,7 @@ export function initializeSpectra() {
           const sClass = stateClass(item.riskState);
           button.className = `detection-row is-${sClass} ${isSelected ? 'is-selected' : ''}`;
           button.onclick = () => {
-            state.selectedObjectId = isSelected ? null : item.objectId;
+            state.selectedObjectId = item.objectId;
             focusSummaryFrame(source);
             renderRiskPanel();
           };
@@ -629,26 +653,34 @@ export function initializeSpectra() {
   function renderRiskPanel() {
     const source = panelSource();
     const isSummary = state.uiMode === "summary";
-    const sourceTime = isSummary ? eventTimestamp(source) : num(source?.timeSec, null);
-    const timeLabel = isSummary ? "Peak" : "Live";
+    const isObjectsMode = state.uiMode === "objects";
+    const sourceTime = (isSummary || isObjectsMode) ? eventTimestamp(source) : num(source?.timeSec, null);
+    const timeLabel = isSummary ? "Peak" : isObjectsMode ? "Objects" : "Live";
+    const objects = objectsForSource(source);
 
-    byId("risk-panel-title").textContent = isSummary ? "Peak Risk" : "Current Risk";
-    byId("objects-panel-title").textContent = isSummary ? "Detected Objects" : "Active Objects";
+    if (isObjectsMode) {
+      if (state.selectedObjectId !== null && !objects.some(o => o.objectId === state.selectedObjectId)) {
+        state.selectedObjectId = null;
+      }
+      if (state.selectedObjectId === null) {
+        const firstObject = highestRiskObject(objects);
+        state.selectedObjectId = firstObject?.objectId ?? null;
+      }
+    }
+
+    const selectedObject = isObjectsMode && state.selectedObjectId !== null
+      ? objects.find(o => o.objectId === state.selectedObjectId) || null
+      : null;
+    const displaySource = selectedObject || source;
+
+    byId("risk-panel-title").textContent = isSummary ? "Peak Risk" : isObjectsMode ? "Object Risk" : "Current Risk";
     applyRiskBannerState({
-      source,
+      source: displaySource,
       timeTag: sourceTime === null ? `${timeLabel}: <span>00:00</span>` : `${timeLabel}: <span>${formatSeconds(sourceTime)}</span>`,
     });
-    
-    const objects = (Array.isArray(source?.objects) ? source.objects : []).filter(isActionableObject);
-    if (state.selectedObjectId !== null && !objects.some(o => o.objectId === state.selectedObjectId)) {
-      state.selectedObjectId = null;
-    }
-    
+
     renderObjectList(source);
-    
-    const activeObject = state.selectedObjectId !== null 
-      ? objects.find(o => o.objectId === state.selectedObjectId) 
-      : source;
+    const activeObject = selectedObject || source;
       
     const riskFactorsTitle = document.querySelector(".risk-factors-title");
     if (riskFactorsTitle) {
@@ -1893,6 +1925,7 @@ export function initializeSpectra() {
     
     byId("toggle-mode-live")?.addEventListener("click", () => setUiMode("live", { timeSec: previewVideo?.currentTime ?? 0 }));
     byId("toggle-mode-summary")?.addEventListener("click", () => setUiMode("summary"));
+    byId("toggle-mode-objects")?.addEventListener("click", () => setUiMode("objects", { timeSec: previewVideo?.currentTime ?? 0 }));
 
     document.querySelectorAll("[data-telemetry-close]").forEach(el => el.addEventListener("click", closeTelemetryDrawer));
     document.querySelectorAll("[data-logs-close]").forEach(el => el.addEventListener("click", closeLogsDrawer));

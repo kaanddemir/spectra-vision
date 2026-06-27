@@ -524,23 +524,6 @@
   padding: 0;
   border: none;
 }
-.threat-object-layout {
-  display: grid;
-  grid-template-columns: minmax(168px, 0.42fr) minmax(0, 1fr);
-  gap: 12px;
-  align-items: stretch;
-}
-.detection-list {
-  height: 162px;
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: rgba(255,255,255,0.025);
-  overflow-y: auto;
-}
 .detection-row {
   width: 100%;
   min-width: 0;
@@ -566,20 +549,6 @@
   background: rgba(255,255,255,0.06);
 }
 
-.pill-status {
-  padding: 3px 6px;
-  border-radius: 4px;
-  font-size: 9.5px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  line-height: 1;
-}
-.pill-status.is-safe { background: rgba(18, 212, 146, 0.1); color: var(--safe); }
-.pill-status.is-caution { background: rgba(255, 176, 32, 0.1); color: var(--caution); }
-.pill-status.is-danger, .pill-status.is-critical { background: rgba(255, 68, 68, 0.15); color: var(--danger); }
-.pill-status.is-none { background: rgba(255, 255, 255, 0.05); color: var(--muted); }
-
 .status-dot {
   width: 8px;
   height: 8px;
@@ -590,27 +559,6 @@
 .status-dot.is-caution { background: var(--caution); box-shadow: 0 0 10px rgba(255, 176, 32, 0.4); }
 .status-dot.is-danger, .status-dot.is-critical { background: var(--danger); box-shadow: 0 0 10px rgba(255, 68, 68, 0.5); }
 .status-dot.is-none { background: var(--muted); }
-
-.detection-group-header {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  padding: 12px 12px 4px;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.detection-group-header::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border-soft);
-  opacity: 0.5;
-}
-.detection-group-header.is-danger { color: var(--danger); }
-.detection-group-header.is-caution { color: var(--caution); }
-.detection-group-header.is-safe { color: var(--safe); }
 
 .detection-main {
   min-width: 0;
@@ -627,20 +575,6 @@
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.detection-empty {
-  display: grid;
-  height: 100%;
-  min-height: 154px;
-  place-items: center;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
-}
-.object-risk-detail {
-  min-width: 0;
-  display: grid;
-  gap: 12px;
 }
 .risk-factors-title {
   margin: 0;

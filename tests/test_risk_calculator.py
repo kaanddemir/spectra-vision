@@ -874,3 +874,44 @@ class TestScoring:
         danger = make_event(state="DANGER", ttc_sec=0.5, near_score=0.5, closing_speed=0.5)
         safe = make_event(state="SAFE")
         assert score_event(danger) > score_event(safe)
+
+    def test_canonical_score_can_outrank_shorter_eta(self):
+        short_eta_only = make_event(
+            state="DANGER",
+            ttc_sec=0.2,
+            near_score=0.1,
+            closing_speed=0.1,
+            crossing=0.1,
+        )
+        richer_risk = make_event(
+            state="DANGER",
+            ttc_sec=0.8,
+            near_score=1.0,
+            closing_speed=1.0,
+            crossing=1.0,
+        )
+        richer_risk.brake_score = 1.0
+
+        assert score_event(richer_risk) > score_event(short_eta_only)
+
+    def test_confidence_gate_damps_non_floor_signal(self):
+        high_confidence = make_event(
+            state="SAFE",
+            ttc_sec=0.8,
+            near_score=1.0,
+            closing_speed=1.0,
+            crossing=1.0,
+        )
+        high_confidence.brake_score = 1.0
+        high_confidence.confidence = 1.0
+        low_confidence = make_event(
+            state="SAFE",
+            ttc_sec=0.8,
+            near_score=1.0,
+            closing_speed=1.0,
+            crossing=1.0,
+        )
+        low_confidence.brake_score = 1.0
+        low_confidence.confidence = 0.0
+
+        assert score_event(high_confidence) > score_event(low_confidence)

@@ -791,16 +791,51 @@ def classify_state(
     return "SAFE"
 
 
-_STATE_SCORE = {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}
+_STATE_SCORE = {"SAFE": 0.06, "CAUTION": 0.42, "DANGER": 0.68}
 
 
-def score_raw(state: str, ttc_sec: float | None, near_score: float, closing_speed: float) -> float:
-    ttc_weight = 0.0 if ttc_sec is None else max(0.0, _CAUTION_TTC_SEC - ttc_sec) / _CAUTION_TTC_SEC
-    return _STATE_SCORE.get(state, 0.0) + ttc_weight + near_score + closing_speed
+def _unit_interval(value: float | int | None) -> float:
+    return float(np.clip(0.0 if value is None else float(value), 0.0, 1.0))
+
+
+def eta_pressure(ttc_sec: float | None) -> float:
+    if ttc_sec is None:
+        return 0.0
+    return _unit_interval((_CAUTION_TTC_SEC - float(ttc_sec)) / _CAUTION_TTC_SEC)
+
+
+def score_raw(
+    state: str,
+    ttc_sec: float | None,
+    near_score: float,
+    closing_speed: float,
+    crossing_risk: float = 0.0,
+    brake: float = 0.0,
+    confidence: float = 1.0,
+) -> float:
+    eta = eta_pressure(ttc_sec)
+    signal = (
+        (0.30 * eta)
+        + (0.25 * _unit_interval(near_score))
+        + (0.20 * _unit_interval(closing_speed))
+        + (0.20 * _unit_interval(crossing_risk))
+        + (0.05 * _unit_interval(brake))
+    )
+    confidence_gate = 0.65 + (0.35 * _unit_interval(confidence))
+    floor = _STATE_SCORE.get(str(state or "").upper(), 0.0)
+    return round(float(max(floor, signal * confidence_gate)), 3)
 
 
 def score_event(event: RiskEvent) -> float:
-    return score_raw(event.state, event.ttc_sec, event.near_score, event.closing_speed)
+    return score_raw(
+        event.state,
+        event.ttc_sec,
+        event.near_score,
+        event.closing_speed,
+        crossing_risk=event.crossing_risk,
+        brake=event.brake_score,
+        confidence=event.confidence,
+    )
 
 
 def _risk_reason(state: str, ttc_sec: Optional[float], lane_pos: float) -> str:
@@ -1264,12 +1299,14 @@ def build_object_events(
         )
         return safe, events
 
-    primary = max(eligible, key=lambda e: (
-        {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(e.state, 0.0)
-        + (0.0 if e.ttc_sec is None else max(0.0, 3.0 - e.ttc_sec) / 3.0)
-        + e.closing_speed
-        + (0.5 * e.crossing_risk)
-    ))
+    primary = max(
+        eligible,
+        key=lambda e: (
+            score_event(e),
+            {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(e.state, 0.0),
+            eta_pressure(e.ttc_sec),
+        ),
+    )
     return primary, events
 
 

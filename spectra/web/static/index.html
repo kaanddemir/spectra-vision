@@ -317,6 +317,10 @@
               <button type="button" id="toggle-mode-summary" class="mode-btn" title="Show most critical moment">
                 Peak
               </button>
+              <button type="button" id="toggle-mode-objects" class="mode-btn" title="Inspect detected objects">
+                Objects
+              </button>
+              <div class="objects-menu" id="objects-menu" hidden></div>
             </div>
           </header>
 
@@ -348,69 +352,72 @@
                   <span class="metric-val" id="risk-object">—</span>
                 </div>
                 <div class="metric-box">
-                  <span class="metric-lbl">Distance</span>
+                  <span class="metric-lbl">Lane</span>
                   <span class="metric-val" id="risk-lane">—</span>
                 </div>
                 <div class="metric-box">
-                  <span class="metric-lbl">Closing</span>
+                  <span class="metric-lbl">Distance</span>
+                  <span class="metric-val" id="risk-distance">—</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-lbl">Motion</span>
+                  <span class="metric-val" id="risk-motion">—</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-lbl">Approach Speed</span>
+                  <span class="metric-val" id="risk-approach-speed">—</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-lbl">Confidence</span>
                   <span class="metric-val" id="risk-confidence">—</span>
                 </div>
               </div>
             </div>
 
-            <!-- SUB PANEL 2: Active Objects -->
-            <div class="risk-sub-panel">
-              <div class="risk-sub-panel-head">
-                <h3 id="objects-panel-title">Active Objects</h3>
-                <span id="threat-count" style="font-size: 11.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;">Objects: <span>0</span></span>
-              </div>
-              <div class="threat-object-layout modern-threat-layout">
-                <div class="detection-list" id="detection-list">
-                  <div class="detection-empty">No tracked objects</div>
-                </div>
-                <div class="object-risk-detail">
-                  <h3 class="risk-factors-title">Risk Factors</h3>
-                  <div class="signal-bars">
-                    <div class="signal-row" data-signal="near">
-                      <span class="signal-label">Proximity 
-                        <span class="info-tip">
-                          <svg><use href="#icon-info"></use></svg>
-                          <div class="tooltip-content">Estimated metric distance between the camera and object, calculated from Depth Anything V2 Metric.</div>
-                        </span>
+            <!-- SUB PANEL 2: Object Inspector -->
+            <div class="risk-sub-panel object-inspector-panel" id="object-inspector-panel">
+              <div class="object-inspector-layout">
+                <h3 class="risk-factors-title">Risk Factors</h3>
+                <div class="signal-bars">
+                  <div class="signal-row" data-signal="near">
+                    <span class="signal-label">Proximity
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content">Estimated metric distance between the camera and object, calculated from Depth Anything V2 Metric.</div>
                       </span>
-                      <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
-                      <span class="signal-value" id="signal-near-value">—</span>
-                    </div>
-                    <div class="signal-row" data-signal="closing">
-                      <span class="signal-label">Approach 
-                        <span class="info-tip">
-                          <svg><use href="#icon-info"></use></svg>
-                          <div class="tooltip-content">Relative closing speed, indicating how fast the object is nearing the camera.</div>
-                        </span>
+                    </span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-near-value">—</span>
+                  </div>
+                  <div class="signal-row" data-signal="closing">
+                    <span class="signal-label">Approach
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content">Relative closing speed, indicating how fast the object is nearing the camera.</div>
                       </span>
-                      <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
-                      <span class="signal-value" id="signal-closing-value">—</span>
-                    </div>
-                    <div class="signal-row" data-signal="crossing">
-                      <span class="signal-label">Crossing 
-                        <span class="info-tip">
-                          <svg><use href="#icon-info"></use></svg>
-                          <div class="tooltip-content">Lateral movement risk, predicting the chance of the object intruding into your lane.</div>
-                        </span>
+                    </span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-closing-value">—</span>
+                  </div>
+                  <div class="signal-row" data-signal="crossing">
+                    <span class="signal-label">Crossing
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content">Lateral movement risk, predicting the chance of the object intruding into your lane.</div>
                       </span>
-                      <div class="signal-track"><span class="signal-fill" id="signal-crossing" style="width:0%"></span></div>
-                      <span class="signal-value" id="signal-crossing-value">—</span>
-                    </div>
-                    <div class="signal-row" data-signal="confidence">
-                      <span class="signal-label">Confidence 
-                        <span class="info-tip">
-                          <svg><use href="#icon-info"></use></svg>
-                          <div class="tooltip-content">Detection reliability score, based on the consistency of visual and spatial signals.</div>
-                        </span>
+                    </span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-crossing" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-crossing-value">—</span>
+                  </div>
+                  <div class="signal-row" data-signal="confidence">
+                    <span class="signal-label">Confidence
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content">Detection reliability score, based on the consistency of visual and spatial signals.</div>
                       </span>
-                      <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
-                      <span class="signal-value" id="signal-confidence-value">—</span>
-                    </div>
+                    </span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-confidence-value">—</span>
                   </div>
                 </div>
               </div>

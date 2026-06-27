@@ -22,7 +22,7 @@ from .risk import (
     TtcImminenceSmoother,
     build_object_events,
     compute_quick_risk,
-    score_raw,
+    score_event,
     stabilized_event_state,
 )
 from ..vision.depth import DepthResult, estimate_frame_depth
@@ -298,19 +298,7 @@ _MIN_CLOSING_FOR_DISPLAY_MPS = 0.30
 
 
 def _risk_score(event: RiskEvent) -> float:
-    state_floor = {
-        "SAFE": 0.06,
-        "CAUTION": 0.42,
-        "DANGER": 0.68,
-    }.get(event.state, 0.0)
-    signal = min(1.0, (0.52 * event.near_score) + (0.48 * event.closing_speed))
-    # ETA pressure only contributes when the stabilized state is non-SAFE; a
-    # calm scene with a far physical ETA should not inflate the risk score.
-    if event.state == "SAFE" or event.ttc_sec is None:
-        ttc_pressure = 0.0
-    else:
-        ttc_pressure = max(0.0, 3.0 - float(event.ttc_sec)) / 3.0
-    return round(float(max(state_floor, (0.48 * signal) + (0.52 * ttc_pressure))), 3)
+    return score_event(event)
 
 
 def _display_lane_position(lane_position: float) -> float:
@@ -452,9 +440,8 @@ def _event_payload_base(
 
     Client-facing fields use schema names (``stabilized_risk_state``,
     ``primary_*``). The primary event's raw scoring inputs are kept on the
-    payload as internal scratch fields because ``score_event_payload`` ranks
-    saved events by them; ``_serialize_event`` drops these before the JSON
-    leaves the server.
+    payload as internal diagnostics; saved-event ranking uses the canonical
+    ``risk_score``/``primary_risk_score`` values.
 
     ``primary_risk_score`` is computed from the **raw** primary event (before
     hysteresis stabilization) so it stays consistent with the matching entry
@@ -1068,9 +1055,7 @@ def analyze_spatial_video(
 
 
 def score_event_payload(payload: dict[str, Any]) -> float:
-    return score_raw(
-        state=str(payload.get("stabilized_risk_state") or "").upper(),
-        ttc_sec=payload.get("collision_eta_sec"),
-        near_score=float(payload.get("proximity_score") or 0.0),
-        closing_speed=float(payload.get("approach_score") or 0.0),
-    )
+    score = payload.get("risk_score")
+    if score is None:
+        score = payload.get("primary_risk_score")
+    return round(float(score or 0.0), 3)

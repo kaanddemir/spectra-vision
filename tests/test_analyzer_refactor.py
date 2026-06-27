@@ -22,7 +22,7 @@ def _make_event(frame_index: int, timestamp_sec: float, spec: dict) -> RiskEvent
         direction="center",
         lane="center",
         object_type="car",
-        confidence=0.9,
+        confidence=spec.get("confidence", 0.9),
         near_score=spec["near"],
         velocity_magnitude=0.1,
         closing_speed=spec["closing"],
@@ -31,8 +31,9 @@ def _make_event(frame_index: int, timestamp_sec: float, spec: dict) -> RiskEvent
         object_id=1,
         expansion_rate=0.1,
         lateral_velocity_norm=0.0,
-        crossing_risk=0.1,
+        crossing_risk=spec.get("crossing", 0.1),
         lane_position=0.0,
+        brake_score=spec.get("brake", 0.0),
         ttc_components=(),
     )
 
@@ -245,6 +246,37 @@ def test_per_second_dedup_keeps_higher_score(monkeypatch):
     # t=5.0 and t=5.3 are within 1s -> the stronger (t=5.3) replaces it.
     times = sorted(round(e["timestamp_sec"], 2) for e in result["events"])
     assert times == [0.0, 5.3]
+
+
+def test_peak_event_uses_risk_score_not_shortest_eta(monkeypatch):
+    _SPECS[:] = [
+        {
+            "t": 0.0,
+            "state": "DANGER",
+            "ttc": 0.2,
+            "near": 0.1,
+            "closing": 0.1,
+            "crossing": 0.1,
+            "brake": 0.0,
+        },
+        {
+            "t": 3.0,
+            "state": "DANGER",
+            "ttc": 0.8,
+            "near": 1.0,
+            "closing": 1.0,
+            "crossing": 1.0,
+            "brake": 1.0,
+        },
+    ]
+    _patch(monkeypatch)
+
+    result = video.analyze_spatial_video(
+        "clip.mp4", max_processed_frames=100, max_saved_events=10, resize_max_side=256
+    )
+
+    assert result["peak_event"]["timestamp_sec"] == 3.0
+    assert result["peak_event"]["primary_risk_score"] > result["events"][1]["primary_risk_score"]
 
 
 def test_saved_events_get_deferred_rgb(monkeypatch):
