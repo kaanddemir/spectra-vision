@@ -340,36 +340,39 @@
                       <use href="#icon-alert"></use>
                     </svg></div>
                 </div>
-                <div class="modern-risk-info">
+                <div class="modern-risk-head">
+                  <span class="risk-state-cap">Overall Status</span>
                   <h1 id="risk-band-main" class="modern-risk-title">—</h1>
-                  <div class="modern-ttc">Collision ETA: <strong id="alert-ttc">—</strong></div>
+                  <div class="hero-subtitle" id="risk-subtitle" hidden></div>
                 </div>
               </div>
 
-              <div class="modern-metrics-grid">
-                <div class="metric-box">
-                  <span class="metric-lbl">Primary Object</span>
-                  <span class="metric-val" id="risk-object">—</span>
+              <div class="hero-metrics">
+                <div class="hero-metric">
+                  <span class="hero-metric-lbl">Collision ETA</span>
+                  <strong class="hero-metric-val" id="alert-ttc">—</strong>
                 </div>
-                <div class="metric-box">
-                  <span class="metric-lbl">Lane</span>
-                  <span class="metric-val" id="risk-lane">—</span>
+                <div class="hero-metric hero-metric-score">
+                  <span class="hero-metric-lbl">Risk Score / 100</span>
+                  <strong class="hero-metric-val" id="risk-score-main">—</strong>
                 </div>
-                <div class="metric-box">
-                  <span class="metric-lbl">Distance</span>
-                  <span class="metric-val" id="risk-distance">—</span>
+              </div>
+
+              <p class="risk-explainer" id="risk-explainer">Status = Risk Score band (≥60 DANGER · ≥25 CAUTION, out of 100) + ETA&lt;1s escalation.</p>
+
+              <span class="section-cap">Measurements</span>
+              <div class="facts-row">
+                <div class="fact-box">
+                  <span class="fact-lbl">Distance</span>
+                  <span class="fact-val" id="risk-distance">—</span>
                 </div>
-                <div class="metric-box">
-                  <span class="metric-lbl">Motion</span>
-                  <span class="metric-val" id="risk-motion">—</span>
+                <div class="fact-box">
+                  <span class="fact-lbl">Closing speed</span>
+                  <span class="fact-val" id="risk-approach">—</span>
                 </div>
-                <div class="metric-box">
-                  <span class="metric-lbl">Approach Speed</span>
-                  <span class="metric-val" id="risk-approach-speed">—</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-lbl">Confidence</span>
-                  <span class="metric-val" id="risk-confidence">—</span>
+                <div class="fact-box">
+                  <span class="fact-lbl">Lane</span>
+                  <span class="fact-val" id="risk-lane">—</span>
                 </div>
               </div>
             </div>
@@ -377,20 +380,31 @@
             <!-- SUB PANEL 2: Object Inspector -->
             <div class="risk-sub-panel object-inspector-panel" id="object-inspector-panel">
               <div class="object-inspector-layout">
-                <h3 class="risk-factors-title">Risk Factors</h3>
+                <h3 class="risk-factors-title">What builds the Risk Score</h3>
+                <p class="risk-factors-sub">Weighted signals add up, then are multiplied by lane relevance and confidence.</p>
                 <div class="signal-bars">
-                  <div class="signal-row" data-signal="near">
-                    <span class="signal-label">Proximity
+                  <div class="signal-row" data-signal="eta">
+                    <span class="signal-label">ETA pressure <span class="signal-weight">40%</span>
                       <span class="info-tip">
                         <svg><use href="#icon-info"></use></svg>
-                        <div class="tooltip-content">Estimated metric distance between the camera and object, calculated from Depth Anything V2 Metric.</div>
+                        <div class="tooltip-content">How close the collision ETA is to the 3s caution horizon. Estimated metric distance and closing speed drive it.</div>
+                      </span>
+                    </span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-eta" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-eta-value">—</span>
+                  </div>
+                  <div class="signal-row" data-signal="near">
+                    <span class="signal-label">Proximity <span class="signal-weight">30%</span>
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content">How near the object is, derived from the metric depth distance (Depth Anything V2 Metric).</div>
                       </span>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-near-value">—</span>
                   </div>
                   <div class="signal-row" data-signal="closing">
-                    <span class="signal-label">Approach
+                    <span class="signal-label">Approach <span class="signal-weight">25%</span>
                       <span class="info-tip">
                         <svg><use href="#icon-info"></use></svg>
                         <div class="tooltip-content">Relative closing speed, indicating how fast the object is nearing the camera.</div>
@@ -399,27 +413,54 @@
                     <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-closing-value">—</span>
                   </div>
-                  <div class="signal-row" data-signal="crossing">
-                    <span class="signal-label">Crossing
+                  <div class="signal-row" data-signal="brake">
+                    <span class="signal-label">Brake <span class="signal-weight">5%</span>
                       <span class="info-tip">
                         <svg><use href="#icon-info"></use></svg>
-                        <div class="tooltip-content">Lateral movement risk, predicting the chance of the object intruding into your lane.</div>
+                        <div class="tooltip-content">Brake-light cue for a lead vehicle — an early warning before the gap visibly closes.</div>
                       </span>
                     </span>
-                    <div class="signal-track"><span class="signal-fill" id="signal-crossing" style="width:0%"></span></div>
-                    <span class="signal-value" id="signal-crossing-value">—</span>
-                  </div>
-                  <div class="signal-row" data-signal="confidence">
-                    <span class="signal-label">Confidence
-                      <span class="info-tip">
-                        <svg><use href="#icon-info"></use></svg>
-                        <div class="tooltip-content">Detection reliability score, based on the consistency of visual and spatial signals.</div>
-                      </span>
-                    </span>
-                    <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
-                    <span class="signal-value" id="signal-confidence-value">—</span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-brake" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-brake-value">—</span>
                   </div>
                 </div>
+
+                <div class="multipliers">
+                  <div class="multiplier-row">
+                    <span class="multiplier-lbl">× Lane relevance
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content">How likely the object is in your lane at impact. Off-path objects gate the whole score toward zero.</div>
+                      </span>
+                    </span>
+                    <span class="multiplier-val" id="mult-relevance">—</span>
+                  </div>
+                  <div class="multiplier-row">
+                    <span class="multiplier-lbl">× Confidence
+                      <span class="info-tip">
+                        <svg><use href="#icon-info"></use></svg>
+                        <div class="tooltip-content" id="confidence-breakdown">Detection / tracking / depth reliability.</div>
+                      </span>
+                    </span>
+                    <span class="multiplier-val" id="mult-confidence">—</span>
+                  </div>
+                  <p class="multiplier-sub" id="confidence-sub">—</p>
+                </div>
+
+                <details class="evidence-details" id="evidence-details">
+                  <summary>Advanced signals</summary>
+                  <div class="evidence-grid">
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Flow</span>
+                      <div class="evidence-row"><span>Expansion</span><span id="ev-flow-expansion">—</span></div>
+                      <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
+                    </div>
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Depth</span>
+                      <div class="evidence-row"><span>Status</span><span id="ev-depth-status">—</span></div>
+                    </div>
+                  </div>
+                </details>
               </div>
             </div>
 

@@ -81,6 +81,11 @@ export function initializeSpectra() {
   };
   const etaDisplay = (eta) => eta?.display || MISSING;
   const etaSeconds = (eta) => eta?.status === "closing" ? num(eta?.sec, null) : null;
+  // ETA pressure mirrors the backend: (3 - ttc)/3 clamped, 0 when not closing.
+  const etaPressure = (eta) => {
+    const sec = etaSeconds(eta);
+    return sec === null ? 0 : clamp((3 - sec) / 3, 0, 1);
+  };
   const laneWithPosition = (lane, lanePosition) => {
     const laneText = lane ? shortLane(lane) : MISSING;
     const pos = num(lanePosition, null);
@@ -144,6 +149,7 @@ export function initializeSpectra() {
       riskFactors: primary?.riskFactors ?? null,
       kinematics: primary?.kinematics ?? null,
       evidence: primary?.evidence ?? null,
+      confidence: primary?.confidence ?? null,
       proximityScore: riskFactors.proximity ?? null,
       approachScore: riskFactors.approach ?? null,
       crossingScore: riskFactors.crossing ?? null,
@@ -496,24 +502,21 @@ export function initializeSpectra() {
     return type === MISSING && !id ? MISSING : `${type === MISSING ? "Object" : type}${id}`;
   }
 
-  function percentLabel(value) {
-    const n = num(value, null);
-    return n === null ? MISSING : `${Math.round(clamp(n, 0, 100))}%`;
-  }
   const distanceLabel = (value) => {
     const n = num(value, null);
     return n === null ? MISSING : `${n.toFixed(n < 10 ? 1 : 0)}m`;
   };
-  const motionLabel = (value) => {
+  // Merges Motion (direction) + Approach Speed into one fact, e.g. "Closing · 3.1 m/s".
+  const approachFactLabel = (value) => {
     const n = num(value, null);
     if (n === null) return MISSING;
-    if (n > 0.30) return "Closing";
-    if (n < -0.30) return "Receding";
+    if (n > 0.30) return `Closing · ${n.toFixed(1)} m/s`;
+    if (n < -0.30) return `Receding · ${Math.abs(n).toFixed(1)} m/s`;
     return "Parallel";
   };
-  const approachSpeedLabel = (value) => {
+  const riskScoreLabel = (value) => {
     const n = num(value, null);
-    return n !== null && n > 0.30 ? `${n.toFixed(1)} m/s` : MISSING;
+    return n === null ? MISSING : String(Math.round(clamp(n, 0, 1) * 100));
   };
 
   function focusSummaryFrame(source) {
@@ -578,21 +581,43 @@ export function initializeSpectra() {
     renderRiskPanel();
   }
 
+  const setText = (id, value) => { const el = byId(id); if (el) el.textContent = value; };
+  const pctLabel = (v) => { const n = num(v, null); return n === null ? MISSING : `${Math.round(clamp(n, 0, 1) * 100)}%`; };
+
+  // Advanced (non-duplicated) diagnostics only: flow signals + depth freshness.
+  function renderAdvanced(source) {
+    const ev = source?.evidence || null;
+    const flow = ev?.flow || {};
+    setText("ev-flow-expansion", pctLabel(flow.expansionScore));
+    setText("ev-flow-radial", pctLabel(flow.radialScore));
+    const depth = ev?.depth || {};
+    setText("ev-depth-status", isReal(depth.status) ? titleCase(depth.status) : MISSING);
+  }
+
+  const confidenceBreakdown = (conf) => {
+    if (!conf) return "Detection / tracking / depth reliability.";
+    return `Detection ${pctLabel(conf.detection)} · Tracking ${pctLabel(conf.tracking)} · Depth ${pctLabel(conf.depth)}`;
+  };
+
   function applyRiskBannerState({ source, timeTag }) {
     const hasObject = source?.objectId !== null && source?.objectId !== undefined;
     const riskState = hasObject ? (source?.riskState || null) : null;
-    const sc = stateClass(riskState);
     const banner = byId("risk-banner");
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
     banner.classList.add(riskClass(riskState));
     byId("risk-band-main").textContent = riskState ? String(riskState).toUpperCase() : MISSING;
     byId("alert-ttc").textContent = etaDisplay(source?.collisionEta);
-    byId("risk-object").textContent = objectLabel(source);
-    byId("risk-lane").textContent = laneWithPosition(source?.lane, source?.lanePosition);
-    byId("risk-distance").textContent = distanceLabel(source?.kinematics?.distanceM);
-    byId("risk-motion").textContent = motionLabel(source?.kinematics?.closingMps);
-    byId("risk-approach-speed").textContent = approachSpeedLabel(source?.kinematics?.closingMps);
-    byId("risk-confidence").textContent = percentLabel(source?.confidencePct);
+    setText("risk-score-main", hasObject ? riskScoreLabel(source?.riskScore) : MISSING);
+    const subtitle = byId("risk-subtitle");
+    if (subtitle) {
+      const label = objectLabel(source);
+      const present = hasObject && label !== MISSING;
+      subtitle.textContent = present ? label : "";
+      subtitle.hidden = !present;
+    }
+    setText("risk-distance", distanceLabel(source?.kinematics?.distanceM));
+    setText("risk-approach", approachFactLabel(source?.kinematics?.closingMps));
+    setText("risk-lane", laneWithPosition(source?.lane, source?.lanePosition));
     const tag = byId("risk-time-tag");
     if (tag) {
       if (timeTag) { tag.innerHTML = timeTag; tag.hidden = false; }
@@ -692,14 +717,19 @@ export function initializeSpectra() {
     }
 
     const factors = activeObject?.riskFactors || {};
-    const kinematics = activeObject?.kinematics || {};
+    // Additive weighted contributors (mirror score_raw): ETA + proximity + approach + brake.
+    setSignalBar("eta", etaPressure(activeObject?.collisionEta));
     setSignalBar("near", factors.proximity);
-    const distanceValue = byId("signal-near-value");
-    if (distanceValue) distanceValue.textContent = distanceLabel(kinematics.distanceM);
     setSignalBar("closing", factors.approach);
-    setSignalBar("crossing", factors.crossing);
+    setSignalBar("brake", factors.brake);
+    // Multipliers: lane relevance (crossing) and confidence gate.
+    setText("mult-relevance", pctLabel(factors.crossing));
     const conf = num(activeObject?.confidencePct, null);
-    setSignalBar("confidence", conf === null ? null : conf / 100);
+    setText("mult-confidence", conf === null ? MISSING : `${Math.round(clamp(conf, 0, 100))}%`);
+    const breakdown = confidenceBreakdown(activeObject?.confidence);
+    setText("confidence-sub", breakdown);
+    setText("confidence-breakdown", breakdown);
+    renderAdvanced(activeObject);
   }
 
   // ─── Timeline + event strip ──────────────────────────────

@@ -11,7 +11,8 @@ from spectra.analysis.risk import (
     StateStabilizer,
     TtcComponent,
     calculate_track_risk,
-    classify_state,
+    state_from_score,
+    score_raw,
     distance_m_for_bbox,
     direction_from_lateral,
     expansion_rate_from_track,
@@ -413,50 +414,42 @@ class TestCrossing:
         assert lane_crossing_risk(far, lane, 2.0) < lane_crossing_risk(near, lane, 2.0)
 
 
-class TestClassifyState:
+class TestStateFromScore:
     def test_safe_when_low_confidence(self):
-        state = classify_state(
-            fused_ttc=0.5,
-            crossing=0.9,
-            near_score=0.5,
-            expansion_rate=0.5,
-            lane_pos=0.0,
-            confidence=0.1,
-        )
-        assert state == "SAFE"
+        # Even a high score + imminent TTC is forced to SAFE when the detection
+        # is not trusted.
+        assert state_from_score(0.9, 0.5, confidence=0.1) == "SAFE"
 
-    def test_danger_low_ttc_in_corridor(self):
-        state = classify_state(
-            fused_ttc=0.5,
-            crossing=0.7,
-            near_score=0.5,
-            expansion_rate=0.5,
-            lane_pos=0.0,
-            confidence=0.8,
-        )
-        assert state == "DANGER"
+    def test_danger_when_high_score(self):
+        assert state_from_score(0.60, None, confidence=0.8) == "DANGER"
 
-    def test_caution_mid_ttc(self):
-        state = classify_state(
-            fused_ttc=2.0,
-            crossing=0.4,
-            near_score=0.3,
-            expansion_rate=0.2,
-            lane_pos=0.2,
-            confidence=0.8,
-        )
-        assert state == "CAUTION"
+    def test_caution_mid_score(self):
+        assert state_from_score(0.30, None, confidence=0.8) == "CAUTION"
 
-    def test_safe_when_outside_corridor(self):
-        state = classify_state(
-            fused_ttc=0.5,
-            crossing=0.05,
-            near_score=0.5,
-            expansion_rate=0.5,
-            lane_pos=2.0,
-            confidence=0.8,
+    def test_safe_when_low_score(self):
+        assert state_from_score(0.10, None, confidence=0.8) == "SAFE"
+
+    def test_imminent_escalates_when_already_risky(self):
+        # A CAUTION-band score with a confirmed imminent TTC snaps to DANGER.
+        assert (
+            state_from_score(0.30, 0.5, ttc_imminent_streak=2, confidence=0.8)
+            == "DANGER"
         )
-        assert state != "DANGER"
+
+    def test_imminent_ignored_when_score_low(self):
+        # The off-path safety property: a near/fast object that is NOT in our
+        # path scores low (lane gate ~0), so an imminent TTC must NOT raise it
+        # to DANGER. This replaces the old explicit corridor gate.
+        assert state_from_score(0.10, 0.5, ttc_imminent_streak=2, confidence=0.8) == "SAFE"
+
+    def test_lane_gate_zeros_off_path_score(self):
+        # Same near/fast/closing object: in-path (relevance 0.9) scores high,
+        # off-path (relevance 0.02) collapses toward zero.
+        in_path = score_raw(0.8, 0.9, 0.8, crossing_risk=0.9, confidence=0.9)
+        off_path = score_raw(0.8, 0.9, 0.8, crossing_risk=0.02, confidence=0.9)
+        assert in_path > 0.20
+        assert off_path < 0.05
+        assert state_from_score(off_path, 0.8, confidence=0.9) == "SAFE"
 
 
 class TestMetricDepth:
@@ -566,7 +559,11 @@ class TestMetricDepth:
 
 
 class TestCalculateTrackRisk:
-    def test_strong_expansion_in_corridor_danger(self):
+    def test_strong_expansion_in_corridor_without_ttc_is_caution(self):
+        # New model: strong bbox expansion in the corridor with NO closing-TTC
+        # estimate no longer forces DANGER. It feeds the Risk Score (proximity +
+        # expansion-driven approach, lane-gated) and lands in the CAUTION band;
+        # DANGER now needs either a high score or a confirmed imminent TTC.
         height, width = 200, 300
         near_map = np.full((height, width), 0.6, dtype=np.float32)
         magnitude = np.full((height, width), 0.4, dtype=np.float32)
@@ -593,7 +590,7 @@ class TestCalculateTrackRisk:
             timestamp_sec=track.timestamp_sec,
         )
 
-        assert event.state == "DANGER"
+        assert event.state == "CAUTION"
         assert event.ttc_sec is None
         assert event.bbox == track.bbox
 

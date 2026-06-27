@@ -125,7 +125,7 @@ _EXPANSION_EMA_RISE = 0.55
 _EXPANSION_EMA_FALL = 0.30
 
 # Smoothing for the displayed per-track fused confidence. Display stability
-# only — classify_state still uses raw detection confidence, so this never
+# only — state_from_score still uses raw detection confidence, so this never
 # changes a risk decision. Rises fast so a newly-confident detection isn't
 # held back; falls slower to ride out one-frame YOLO confidence dips.
 _CONFIDENCE_EMA_RISE = 0.60
@@ -647,7 +647,7 @@ class ConfidenceSmoother:
 
     Smooths the confidence value shown in the UI / telemetry so it doesn't jump
     frame-to-frame with raw YOLO confidence. Purely cosmetic — the raw
-    detection confidence still drives ``classify_state``.
+    detection confidence still drives ``state_from_score``.
     """
 
     def __init__(self) -> None:
@@ -696,8 +696,8 @@ class DepthDeltaSmoother:
 class TtcImminenceSmoother:
     """Per-track sliding count of imminent-TTC frames within a short window.
 
-    ``classify_state`` uses the returned count to require multi-frame
-    confirmation before upgrading to DANGER on the TTC<1s rule. The window
+    ``state_from_score`` uses the returned count to require multi-frame
+    confirmation before the TTC<1s rule snaps to DANGER. The window
     rule (2-of-last-3 imminent) survives a single intermediate frame where
     TTC briefly recovers above 1s — a common pattern for real cut-ins where
     expansion-rate noise causes one-frame TTC spikes — while still rejecting
@@ -748,52 +748,6 @@ class TtcImminenceSmoother:
 # ── State machine ─────────────────────────────────────────────────────────────
 
 
-def classify_state(
-    *,
-    fused_ttc: Optional[float],
-    crossing: float,
-    near_score: float,
-    expansion_rate: float,
-    lane_pos: float,
-    confidence: float,
-    lane_confidence: float = 1.0,
-    ttc_imminent_streak: int = 2,
-) -> str:
-    if confidence < 0.20:
-        return "SAFE"
-
-    in_ego_lane = abs(lane_pos) < 0.7 and lane_confidence >= _LANE_TRUST_FLOOR
-
-    if fused_ttc is not None:
-        # The TTC<1s immediate-DANGER rule requires at least two consecutive
-        # frames of imminent TTC so a single-frame bbox-expansion spike cannot
-        # flip the state on its own. The streak counter is maintained per
-        # track by ``TtcImminenceSmoother``. Callers without a smoother get
-        # the default ``2`` (treated as already confirmed) for backward
-        # compatibility.
-        if (
-            fused_ttc < _DANGER_TTC_SEC
-            and ttc_imminent_streak >= 2
-            and (in_ego_lane or crossing >= 0.55)
-        ):
-            return "DANGER"
-        if fused_ttc < _CAUTION_TTC_SEC and (in_ego_lane or crossing >= 0.30):
-            return "CAUTION"
-        if fused_ttc < _CAUTION_TTC_SEC and near_score >= 0.55:
-            return "CAUTION"
-
-    if expansion_rate >= 0.40 and crossing >= 0.45 and near_score >= 0.40:
-        return "DANGER"
-    if expansion_rate >= 0.20 and (in_ego_lane or crossing >= 0.30):
-        return "CAUTION"
-    if near_score >= 0.78 and crossing >= 0.50:
-        return "CAUTION"
-    return "SAFE"
-
-
-_STATE_SCORE = {"SAFE": 0.06, "CAUTION": 0.42, "DANGER": 0.68}
-
-
 def _unit_interval(value: float | int | None) -> float:
     return float(np.clip(0.0 if value is None else float(value), 0.0, 1.0))
 
@@ -805,7 +759,6 @@ def eta_pressure(ttc_sec: float | None) -> float:
 
 
 def score_raw(
-    state: str,
     ttc_sec: float | None,
     near_score: float,
     closing_speed: float,
@@ -813,22 +766,33 @@ def score_raw(
     brake: float = 0.0,
     confidence: float = 1.0,
 ) -> float:
-    eta = eta_pressure(ttc_sec)
+    """Single canonical Risk Score in [0, 1].
+
+    Lane relevance (``crossing_risk``) is a *multiplicative gate*, not an
+    additive term: an object that is not in our path (relevance ~0) scores ~0
+    no matter how close or fast it is. This is what keeps a near/fast off-path
+    vehicle from reading DANGER. The score is independent of the discrete state
+    — the state is now *derived* from this score (see ``state_from_score``), so
+    there is no state floor and no circular dependency.
+
+        signal    = 0.40·eta + 0.30·proximity + 0.25·approach + 0.05·brake
+        gate      = 0.65 + 0.35·confidence
+        relevance = crossing_risk            (probability in ego lane at impact)
+        score     = gate · relevance · signal
+    """
     signal = (
-        (0.30 * eta)
-        + (0.25 * _unit_interval(near_score))
-        + (0.20 * _unit_interval(closing_speed))
-        + (0.20 * _unit_interval(crossing_risk))
+        (0.40 * eta_pressure(ttc_sec))
+        + (0.30 * _unit_interval(near_score))
+        + (0.25 * _unit_interval(closing_speed))
         + (0.05 * _unit_interval(brake))
     )
     confidence_gate = 0.65 + (0.35 * _unit_interval(confidence))
-    floor = _STATE_SCORE.get(str(state or "").upper(), 0.0)
-    return round(float(max(floor, signal * confidence_gate)), 3)
+    relevance = _unit_interval(crossing_risk)
+    return round(float(confidence_gate * relevance * signal), 3)
 
 
 def score_event(event: RiskEvent) -> float:
     return score_raw(
-        event.state,
         event.ttc_sec,
         event.near_score,
         event.closing_speed,
@@ -836,6 +800,48 @@ def score_event(event: RiskEvent) -> float:
         brake=event.brake_score,
         confidence=event.confidence,
     )
+
+
+# Risk Score band edges → discrete status. Round values on the 0–100 scale the
+# UI shows (25 / 60). Tune on footage. The status is purely a banding of the
+# score plus an imminent-TTC escalation; lane relevance lives only in the score.
+_CAUTION_SCORE_BAND = 0.25
+_DANGER_SCORE_BAND = 0.60
+
+
+def state_from_score(
+    score: float,
+    ttc_sec: float | None,
+    *,
+    ttc_imminent_streak: int = 2,
+    confidence: float = 1.0,
+) -> str:
+    """Derive SAFE/CAUTION/DANGER from the Risk Score band.
+
+    The score already folds in ETA pressure, proximity, approach, brake and the
+    lane-relevance gate, so the status needs no extra spatial inputs. The only
+    override is imminence: a confirmed TTC < 1s on an already-risky object
+    (score at least in the CAUTION band) snaps straight to DANGER rather than
+    waiting for the score to climb. Very low detection confidence forces SAFE.
+    """
+    if confidence < 0.20:
+        return "SAFE"
+
+    if score >= _DANGER_SCORE_BAND:
+        base = "DANGER"
+    elif score >= _CAUTION_SCORE_BAND:
+        base = "CAUTION"
+    else:
+        base = "SAFE"
+
+    if (
+        ttc_sec is not None
+        and ttc_sec < _DANGER_TTC_SEC
+        and ttc_imminent_streak >= 2
+        and score >= _CAUTION_SCORE_BAND
+    ):
+        return "DANGER"
+    return base
 
 
 def _risk_reason(state: str, ttc_sec: Optional[float], lane_pos: float) -> str:
@@ -1028,37 +1034,32 @@ def calculate_track_risk(
     if confidence_smoother is not None:
         fused_confidence = confidence_smoother.update(track.track_id, fused_confidence)
 
-    state = classify_state(
-        fused_ttc=risk_time_hint,
-        crossing=crossing,
-        near_score=near_score,
-        expansion_rate=expansion_rate,
-        lane_pos=pos,
-        confidence=detection_confidence,
-        lane_confidence=lane.confidence,
+    # Brake-light cue feeds the Risk Score directly now (5% weight inside
+    # ``score_raw``) rather than overriding the state band, so it is computed
+    # before scoring.
+    brake = brake_score(bgr, bbox) if track.class_name in _BRAKE_LIGHT_CLASSES else 0.0
+
+    # Single canonical Risk Score, then derive the discrete status by banding
+    # it. ``physical_ttc`` (the depth ETA we also expose) is used for both the
+    # score and the imminence escalation so the status and the displayed score
+    # always agree. ``score_event`` recomputes the identical value from the
+    # serialized event fields.
+    score = score_raw(
+        physical_ttc,
+        near_score,
+        closing_speed,
+        crossing_risk=crossing,
+        brake=brake,
+        confidence=fused_confidence,
+    )
+    state = state_from_score(
+        score,
+        physical_ttc,
         ttc_imminent_streak=ttc_imminent_streak,
+        confidence=detection_confidence,
     )
 
-    # Brake-light cue: a lead vehicle braking in our lane is an early warning
-    # even before TTC drops. Escalate one band when a rear-facing vehicle shows
-    # a confident brake-lamp pair and is reasonably in-path. Corroborating only
-    # — it lifts SAFE→CAUTION, and CAUTION→DANGER only with a closing TTC.
-    brake = brake_score(bgr, bbox) if track.class_name in _BRAKE_LIGHT_CLASSES else 0.0
-    in_ego_lane = abs(pos) < 0.7 and lane.confidence >= _LANE_TRUST_FLOOR
-    braking_lead = brake >= _BRAKE_ESCALATE_SCORE and in_ego_lane
-    if braking_lead:
-        if state == "SAFE":
-            state = "CAUTION"
-        elif state == "CAUTION" and risk_time_hint is not None and risk_time_hint < _CAUTION_TTC_SEC:
-            state = "DANGER"
-
     reason = _risk_reason(state, risk_time_hint, pos)
-    if braking_lead and state != "SAFE":
-        reason = (
-            f"lead vehicle braking: approach hint {risk_time_hint:.1f}s"
-            if risk_time_hint is not None
-            else "lead vehicle braking ahead"
-        )
 
     tracking_confidence = float(
         np.clip(
@@ -1115,7 +1116,7 @@ def is_imminent_danger(event: RiskEvent) -> bool:
 
 def stabilized_event_state(stabilizer: "StateStabilizer", event: RiskEvent) -> str:
     # Multi-frame TTC confirmation already happens per-track in
-    # ``TtcImminenceSmoother`` before ``classify_state`` returns DANGER, so by
+    # ``TtcImminenceSmoother`` before ``state_from_score`` returns DANGER, so by
     # the time an imminent event reaches the stabilizer it has already
     # survived the ``ttc<1s for 2 consecutive frames`` filter. The stabilizer
     # still bypasses upgrade hysteresis for those confirmed imminent events
@@ -1221,7 +1222,7 @@ def build_object_events(
         return safe, [safe]
 
     # Two-pass: fuse TTC first so the imminence streak per track is updated
-    # before classify_state sees it. Per-track work is light, so this is
+    # before state_from_score sees it. Per-track work is light, so this is
     # cheaper than carrying state across function calls.
     events: list[RiskEvent] = []
     active_ids: set[int] = set()

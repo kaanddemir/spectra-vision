@@ -99,43 +99,47 @@ def test_timeline_uses_backend_risk_score():
     assert "riskFactors" not in score_fn
 
 
-def test_banner_metrics_are_unambiguous():
+def test_banner_metrics_have_no_duplicated_data():
+    """Each datum appears exactly once: measurements, score contributors,
+    multipliers, and advanced diagnostics never repeat the same value."""
     index = read_static("index.html")
     controls = read_static("js/controls.js")
-    risk_css = read_static("css/risk.css")
 
-    grid_start = index.index('<div class="modern-metrics-grid">')
-    grid_end = index.index("</div>\n            </div>", grid_start)
-    metrics_grid = index[grid_start:grid_end]
+    # The old ambiguous 6-box grid is gone for good.
+    assert "modern-metrics-grid" not in index
+    for dead_id in ("risk-object", "risk-motion", "risk-approach-speed", "risk-confidence"):
+        assert f'id="{dead_id}"' not in index
 
-    for label in ("Primary Object", "Lane", "Distance", "Motion", "Approach Speed", "Confidence"):
-        assert label in metrics_grid
-    assert '<span class="metric-lbl">Closing</span>' not in metrics_grid
+    # Measurements strip: physical readings only, each once. Confidence is NOT here.
+    facts_start = index.index('<span class="section-cap">Measurements</span>')
+    facts_end = index.index("<!-- SUB PANEL 2", facts_start)
+    facts = index[facts_start:facts_end]
+    for label in ("Distance", "Closing speed", "Lane"):
+        assert label in facts
+    assert "Confidence" not in facts
+    for element_id in ("risk-distance", "risk-approach", "risk-lane"):
+        assert f'id="{element_id}"' in facts
 
-    for element_id in (
-        "risk-object",
-        "risk-lane",
-        "risk-distance",
-        "risk-motion",
-        "risk-approach-speed",
-        "risk-confidence",
-    ):
-        assert f'id="{element_id}"' in metrics_grid
+    # Risk Score contributors mirror score_raw: four weighted bars; crossing is
+    # a multiplier (not a bar) and confidence is a multiplier (not a fact box).
+    for bar_id in ("signal-eta", "signal-near", "signal-closing", "signal-brake"):
+        assert f'id="{bar_id}"' in index
+    assert 'id="signal-crossing"' not in index
+    for weight in ("40%", "30%", "25%", "5%"):
+        assert f'<span class="signal-weight">{weight}</span>' in index
+    assert 'id="mult-relevance"' in index
+    assert 'id="mult-confidence"' in index
 
-    motion_start = controls.index("const motionLabel = (value) => {")
-    motion_end = controls.index("  const approachSpeedLabel", motion_start)
-    motion_fn = controls[motion_start:motion_end]
-    assert "Closing" in motion_fn
-    assert "Estimating" not in motion_fn
-    assert "MISSING" in motion_fn
-    assert "m/s" not in motion_fn
+    # Advanced section holds only non-duplicated diagnostics (no distance /
+    # closing / crossing / confidence repeats).
+    for removed_ev in ("ev-depth-distance", "ev-depth-closing", "ev-lane-position", "ev-conf-detection"):
+        assert f'id="{removed_ev}"' not in index
+    for kept_ev in ("ev-flow-expansion", "ev-flow-radial", "ev-depth-status"):
+        assert f'id="{kept_ev}"' in index
 
-    speed_start = controls.index("const approachSpeedLabel = (value) => {")
-    speed_end = controls.index("\n\n  function focusSummaryFrame", speed_start)
-    speed_fn = controls[speed_start:speed_end]
-    assert "m/s" in speed_fn
-    assert "MISSING" in speed_fn
-    assert "repeat(auto-fit, minmax(150px, 1fr))" in risk_css
+    # ETA pressure is derived client-side from the collision ETA seconds.
+    assert "const etaPressure" in controls
+    assert 'setSignalBar("eta", etaPressure(' in controls
 
 
 def test_risk_panel_has_objects_tab_and_unified_object_inspector():

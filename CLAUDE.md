@@ -307,52 +307,56 @@ For example, a vehicle in the right lane may stay low risk even if it is approac
 
 Collision-cone distance reliability: `lane_position` is normalized by the lane width at the object's image row, so far objects (near the horizon) are computed from very few pixels and their lateral-velocity extrapolation is jittery. `lane_crossing_risk()` damps the *predicted* (velocity-based) crossing toward the horizon using the object's vertical position; the static corridor `base` stays a floor, so genuine near cut-ins are untouched while phantom far cut-ins fade. (Ego-yaw / curved-path handling is intentionally not modeled — lane geometry is stored as straight lines.)
 
-## 14. Closing Speed and Confidence
+## 14. Approach Score and Confidence
 
-For every object, Spectra computes a normalized closing-speed-like signal:
+For every object, Spectra computes a normalized `approach` signal (`_approach_score`), led by metric closing speed:
 
-- 50% bounding-box expansion
-- 30% crossing risk
+- 50% metric closing speed (depth Kalman range-rate)
+- 30% bounding-box expansion
 - 20% optical-flow magnitude
 
-This signal is multiplied by class risk weight. People and bicycles are slightly more sensitive.
+This signal is multiplied by class risk weight (people and bicycles are slightly more sensitive) and becomes the `approach` term in the Risk Score (section 15a).
 
-Fused confidence combines:
+Fused confidence combines detection confidence and lane geometry confidence; it drives the Risk Score's confidence gate. Very low detection confidence forces the status to `SAFE` (section 15b).
 
-- Detection confidence
-- Crossing risk
-- Expansion strength
-- Lane geometry confidence
+## 15. Risk Score and State Classification
 
-Very low detection confidence can force the state to `SAFE`.
+There are two distinct outputs, and **the state is derived from the score** (no circular dependency, no double-counted lane signal).
 
-## 15. Risk State Classification
+### 15a. Risk Score (how dangerous)
 
-Code: `classify_state()`
+Code: `score_raw()` / `score_event()` in `spectra/analysis/risk.py`.
 
-There are three states:
+A single continuous `[0, 1]` value. Lane relevance is a **multiplicative gate**, not an additive term, so an object that is not in our path scores ~0 regardless of how close or fast it is:
 
-- `SAFE`
-- `CAUTION`
-- `DANGER`
+```
+signal    = 0.40·eta_pressure(ttc) + 0.30·proximity + 0.25·approach + 0.05·brake
+gate      = 0.65 + 0.35·confidence
+relevance = crossing_risk            # probability of being in the ego lane at impact
+Risk Score = gate · relevance · signal
+```
 
-Main thresholds:
+`eta_pressure(ttc) = clamp((3 − ttc) / 3, 0, 1)`. The score has **no state floor**, so the score and the state are computed in one direction only (features → score → state). Because lane relevance gates the whole score, a near/fast off-path vehicle stays low (this replaced the old explicit corridor gate inside the state machine).
 
-- TTC < 1.0s and the object is in or entering the ego lane: `DANGER`
-- TTC < 3.0s and the object is lane-relevant: `CAUTION`
-- TTC < 3.0s and nearness is high: `CAUTION`
-- Strong expansion with meaningful crossing and nearness: `DANGER`
-- Moderate expansion with lane relevance: `CAUTION`
-- Very high nearness with meaningful crossing: `CAUTION`
-- Otherwise: `SAFE`
+### 15b. Status (which band)
 
-This raw decision is later stabilized.
+Code: `state_from_score()` in `spectra/analysis/risk.py`.
 
-### 15b. Brake-Light Cue
+The status is purely a banding of the Risk Score plus one safety escalation:
 
-Code: `spectra/vision/brake_lights.py` (`brake_score`), applied in `calculate_track_risk()`.
+- `Risk Score ≥ _DANGER_SCORE_BAND` (0.60, i.e. 60/100, tunable): `DANGER`
+- `Risk Score ≥ _CAUTION_SCORE_BAND` (0.25, i.e. 25/100, tunable): `CAUTION`
+- otherwise: `SAFE`
+- **Imminent escalation:** a confirmed TTC < 1.0s (≥2 imminent frames via `TtcImminenceSmoother`) on an object already in at least the CAUTION band snaps straight to `DANGER`. The escalation is gated by the score (not by a separate lane input), so an imminent *off-path* object — which scores low — is not raised.
+- Detection confidence < 0.20 forces `SAFE` (trust guard).
 
-A lit brake-lamp pair lights up *before* the gap visibly closes, so it is an early forward-collision cue no TTC signal captures. For rear-facing vehicle classes (car/truck/bus), `brake_score()` looks for a bright, symmetric, localized red pair in the lower band of the bbox (full-band red is treated as bodywork and suppressed). When an in-path lead vehicle shows a confident brake score, the state is escalated one band (`SAFE`→`CAUTION`, and `CAUTION`→`DANGER` only with a closing TTC). It is a corroborating signal, never acted on alone; the value is exposed as `RiskEvent.brake_score` and a `BRAKE` label in the overlay.
+The band edges are initial values and are meant to be tuned against real footage. This raw decision is later stabilized (section 16).
+
+### 15c. Brake-Light Cue
+
+Code: `spectra/vision/brake_lights.py` (`brake_score`), computed in `calculate_track_risk()`.
+
+A lit brake-lamp pair lights up *before* the gap visibly closes, so it is an early forward-collision cue no TTC signal captures. For rear-facing vehicle classes (car/truck/bus), `brake_score()` looks for a bright, symmetric, localized red pair in the lower band of the bbox (full-band red is treated as bodywork and suppressed). The brake score now feeds the **Risk Score directly** (the 5% `brake` term above) rather than overriding the state band; it is exposed as `RiskEvent.brake_score` and a `BRAKE` label in the overlay.
 
 ## 16. State Stabilization
 
@@ -368,7 +372,7 @@ Default behavior:
 
 This reduces flicker in the frontend risk banner.
 
-TTC is preserved through stabilization. Even when the stabilized state is `SAFE`, the fused TTC value (when measurable) survives, so the timeline chart and the in-frame HUD continue to show a numeric TTC reading rather than a placeholder. The risk score (`_risk_score`) ignores TTC pressure when the state is `SAFE`, so showing a SAFE TTC does not inflate the saved-event ranking.
+TTC is preserved through stabilization. Even when the stabilized state is `SAFE`, the fused TTC value (when measurable) survives, so the timeline chart and the in-frame HUD continue to show a numeric TTC reading rather than a placeholder. A `SAFE` object's Risk Score stays low on its own because the score is the lane-gated weighted signal (no state floor), so showing a SAFE TTC does not inflate the saved-event ranking.
 
 ## 17. Multiple Objects in One Frame
 

@@ -530,9 +530,9 @@
 
 .modern-risk-main {
   display: grid;
-  grid-template-columns: 80px 1fr auto;
+  grid-template-columns: 80px 1fr;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
 }
 
 .modern-risk-ring {
@@ -555,15 +555,24 @@
   width: 36px; height: 36px;
 }
 
-.modern-risk-info {
+.modern-risk-head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.risk-state-cap {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .modern-risk-title {
   margin: 0;
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 900;
   color: var(--r);
   line-height: 1;
@@ -586,45 +595,28 @@
   box-shadow: none;
 }
 
-.modern-ttc {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-soft);
-}
-
-.modern-ttc strong {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  margin-left: 4px;
-}
-
-.modern-metrics-grid {
+/* Twin hero: Collision ETA + Risk Score in one bordered card */
+.hero-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  background: transparent;
+  grid-template-columns: 1fr 1fr;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  gap: 0;
+  border-radius: 8px;
+  margin-top: 16px;
+  overflow: hidden;
 }
 
-.metric-box {
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--border-soft);
-  border-radius: 0;
-  padding: 12px 16px;
+.hero-metric {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  padding: 14px 18px;
 }
-.metric-box:last-child {
-  border-right: none;
+.hero-metric + .hero-metric {
+  border-left: 1px solid var(--border-soft);
 }
 
-.metric-lbl {
+.hero-metric-lbl {
   font-size: 10px;
   font-weight: 700;
   color: var(--muted);
@@ -632,13 +624,202 @@
   letter-spacing: 0.05em;
 }
 
-.metric-val {
+.hero-metric-val {
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.hero-metric-score .hero-metric-val {
+  color: var(--r);
+}
+.risk-banner.risk-none .hero-metric-score .hero-metric-val {
+  color: #94a3b8;
+}
+
+/* Object identity under the state word */
+.hero-subtitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+.hero-subtitle[hidden] { display: none; }
+
+/* One-line explanation of how Status is derived */
+.risk-explainer {
+  margin: 10px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Small uppercase section caption (Measurements, etc.) */
+.section-cap {
+  display: block;
+  margin: 16px 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Compact measurements strip (Distance / Closing speed / Lane) */
+.facts-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  margin-top: 12px;
+}
+
+.fact-box {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  border-right: 1px solid var(--border-soft);
+}
+.fact-box:last-child {
+  border-right: none;
+}
+
+.fact-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fact-val {
   font-size: 13px;
   font-weight: 800;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Risk Factors subheading */
+.risk-factors-sub {
+  margin: -6px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Weight chip next to each contributor bar label */
+.signal-weight {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Score multipliers (lane relevance + confidence) */
+.multipliers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 2px;
+  border-top: 1px dashed var(--border-soft);
+}
+.multiplier-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.multiplier-lbl {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.multiplier-val {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.multiplier-sub {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Evidence (expandable) */
+.evidence-details {
+  margin-top: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.evidence-details > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 9px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  user-select: none;
+}
+.evidence-details > summary::-webkit-details-marker { display: none; }
+.evidence-details > summary::after {
+  content: "▸";
+  float: right;
+  transition: transform 0.15s ease;
+}
+.evidence-details[open] > summary::after { transform: rotate(90deg); }
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 4px 14px 12px;
+}
+.evidence-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.evidence-group-lbl {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+.evidence-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.evidence-row > span:first-child { color: var(--muted); }
+.evidence-row > span:last-child {
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .object-inspector-layout {
