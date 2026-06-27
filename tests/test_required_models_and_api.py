@@ -39,7 +39,6 @@ def _v3_object(**overrides):
             "depth": 0.64,
         },
         "collisionEta": {
-            "status": "closing",
             "display": "2.2s",
             "sec": 2.2,
         },
@@ -54,7 +53,6 @@ def _v3_object(**overrides):
             "brake": 0.0,
         },
         "evidence": {
-            "depth": {"status": "tracked"},
             "flow": {"expansionScore": 0.1, "radialScore": 0.2},
         },
     }
@@ -152,7 +150,7 @@ def test_serialized_result_uses_v3_schema():
         "tracking": 0.81,
         "depth": 0.64,
     }
-    assert obj["collisionEta"]["status"] == "closing"
+    assert "status" not in obj["collisionEta"]
     assert obj["collisionEta"]["display"] == "2.2s"
     assert obj["collisionEta"]["sec"] == 2.2
     assert "source" not in obj["collisionEta"]  # dead constant removed
@@ -168,14 +166,12 @@ def test_serialized_result_uses_v3_schema():
     }
     for value in obj["riskFactors"].values():
         assert 0.0 <= value <= 1.0
-    # evidence is now slimmed to ONLY the unique diagnostics; everything it used
-    # to copy (detector class/confidence, depth distance/closing/confidence, lane
-    # bucket/position/crossing) lives once at the canonical top level.
+    # evidence is now slimmed to ONLY the unique flow diagnostics; everything it
+    # used to copy lives once at the canonical top level.
     assert obj["evidence"] == {
-        "depth": {"status": "tracked"},
         "flow": {"expansionScore": 0.1, "radialScore": 0.2},
     }
-    for dead_evidence_key in ("detector", "lane"):
+    for dead_evidence_key in ("detector", "depth", "lane"):
         assert dead_evidence_key not in obj["evidence"]
     assert "riskReason" not in obj
     for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
@@ -256,9 +252,7 @@ def test_primary_risk_score_matches_objects_entry():
         overallConfidence=0.54,
         confidence={"detection": 0.54, "tracking": 0.76, "depth": 0.33},
         collisionEta={
-            "status": "closing",
             "display": "0.9s",
-            "source": "depth_kalman",
             "sec": 0.87,
         },
         riskFactors={

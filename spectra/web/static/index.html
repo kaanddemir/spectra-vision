@@ -347,7 +347,7 @@
                   <span class="risk-state-cap">Overall Status
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">Status is a band of the Risk Score: ≥60 DANGER · ≥25 CAUTION (out of 100), plus an ETA&lt;1s escalation when the object is already risky.</div>
+                      <div class="tooltip-content">Overall Status is the final risk band for the selected object. Risk Score ≥60 becomes DANGER, ≥25 becomes CAUTION, and an already-risky object with ETA under 1s can escalate to DANGER.</div>
                     </span>
                   </span>
                   <h1 id="risk-band-main" class="modern-risk-title">—</h1>
@@ -360,7 +360,7 @@
                   <span class="hero-metric-lbl">Collision ETA
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">Distance ÷ closing speed, both from the depth Kalman (metric depth — not visual cues). Shows a value only while the object is actually closing; otherwise Estimating / No closing / Low confidence.</div>
+                      <div class="tooltip-content">Physical time to collision from metric depth: distance divided by closing speed. It appears only when the object is closing with enough depth confidence.</div>
                     </span>
                   </span>
                   <strong class="hero-metric-val" id="alert-ttc">—</strong>
@@ -369,7 +369,7 @@
                   <span class="hero-metric-lbl">Risk Score / 100
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">How dangerous the object is, 0–100. See "What builds the Risk Score" below for the weighted signals and multipliers.</div>
+                      <div class="tooltip-content">A 0–100 score for the selected object. It combines ETA pressure, proximity, approach and brake cues, then applies lane relevance and confidence.</div>
                     </span>
                   </span>
                   <strong class="hero-metric-val" id="risk-score-main">—</strong>
@@ -379,7 +379,7 @@
               <h3 class="risk-factors-title builds-title">What builds the Collision ETA
                 <span class="info-tip">
                   <svg><use href="#icon-info"></use></svg>
-                  <div class="tooltip-content">ETA = Distance ÷ Closing speed — both from the depth Kalman. It is purely longitudinal; lateral position (lane) feeds the Risk Score, not the ETA.</div>
+                  <div class="tooltip-content">Collision ETA uses only longitudinal motion from depth: distance and closing speed. Lane position affects the Risk Score, not the ETA calculation.</div>
                 </span>
               </h3>
               <div class="eta-builder signal-bars">
@@ -387,7 +387,7 @@
                   <span class="signal-label">Distance</span>
                   <span class="info-tip">
                     <svg><use href="#icon-info"></use></svg>
-                    <div class="tooltip-content">Metric distance to the object from monocular depth (Depth Anything V2 Metric). Bar gauges closeness over 0–60 m.</div>
+                    <div class="tooltip-content">Estimated metric distance to the selected object from Depth Anything V2 Metric. The bar fills as the object gets closer within the 0–60 m display range.</div>
                   </span>
                   <div class="signal-track"><span class="signal-fill" id="fill-distance" style="width:0%"></span></div>
                   <span class="signal-value" id="risk-distance">—</span>
@@ -396,7 +396,7 @@
                   <span class="signal-label">Closing speed</span>
                   <span class="info-tip">
                     <svg><use href="#icon-info"></use></svg>
-                    <div class="tooltip-content">How fast the gap is closing, from the per-track depth Kalman (range-rate). Bar gauges speed over 0–12 m/s.</div>
+                    <div class="tooltip-content">Closing speed from the per-object depth Kalman track. Positive values mean the gap is shrinking; the bar fills over the 0–12 m/s display range.</div>
                   </span>
                   <div class="signal-track"><span class="signal-fill" id="fill-closing" style="width:0%"></span></div>
                   <span class="signal-value" id="risk-approach">—</span>
@@ -410,16 +410,15 @@
                 <h3 class="risk-factors-title builds-title">What builds the Risk Score
                   <span class="info-tip">
                     <svg><use href="#icon-info"></use></svg>
-                    <div class="tooltip-content">Weighted signals add up, then are multiplied by lane relevance and confidence.</div>
+                    <div class="tooltip-content">Risk Score starts with weighted evidence signals, then scales them by lane relevance and overall confidence.</div>
                   </span>
-                  <span class="risk-factors-object" id="risk-factors-object"></span>
                 </h3>
                 <div class="signal-bars">
                   <div class="signal-row" data-signal="eta">
                     <span class="signal-label">ETA pressure <span class="signal-weight">40%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">How close the collision ETA is to the 3s caution horizon. Estimated metric distance and closing speed drive it.</div>
+                      <div class="tooltip-content">How close the Collision ETA is to the 3s caution horizon. Shorter ETA creates more pressure; no closing motion produces no ETA pressure.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-eta" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-eta-value">—</span>
@@ -428,7 +427,7 @@
                     <span class="signal-label">Proximity <span class="signal-weight">30%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">How near the object is, derived from the metric depth distance (Depth Anything V2 Metric).</div>
+                      <div class="tooltip-content">How close the selected object is in metric depth. Nearer objects add more risk even before closing speed becomes severe.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-near" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-near-value">—</span>
@@ -437,7 +436,7 @@
                     <span class="signal-label">Approach <span class="signal-weight">25%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">Relative closing speed, indicating how fast the object is nearing the camera.</div>
+                      <div class="tooltip-content">How strongly the object is approaching the camera. Higher closing speed increases the score even when ETA is still above the danger threshold.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-closing-value">—</span>
@@ -446,7 +445,7 @@
                     <span class="signal-label">Brake <span class="signal-weight">5%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">Brake-light cue for a lead vehicle — an early warning before the gap visibly closes.</div>
+                      <div class="tooltip-content">Brake-light evidence from the selected lead vehicle. It adds a small early-warning signal when braking is detected.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-brake" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-brake-value">—</span>
@@ -458,7 +457,7 @@
                     <span class="signal-label">Lane relevance</span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">Multiplier: how likely the object is in your lane at impact. Off-path objects gate the whole score toward zero.</div>
+                      <div class="tooltip-content">Lane relevance estimates whether the object is in the ego lane at impact time. Off-path objects reduce the final Risk Score.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-relevance" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-relevance-value">—</span>
@@ -467,7 +466,7 @@
                     <span class="signal-label">Confidence</span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content" id="confidence-breakdown">Multiplier: detection / tracking / depth reliability.</div>
+                      <div class="tooltip-content" id="confidence-breakdown">Overall confidence scales the final Risk Score using detection, tracking and depth reliability.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-confidence-value">—</span>
@@ -483,36 +482,34 @@
                       <div class="evidence-row"><span>Confidence</span><span id="ev-detector-conf">—</span></div>
                     </div>
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Tracking (IoU)</span>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-tracking-conf">—</span></div>
+                      <span class="evidence-group-lbl">Flow (DIS)</span>
+                      <div class="evidence-row"><span>Expansion</span><span id="ev-flow-expansion">—</span></div>
+                      <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
                     </div>
                     <div class="evidence-group">
                       <span class="evidence-group-lbl">Depth / Kinematics</span>
                       <div class="evidence-row"><span>Distance</span><span id="ev-depth-distance">—</span></div>
                       <div class="evidence-row"><span>Closing speed</span><span id="ev-depth-closing">—</span></div>
-                      <div class="evidence-row"><span>Status</span><span id="ev-depth-status">—</span></div>
                       <div class="evidence-row"><span>Confidence</span><span id="ev-depth-conf">—</span></div>
                     </div>
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Flow (DIS)</span>
-                      <div class="evidence-row"><span>Expansion</span><span id="ev-flow-expansion">—</span></div>
-                      <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
-                    </div>
-                    <div class="evidence-group evidence-group--lane">
                       <span class="evidence-group-lbl">Lane (UFLDv2)</span>
                       <div class="evidence-row"><span>Bucket</span><span id="ev-lane-bucket">—</span></div>
                       <div class="evidence-row"><span>Position</span><span id="ev-lane-pos">—</span></div>
                       <div class="evidence-row"><span>Crossing</span><span id="ev-lane-crossing">—</span></div>
                     </div>
+                    <div class="evidence-group evidence-group--tracking">
+                      <span class="evidence-group-lbl">Tracking (IoU)</span>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-tracking-conf">—</span></div>
+                    </div>
                     <div class="evidence-group evidence-group--fusion">
                       <span class="evidence-group-lbl">Fusion / Risk</span>
+                      <div class="evidence-row evidence-row--wide"><span>State</span><span id="ev-fusion-state">—</span></div>
                       <div class="evidence-row"><span>Collision ETA</span><span id="ev-fusion-eta">—</span></div>
                       <div class="evidence-row"><span>Risk Score</span><span id="ev-fusion-score">—</span></div>
-                      <div class="evidence-row"><span>State</span><span id="ev-fusion-state">—</span></div>
-                      <div class="evidence-row"><span>Proximity</span><span id="ev-fusion-proximity">—</span></div>
                       <div class="evidence-row"><span>Approach</span><span id="ev-fusion-approach">—</span></div>
                       <div class="evidence-row"><span>Brake</span><span id="ev-fusion-brake">—</span></div>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-fusion-confidence">—</span></div>
+                      <div class="evidence-row evidence-row--wide"><span>Confidence</span><span id="ev-fusion-confidence">—</span></div>
                     </div>
                   </div>
                 </details>

@@ -139,11 +139,11 @@ def test_banner_metrics_have_no_duplicated_data():
     # intentionally repeating values shown elsewhere so the panel is self-contained.
     for kept_ev in (
         "ev-detector-class", "ev-detector-conf", "ev-tracking-conf",
-        "ev-depth-distance", "ev-depth-closing", "ev-depth-status", "ev-depth-conf",
+        "ev-depth-distance", "ev-depth-closing", "ev-depth-conf",
         "ev-flow-expansion", "ev-flow-radial",
         "ev-lane-bucket", "ev-lane-pos", "ev-lane-crossing",
         "ev-fusion-eta", "ev-fusion-score", "ev-fusion-state",
-        "ev-fusion-proximity", "ev-fusion-approach", "ev-fusion-brake",
+        "ev-fusion-approach", "ev-fusion-brake",
         "ev-fusion-confidence",
     ):
         assert f'id="{kept_ev}"' in index

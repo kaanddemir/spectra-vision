@@ -145,7 +145,6 @@ def test_object_metric_emits_v3_collision_eta_contract():
     obj = video._object_metric(event)
 
     assert obj["collisionEta"] == {
-        "status": "closing",
         "display": "0.5s",
         "sec": 0.5,
     }
@@ -161,13 +160,13 @@ def test_object_metric_emits_v3_collision_eta_contract():
     }
     assert obj["riskFactors"]["approach"] == 0.83
     assert all(0.0 <= value <= 1.0 for value in obj["riskFactors"].values())
-    # evidence carries only the unique diagnostics; the rest lives once at the
+    # evidence carries only the unique flow diagnostics; the rest lives once at the
     # canonical top level (objectType, confidence, lane, lanePosition, kinematics).
     assert obj["evidence"] == {
-        "depth": {"status": "tracked"},
         "flow": {"expansionScore": 0.42, "radialScore": 0.31},
     }
     assert "detector" not in obj["evidence"]
+    assert "depth" not in obj["evidence"]
     assert "lane" not in obj["evidence"]
     assert obj["lanePosition"] == -1.5
     assert "riskReason" not in obj
@@ -200,8 +199,8 @@ def test_object_metric_uses_status_instead_of_null_user_eta():
     )
 
     eta = video._object_metric(event)["collisionEta"]
-    assert eta["status"] == "not_closing"
-    assert eta["display"] == "No closing"
+    assert "status" not in eta
+    assert eta["display"] == "—"
     assert "sec" not in eta
 
 

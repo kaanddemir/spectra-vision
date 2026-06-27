@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .risk import RiskEvent
+from .risk import RiskEvent, score_event
 from ..vision.road import LaneFrame, lane_edges_at_y
 
 
@@ -253,15 +253,26 @@ def annotate_frame(
 
     eta_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
     lane_lbl = _readable_lane(primary_event.lane)
-    obj_lbl = (primary_event.object_type or "scene").upper()
+    obj_lbl = (primary_event.object_type or "scene").title()
 
     # 3. Telemetry HUD card. Only visible in CAUTION/DANGER states to keep 
     # the SAFE view clean, matching the event timeline logic.
     if primary_event.state in {"CAUTION", "DANGER"}:
         card_x, card_y = 12, 10
-        card_w = min(220, max(160, width - 24))
         pad = 10
         inner_x = card_x + pad
+        display_id = primary_event.display_id if primary_event.display_id is not None else primary_event.object_id
+        object_label = f"{obj_lbl} #{display_id}" if display_id is not None else obj_lbl
+        risk_label = f"{int(round(score_event(primary_event) * 100))}"
+        lane_text = lane_lbl if lane_lbl and primary_event.bbox is not None else "--"
+        metric_text = f"C. ETA {eta_str} | Risk {risk_label} | {lane_text}"
+
+        state_text = primary_event.state
+        (stw, _), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
+        (otw, _), _ = cv2.getTextSize(object_label, _FONT, 0.43, 1)
+        (mtw, _), _ = cv2.getTextSize(metric_text, _FONT, 0.4, 1)
+        pill_w = stw + 14
+        card_w = min(width - 24, max(190, pad * 2 + max(pill_w + 12 + otw, mtw)))
 
         # background
         card_y2 = card_y + 64
@@ -270,11 +281,8 @@ def annotate_frame(
         cv2.addWeighted(panel, 0.78, output, 0.22, 0, output)
         cv2.rectangle(output, (card_x, card_y), (card_x + card_w, card_y2), (40, 50, 65), 1, cv2.LINE_AA)
 
-        # row 1 — state pill + physical ETA
+        # row 1 — state pill + object identity
         pill_h = 18
-        state_text = primary_event.state
-        (stw, sth), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
-        pill_w = stw + 14
         pill_y = card_y + 10
         cv2.rectangle(output, (inner_x, pill_y), (inner_x + pill_w, pill_y + pill_h), color, thickness=-1)
         cv2.putText(
@@ -287,30 +295,21 @@ def annotate_frame(
             1,
             cv2.LINE_AA,
         )
-        ttc_label = f"ETA {eta_str}"
         cv2.putText(
             output,
-            ttc_label,
+            object_label,
             (inner_x + pill_w + 12, pill_y + pill_h - 4),
             _FONT,
-            0.5,
-            color,
+            0.43,
+            (220, 226, 238),
             1,
             cv2.LINE_AA,
         )
 
-        # row 2 — ID | object | lane
-        sub_parts = []
-        display_id = primary_event.display_id if primary_event.display_id is not None else primary_event.object_id
-        if display_id is not None:
-            sub_parts.append(f"#{display_id}")
-        sub_parts.append(obj_lbl)
-        if lane_lbl and primary_event.bbox is not None:
-            sub_parts.append(lane_lbl)
-        sub_text = " | ".join(sub_parts)
+        # row 2 — physical ETA, risk score, lane
         cv2.putText(
             output,
-            sub_text,
+            metric_text,
             (inner_x, card_y + 50),
             _FONT,
             0.4,

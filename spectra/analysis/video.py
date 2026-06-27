@@ -316,32 +316,25 @@ def _collision_eta_metric(event: RiskEvent) -> dict[str, Any]:
     depth_component = _depth_component(event)
     distance_m = event.distance_m
     closing_mps = event.closing_mps
-    status = "estimating"
-    display = "Estimating"
+    display = "—"
     sec: float | None = None
 
     if distance_m is None or closing_mps is None:
-        status = "estimating"
-        display = "Estimating"
+        display = "—"
     elif float(closing_mps) <= _MIN_CLOSING_FOR_DISPLAY_MPS:
-        status = "not_closing"
-        display = "No closing"
+        display = "—"
     else:
         raw_eta = float(distance_m) / max(float(closing_mps), 1e-6)
         confidence = float(getattr(depth_component, "confidence", 0.0) or 0.0)
         if raw_eta > _ETA_HORIZON_SEC:
-            status = "beyond_horizon"
             display = f">{_ETA_HORIZON_SEC:.0f}s"
         elif confidence < _ETA_LOW_CONFIDENCE:
-            status = "low_confidence"
-            display = "Low confidence"
+            display = "—"
         else:
-            status = "closing"
             sec = event.ttc_sec if event.ttc_sec is not None else raw_eta
             display = f"{float(sec):.1f}s"
 
     eta: dict[str, Any] = {
-        "status": status,
         "display": display,
     }
     if sec is not None:
@@ -386,10 +379,9 @@ def _evidence_metric(event: RiskEvent) -> dict[str, Any]:
     depth distance/closing/confidence, lane bucket/position, crossing) duplicated
     canonical fields (``objectType``, ``kinematics``, ``confidence``, ``lane``,
     ``lanePosition``, ``riskFactors.crossing``); the UI now reads those directly,
-    so only the genuinely-unique signals remain here.
+    so only the genuinely-unique flow signals remain here.
     """
     return {
-        "depth": {"status": "tracked" if event.distance_m is not None else "estimating"},
         "flow": {
             "expansionScore": round(float(np.clip(event.expansion_rate, 0.0, 1.0)), 3),
             "radialScore": round(float(np.clip(event.velocity_magnitude, 0.0, 1.0)), 3),

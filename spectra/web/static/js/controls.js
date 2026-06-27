@@ -79,8 +79,12 @@ export function initializeSpectra() {
     const s = Math.floor(Math.max(0, n) % 60);
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
-  const etaDisplay = (eta) => eta?.display || MISSING;
-  const etaSeconds = (eta) => eta?.status === "closing" ? num(eta?.sec, null) : null;
+  const etaDisplay = (eta) => {
+    const display = eta?.display;
+    if (!display) return MISSING;
+    return ["Estimating", "No closing", "Low confidence"].includes(display) ? MISSING : display;
+  };
+  const etaSeconds = (eta) => num(eta?.sec, null);
   // ETA pressure mirrors the backend: (3 - ttc)/3 clamped, 0 when not closing.
   const etaPressure = (eta) => {
     const sec = etaSeconds(eta);
@@ -598,10 +602,8 @@ export function initializeSpectra() {
     setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
     setText("ev-detector-conf", pctLabel(conf.detection));
     setText("ev-tracking-conf", pctLabel(conf.tracking));
-    const depth = ev?.depth || {};
     setText("ev-depth-distance", distanceLabel(source?.kinematics?.distanceM));
     setText("ev-depth-closing", closingShort(source?.kinematics?.closingMps));
-    setText("ev-depth-status", isReal(depth.status) ? titleCase(depth.status) : MISSING);
     setText("ev-depth-conf", pctLabel(conf.depth));
     const flow = ev?.flow || {};
     setText("ev-flow-expansion", pctLabel(flow.expansionScore));
@@ -614,15 +616,14 @@ export function initializeSpectra() {
     setText("ev-fusion-score", riskScoreLabel(source?.riskScore));
     const rawState = source?.rawRiskState ?? source?.riskState;
     setText("ev-fusion-state", isReal(rawState) ? titleCase(rawState) : MISSING);
-    setText("ev-fusion-proximity", pctLabel(riskFactors.proximity));
     setText("ev-fusion-approach", pctLabel(riskFactors.approach));
     setText("ev-fusion-brake", pctLabel(riskFactors.brake));
     setText("ev-fusion-confidence", confidenceLabel(source));
   }
 
   const confidenceBreakdown = (conf) => {
-    if (!conf) return "Detection / tracking / depth reliability.";
-    return `Detection ${pctLabel(conf.detection)} · Tracking ${pctLabel(conf.tracking)} · Depth ${pctLabel(conf.depth)}`;
+    if (!conf) return "Overall confidence scales the final Risk Score using detection, tracking and depth reliability.";
+    return `Overall confidence scales the final Risk Score. Detection ${pctLabel(conf.detection)} · Tracking ${pctLabel(conf.tracking)} · Depth ${pctLabel(conf.depth)}.`;
   };
 
   // Frame-level traffic-light advisory (red/yellow/green); hidden otherwise.
@@ -757,10 +758,6 @@ export function initializeSpectra() {
     renderTrafficLight(source);
     const activeObject = selectedObject || source;
       
-    // Title text + info icon are static; only the (object) suffix is dynamic
-    // so the info-tip is preserved across renders.
-    setText("risk-factors-object", (activeObject && isReal(activeObject.objectId)) ? `(${objectLabel(activeObject)})` : "");
-
     const factors = activeObject?.riskFactors || {};
     const km = activeObject?.kinematics || {};
     // Collision-ETA input gauges (raw measurements on a fixed scale).
