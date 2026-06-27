@@ -507,6 +507,16 @@
 .risk-sub-panel:last-child {
   border-bottom: none;
 }
+/* Both section dividers now come from the headings' top border (.builds-title),
+   so the sub-panels themselves carry no border between them. Equal padding on
+   each side of the line keeps the spacing symmetric. */
+.risk-banner-body > .risk-sub-panel:first-child {
+  border-bottom: none;
+  padding-bottom: 16px;
+}
+.object-inspector-panel {
+  padding-top: 0;
+}
 
 
 
@@ -694,16 +704,15 @@
   letter-spacing: 0.05em;
 }
 
-/* "What builds the Collision ETA" — section header with inline info icon */
-.builder-head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+/* Both "What builds…" headings carry an identical full-width divider above
+   them with equal spacing, so the two sections are evenly separated. */
+.builds-title {
+  border-top: 1px solid var(--border-soft);
+  margin: 0 -20px;
+  padding: 18px 20px 0;
 }
-.builder-head .section-cap { margin-bottom: 0; }
-.builder-head .info-tip { width: 18px; height: 18px; }
 
-.eta-builder { margin-top: 10px; }
+.eta-builder { margin-top: 0; }
 
 /* Shared 4-column grid for every contributor row (ETA inputs, score bars,
    lane relevance + confidence): [label(+weight) 120px] · [info icon 16px] ·
@@ -739,14 +748,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Lane relevance + confidence rows: bars like the rest, kept as a separate
-   group by a dashed divider (they multiply the score rather than add to it). */
+/* Lane relevance + confidence rows: bars like the rest (multiply the score). */
 .multipliers {
   display: grid;
   gap: 10px;
   margin-top: 10px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--border-soft);
 }
 /* Evidence (expandable) */
 .evidence-details {

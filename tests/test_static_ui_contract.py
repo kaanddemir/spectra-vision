@@ -115,7 +115,7 @@ def test_banner_metrics_have_no_duplicated_data():
     # and the old Measurements strip is gone.
     assert "Measurements" not in index
     assert 'id="risk-lane"' not in index
-    eta_start = index.index('<span class="section-cap">What builds the Collision ETA</span>')
+    eta_start = index.index('What builds the Collision ETA')
     eta_end = index.index("<!-- SUB PANEL 2", eta_start)
     eta = index[eta_start:eta_end]
     for label in ("Distance", "Closing speed"):
