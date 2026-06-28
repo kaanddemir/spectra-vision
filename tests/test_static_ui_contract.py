@@ -109,8 +109,8 @@ def test_video_risk_analysis_player_controls_are_present():
         "playback-mode-normal",
         "playback-mode-risk",
         "playback-mode-pause-risk",
-        "playback-mode-button",
-        "playback-mode-menu",
+        "player-settings-button",
+        "player-settings-menu",
         "export-snapshot",
         "export-evidence-json",
         "export-evidence-image",
@@ -130,8 +130,9 @@ def test_video_risk_analysis_player_controls_are_present():
         assert contract in controls
 
     assert ".timeline-risk-segment.seg-danger" in timeline_css
-    assert ".player-mode-picker" in preview_css
-    assert ".mode-picker-button" in preview_css
+    assert ".heat-cell.heat-danger" in timeline_css
+    assert ".player-settings" in preview_css
+    assert ".settings-menu" in preview_css
     assert ".mode-picker-menu" in preview_css
     assert ".player-risk-segments" in preview_css
     assert ".side-bar-btn:disabled" in preview_css
@@ -147,10 +148,19 @@ def test_live_risk_overlay_and_player_polish_present():
         "visual-overlay",
         "frame-step-back",
         "frame-step-forward",
-        "speed-btn",
+        "player-settings-button",
         "overlay-toggle",
         "replay-event-btn",
         "playback-mode-slow-risk",
+        "volume-btn",
+        "volume-slider",
+        "time-readout",
+        "event-prev",
+        "event-next",
+        "seek-tooltip",
+        "shortcuts-modal",
+        "open-shortcuts",
+        "timeline-heat",
     ):
         assert f'id="{element_id}"' in index
 
@@ -167,6 +177,15 @@ def test_live_risk_overlay_and_player_polish_present():
         '"slow-risk"',
         "function toggleReplayLoop",
         "requestAnimationFrame(overlayLoop)",
+        "function toggleMute",
+        "function renderTimeReadout",
+        'timeDisplayMode',
+        "function jumpToEvent",
+        "function showSeekTooltipAt",
+        "function openShortcuts",
+        "function renderTimelineHeat",
+        "function seekFromRail",
+        "formatAxisTime",
     ):
         assert contract in controls
 

@@ -22,7 +22,6 @@ export function initializeSpectra() {
 
   // CSS-side risk colours (mirror of overlay.py COLORS, BGR→hex).
   const RISK_COLORS = { DANGER: "#ff3b3b", CAUTION: "#ffb020", SAFE: "#12d492" };
-  const SPEED_STEPS = [0.5, 1, 2];
 
   const state = {
     previewUrl: "",
@@ -61,6 +60,8 @@ export function initializeSpectra() {
     playbackRate: 1,
     overlayRafId: null,
     loopSegment: null,
+    timeDisplayMode: "time",
+    lastVolume: 1,
   };
 
   const byId = (id) => document.getElementById(id);
@@ -91,6 +92,16 @@ export function initializeSpectra() {
     const m = Math.floor(Math.max(0, n) / 60);
     const s = Math.floor(Math.max(0, n) % 60);
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  };
+  // Axis tick formatter: when the spacing between ticks is under a second
+  // (short analysis windows), add a decimal so labels don't repeat (00:09 00:09).
+  const formatAxisTime = (totalSec, stepSec) => {
+    const n = num(totalSec, null);
+    if (n === null) return MISSING;
+    if (num(stepSec, 1) >= 1) return formatSeconds(n);
+    const m = Math.floor(Math.max(0, n) / 60);
+    const s = Math.max(0, n) % 60;
+    return `${String(m).padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}`;
   };
   const etaDisplay = (eta) => {
     const display = eta?.display;
@@ -562,15 +573,33 @@ export function initializeSpectra() {
     try { previewVideo.currentTime = target; } catch {}
   }
 
+  // Jump to the previous/next CAUTION/DANGER event relative to the playhead.
+  function jumpToEvent(dir) {
+    if (!previewVideo || previewVideo.hidden || !previewVideo.src) return;
+    const items = timelineEventItems();
+    if (!items.length) return;
+    const t = previewVideo.currentTime ?? 0;
+    let target;
+    if (dir > 0) {
+      target = items.find((it) => it.ts > t + 0.05) || items[items.length - 1];
+    } else {
+      const earlier = items.filter((it) => it.ts < t - 0.05);
+      target = earlier.length ? earlier[earlier.length - 1] : items[0];
+    }
+    if (!target) return;
+    previewVideo.pause();
+    state.suppressVideoSyncCount = 1;
+    seekPreviewVideo(target.ts);
+    applyTimelineStateAt(target.ts, { switchMode: true });
+    setActiveEventIndex(target.index, { scroll: true });
+  }
+
   function setPlaybackRate(rate) {
     state.playbackRate = rate;
     if (previewVideo && state.playbackMode !== "slow-risk") previewVideo.playbackRate = rate;
-    const btn = byId("speed-btn");
-    if (btn) { btn.textContent = `${rate}×`; btn.title = `Playback speed (${rate}×)`; }
-  }
-  function cyclePlaybackRate() {
-    const i = SPEED_STEPS.indexOf(state.playbackRate);
-    setPlaybackRate(SPEED_STEPS[(i + 1) % SPEED_STEPS.length]);
+    document.querySelectorAll("[data-speed]").forEach((b) => {
+      b.classList.toggle("is-active", parseFloat(b.dataset.speed) === rate);
+    });
   }
 
   function currentRiskSegment() {
@@ -597,6 +626,110 @@ export function initializeSpectra() {
     updateReplayButton();
     seekPreviewVideo(seg.start);
     playWithinWindow();
+  }
+
+  // ─── volume ───────────────────────────────────────────────
+  function updateVolumeUI() {
+    const btn = byId("volume-btn");
+    const slider = byId("volume-slider");
+    if (!previewVideo) return;
+    const muted = previewVideo.muted || previewVideo.volume === 0;
+    if (btn) {
+      btn.classList.toggle("is-muted", muted);
+      btn.setAttribute("aria-pressed", muted ? "true" : "false");
+    }
+    if (slider) {
+      const pct = Math.round((muted ? 0 : previewVideo.volume) * 100);
+      slider.value = String(pct);
+      slider.style.setProperty("--vfill", `${pct}%`);
+    }
+  }
+  function setVolume(fraction) {
+    if (!previewVideo) return;
+    const v = clamp(fraction, 0, 1);
+    previewVideo.volume = v;
+    previewVideo.muted = v === 0;
+    if (v > 0) state.lastVolume = v;
+    updateVolumeUI();
+  }
+  function toggleMute() {
+    if (!previewVideo) return;
+    if (previewVideo.muted || previewVideo.volume === 0) {
+      setVolume(state.lastVolume || 1);
+    } else {
+      previewVideo.muted = true;
+      updateVolumeUI();
+    }
+  }
+
+  // ─── time / frame readout ─────────────────────────────────
+  function fpsForReadout() {
+    return num(state.currentResult?.fps, 0) || 30;
+  }
+  function renderTimeReadout(timeSec) {
+    const t = num(timeSec, 0) || 0;
+    const dur = (previewVideo?.duration && Number.isFinite(previewVideo.duration))
+      ? previewVideo.duration
+      : (currentTotalDuration() || 0);
+    if (state.timeDisplayMode === "frames") {
+      const fps = fpsForReadout();
+      timeCurrent.textContent = `#${Math.round(t * fps)}`;
+      timeTotal.textContent = `#${Math.round(dur * fps)}`;
+    } else {
+      timeCurrent.textContent = formatSeconds(t);
+      timeTotal.textContent = formatSeconds(dur);
+    }
+  }
+  function toggleTimeDisplay() {
+    state.timeDisplayMode = state.timeDisplayMode === "frames" ? "time" : "frames";
+    renderTimeReadout(previewVideo?.currentTime ?? 0);
+  }
+
+  // ─── seek-bar hover preview ───────────────────────────────
+  function nearestEventWithImageAt(t) {
+    const items = timelineEventItems().filter((it) => it.ev?.images?.blend);
+    if (!items.length) return null;
+    let best = null, bestDiff = Infinity;
+    items.forEach((it) => { const d = Math.abs(it.ts - t); if (d < bestDiff) { bestDiff = d; best = it; } });
+    const tol = clamp(currentTotalDuration() * 0.03, 0.3, 1.0);
+    return best && bestDiff <= tol ? best.ev : null;
+  }
+  function showSeekTooltipAt(clientX) {
+    const track = seekBar?.closest(".seek-track");
+    const tip = byId("seek-tooltip");
+    if (!track || !tip || !state.timelineRows.length) return;
+    const rect = track.getBoundingClientRect();
+    const ratio = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const { start, span } = winBounds();
+    const t = start + ratio * span;
+    byId("seek-tooltip-time").textContent = formatSeconds(t);
+    const ev = nearestEventWithImageAt(t);
+    const thumb = byId("seek-tooltip-thumb");
+    const blend = ev?.images?.blend;
+    if (blend) { thumb.src = mediaSrc(blend); thumb.hidden = false; }
+    else { thumb.hidden = true; thumb.removeAttribute("src"); }
+    tip.hidden = false;
+    const half = tip.offsetWidth / 2;
+    tip.style.left = `${clamp(clientX - rect.left, half, rect.width - half)}px`;
+  }
+  function hideSeekTooltip() {
+    const tip = byId("seek-tooltip");
+    if (tip) tip.hidden = true;
+  }
+
+  // ─── keyboard shortcuts help ──────────────────────────────
+  function openShortcuts() {
+    const m = byId("shortcuts-modal");
+    if (!m) return;
+    m.hidden = false;
+    void m.offsetHeight;
+    m.classList.add("is-open");
+  }
+  function closeShortcuts() {
+    const m = byId("shortcuts-modal");
+    if (!m) return;
+    m.classList.remove("is-open");
+    setTimeout(() => { if (!m.classList.contains("is-open")) m.hidden = true; }, 400);
   }
 
   function imageSetForEvent(ev) {
@@ -689,9 +822,8 @@ export function initializeSpectra() {
     const w = previewVideo.videoWidth, h = previewVideo.videoHeight;
     
     state.sourceMeta = { durationSec: previewVideo.duration, width: w, height: h };
-    timeTotal.textContent = dur;
-    timeCurrent.textContent = "00:00";
-    
+    renderTimeReadout(previewVideo.currentTime || 0);
+
     // Estimate frames assuming 30fps — backend clamps to actual frame count.
     const estFrames = Math.ceil(previewVideo.duration * 30);
     const meta = byId("selected-meta");
@@ -1038,15 +1170,17 @@ export function initializeSpectra() {
     const axis = byId("timeline-axis");
     axis.replaceChildren();
     const ticks = 6;
+    const tickStep = winSpan / (ticks - 1);
     for (let i = 0; i < ticks; i++) {
       const sp = document.createElement("span");
-      sp.textContent = formatSeconds(winStart + (winSpan * i) / (ticks - 1));
+      sp.textContent = formatAxisTime(winStart + tickStep * i, tickStep);
       axis.appendChild(sp);
     }
 
     const track = byId("timeline-events");
     track.replaceChildren();
     renderFrameRiskSegments(timelineRows);
+    renderTimelineHeat(timelineRows);
     const strip = byId("event-strip");
     strip.replaceChildren();
 
@@ -1068,7 +1202,8 @@ export function initializeSpectra() {
       dot.style.left = `${left}%`;
       dot.title = eventTooltip(item);
       dot.setAttribute("aria-label", dot.title);
-      dot.addEventListener("click", () => {
+      dot.addEventListener("click", (e) => {
+        e.stopPropagation();
         seekPreviewVideo(ts);
         applyTimelineStateAt(ts);
         setActiveEventIndex(idx, { scroll: true });
@@ -1107,7 +1242,7 @@ export function initializeSpectra() {
             </div>
             <div class="box-item">
               <span class="lbl">RISK SCORE</span>
-              <span class="val">${riskScoreLabel(ev.riskScore)}</span>
+              <span class="val risk-score-val">${riskScoreLabel(ev.riskScore)}</span>
             </div>
             <div class="box-item">
               <span class="lbl">LANE</span>
@@ -1155,6 +1290,62 @@ export function initializeSpectra() {
       segments.push({ start: segment.start, end: segment.end, sc: segment.sc });
     });
     return segments;
+  }
+
+  // Event-timeline heat band: one colored cell per frame segment, coloured by
+  // risk state and faded by risk score so risk concentration reads at a glance.
+  function renderTimelineHeat(rows) {
+    const layer = byId("timeline-heat");
+    if (!layer) return;
+    layer.replaceChildren();
+    const { start: winStart, span: winSpan } = winBounds();
+    const segments = frameSegmentsFromTimelineRows(rows);
+    segments.forEach((seg) => {
+      const left = clamp(((seg.start - winStart) / winSpan) * 100, 0, 100);
+      const right = clamp(((seg.end - winStart) / winSpan) * 100, 0, 100);
+      const cell = document.createElement("span");
+      cell.className = `heat-cell heat-${seg.sc}`;
+      cell.style.left = `${left}%`;
+      cell.style.width = `${Math.max(0.2, right - left)}%`;
+      const score = clamp(num(seg.row?.riskScore, 0), 0, 1);
+      const base = seg.sc === "safe" ? 0.16 : 0.4;
+      cell.style.opacity = String(clamp(base + score * 0.6, 0.12, 1));
+      layer.appendChild(cell);
+    });
+  }
+
+  // ─── interactive heat band (click to seek, hover tooltip) ──
+  function railTimeFromX(clientX) {
+    const rail = byId("timeline-rail");
+    if (!rail) return null;
+    const rect = rail.getBoundingClientRect();
+    const ratio = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const { start, span } = winBounds();
+    return { t: start + ratio * span, rect };
+  }
+  function showTimelineTipAt(clientX) {
+    const tip = byId("timeline-tip");
+    const hit = railTimeFromX(clientX);
+    if (!tip || !hit || !state.timelineRows.length) return;
+    const row = findTimelineRowAt(hit.t);
+    const sc = stateClass(row?.riskState);
+    const score = Math.round(clamp(num(row?.riskScore, 0), 0, 1) * 100);
+    tip.innerHTML = `<span class="tt-time">${formatSeconds(hit.t)}</span>`
+      + `<span class="tt-state risk-${sc}">${sc === "none" ? "SAFE" : sc.toUpperCase()} · ${score}</span>`;
+    tip.hidden = false;
+    const half = tip.offsetWidth / 2;
+    tip.style.left = `${clamp(clientX - hit.rect.left, half, hit.rect.width - half)}px`;
+  }
+  function hideTimelineTip() {
+    const tip = byId("timeline-tip");
+    if (tip) tip.hidden = true;
+  }
+  function seekFromRail(clientX) {
+    if (!state.timelineRows.length) return;
+    const hit = railTimeFromX(clientX);
+    if (!hit) return;
+    seekPreviewVideo(hit.t);
+    applyTimelineStateAt(hit.t);
   }
 
   function renderFrameRiskSegments(rows) {
@@ -1323,16 +1514,11 @@ export function initializeSpectra() {
 
     if (!points.length) {
       if (pointCountEl) pointCountEl.textContent = "0";
-      const totalEventsEl = byId("stat-total-events");
-      if (totalEventsEl) totalEventsEl.textContent = String((result?.events || []).length);
       updateChartAxisX();
       return;
     }
 
     if (pointCountEl) pointCountEl.textContent = String(points.length);
-
-    const totalEventsEl = byId("stat-total-events");
-    if (totalEventsEl) totalEventsEl.textContent = String((result?.events || []).length);
 
     const chartPoints = points.map((point) => ({
       ...point,
@@ -1447,9 +1633,10 @@ export function initializeSpectra() {
     const { start, span } = winBounds();
     axis.replaceChildren();
     const ticks = 6;
+    const tickStep = span / (ticks - 1);
     for (let i = 0; i < ticks; i++) {
       const sp = document.createElement("span");
-      sp.textContent = formatSeconds(start + (span * i) / (ticks - 1));
+      sp.textContent = formatAxisTime(start + tickStep * i, tickStep);
       axis.appendChild(sp);
     }
   }
@@ -1470,7 +1657,7 @@ export function initializeSpectra() {
   function updateVideoTimeControls(timeSec) {
     const t = num(timeSec, null);
     if (t === null) return;
-    timeCurrent.textContent = formatSeconds(t);
+    renderTimeReadout(t);
     // Seek bar spans the analyzed window (0% = winStart, 100% = winEnd).
     const { start, span } = winBounds();
     const ratio = clamp((t - start) / span, 0, 1);
@@ -1544,24 +1731,25 @@ export function initializeSpectra() {
     // Leaving slow-risk restores the user's chosen base rate.
     if (previewVideo && state.playbackMode !== "slow-risk") previewVideo.playbackRate = state.playbackRate;
     updatePlaybackModeButtons();
-    closePlaybackModeMenu();
   }
 
-  function setPlaybackModeMenuOpen(open) {
-    const menu = byId("playback-mode-menu");
-    const button = byId("playback-mode-button");
+  // Settings popup (gear) — holds playback mode, speed, overlay + loop toggles.
+  function setSettingsMenuOpen(open) {
+    const menu = byId("player-settings-menu");
+    const button = byId("player-settings-button");
     if (!menu || !button) return;
     menu.hidden = !open;
     button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.classList.toggle("is-active", open);
   }
 
-  function closePlaybackModeMenu() {
-    setPlaybackModeMenuOpen(false);
+  function closeSettingsMenu() {
+    setSettingsMenuOpen(false);
   }
 
-  function togglePlaybackModeMenu() {
-    const menu = byId("playback-mode-menu");
-    setPlaybackModeMenuOpen(!!menu?.hidden);
+  function toggleSettingsMenu() {
+    const menu = byId("player-settings-menu");
+    setSettingsMenuOpen(!!menu?.hidden);
   }
 
   function handlePlaybackModeTick(currentTime) {
@@ -2168,8 +2356,10 @@ export function initializeSpectra() {
       updateSourceMetaFromVideo();
       resizeOverlayCanvas();
       redrawOverlayAtCurrentTime();
+      updateVolumeUI();
       updateEvidenceControls();
     });
+    previewVideo.addEventListener("volumechange", updateVolumeUI);
     previewVideo.addEventListener("timeupdate", () => {
       const cur = previewVideo.currentTime;
       const { start, end } = winBounds();
@@ -2231,13 +2421,35 @@ export function initializeSpectra() {
         previewVideo.pause();
       }
     });
-    byId("preview-expand")?.addEventListener("click", () => expandMedia(previewVideo.src, "video"));
+    byId("preview-expand")?.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 
     byId("frame-step-back")?.addEventListener("click", () => stepFrame(-1));
     byId("frame-step-forward")?.addEventListener("click", () => stepFrame(1));
-    byId("speed-btn")?.addEventListener("click", cyclePlaybackRate);
+    byId("event-prev")?.addEventListener("click", () => jumpToEvent(-1));
+    byId("event-next")?.addEventListener("click", () => jumpToEvent(1));
+    const seekTrackEl = seekBar?.closest(".seek-track");
+    seekTrackEl?.addEventListener("mousemove", (e) => showSeekTooltipAt(e.clientX));
+    seekTrackEl?.addEventListener("mouseleave", hideSeekTooltip);
+    const railEl = byId("timeline-rail");
+    railEl?.addEventListener("mousemove", (e) => showTimelineTipAt(e.clientX));
+    railEl?.addEventListener("mouseleave", hideTimelineTip);
+    railEl?.addEventListener("click", (e) => seekFromRail(e.clientX));
+    document.querySelectorAll("[data-shortcuts-close]").forEach((el) => el.addEventListener("click", closeShortcuts));
     byId("overlay-toggle")?.addEventListener("click", () => toggleOverlay());
     byId("replay-event-btn")?.addEventListener("click", toggleReplayLoop);
+    byId("player-settings-button")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleSettingsMenu();
+    });
+    document.querySelectorAll("[data-speed]").forEach((btn) => {
+      btn.addEventListener("click", () => setPlaybackRate(parseFloat(btn.dataset.speed)));
+    });
+    byId("volume-btn")?.addEventListener("click", toggleMute);
+    byId("volume-slider")?.addEventListener("input", (e) => setVolume(num(e.target.value, 0) / 100));
+    byId("time-readout")?.addEventListener("click", toggleTimeDisplay);
+    updateVolumeUI();
 
     // Keep the canvas matched to the displayed video rect on layout changes.
     if (typeof ResizeObserver !== "undefined" && previewFrame) {
@@ -2249,36 +2461,39 @@ export function initializeSpectra() {
     document.addEventListener("keydown", (e) => {
       const tag = (e.target?.tagName || "").toLowerCase();
       if (["input", "textarea", "select", "button", "a"].includes(tag) || e.target?.isContentEditable) return;
+      // Shortcuts help works even before a video is loaded.
+      if (e.key === "?") { e.preventDefault(); openShortcuts(); return; }
       if (!previewVideo?.src || previewVideo.hidden) return;
       switch (e.key) {
         case " ": e.preventDefault(); togglePlay(); break;
-        case "ArrowLeft": case ",": e.preventDefault(); stepFrame(-1); break;
-        case "ArrowRight": case ".": e.preventDefault(); stepFrame(1); break;
-        case "f": case "F": expandMedia(previewVideo.src, "video"); break;
+        case "ArrowLeft": case ",": e.preventDefault(); e.shiftKey ? jumpToEvent(-1) : stepFrame(-1); break;
+        case "ArrowRight": case ".": e.preventDefault(); e.shiftKey ? jumpToEvent(1) : stepFrame(1); break;
+        case "f": case "F": toggleFullscreen(); break;
         case "m": case "M": toggleOverlay(); break;
       }
     });
   }
 
-  function expandMedia(src, kind) {
-    if (!src) return;
-    const overlay = document.createElement("div");
-    overlay.className = "media-overlay";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "close-btn";
-    close.innerHTML = '<svg><use href="#icon-x"></use></svg>';
-    overlay.appendChild(close);
-    const media = kind === "video" ? document.createElement("video") : document.createElement("img");
-    media.src = src;
-    if (kind === "video") {
-      media.controls = true; media.autoplay = true; media.muted = true; media.playsInline = true;
+  // Fullscreen the whole player (video + canvas overlay + controls) so the
+  // risk overlay stays in sync, instead of cloning a bare <video>.
+  function fullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+  function toggleFullscreen() {
+    if (!previewFrame || !previewVideo?.src) return;
+    if (fullscreenElement()) {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    } else {
+      (previewFrame.requestFullscreen || previewFrame.webkitRequestFullscreen)?.call(previewFrame);
     }
-    overlay.appendChild(media);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay || e.target.closest(".close-btn")) overlay.remove();
-    });
-    document.body.appendChild(overlay);
+  }
+  function handleFullscreenChange() {
+    const on = fullscreenElement() === previewFrame;
+    previewFrame.classList.toggle("is-fullscreen", on);
+    byId("preview-expand")?.classList.toggle("is-active", on);
+    // The frame just changed size; re-fit the overlay canvas.
+    resizeOverlayCanvas();
+    redrawOverlayAtCurrentTime();
   }
 
   function selectedEventAtCurrentTime() {
@@ -2514,6 +2729,7 @@ export function initializeSpectra() {
 
     byId("open-settings")?.addEventListener("click", openDrawer);
     byId("open-help")?.addEventListener("click", openHelpModal);
+    byId("open-shortcuts")?.addEventListener("click", openShortcuts);
     byId("reset-advanced-sampling")?.addEventListener("click", resetAdvancedSampling);
     byId("view-json-btn")?.addEventListener("click", openJsonView);
     byId("download-json-btn")?.addEventListener("click", downloadJson);
@@ -2521,10 +2737,6 @@ export function initializeSpectra() {
     byId("export-snapshot")?.addEventListener("click", exportSnapshot);
     byId("export-evidence-image")?.addEventListener("click", exportEvidenceImage);
     byId("export-evidence-json")?.addEventListener("click", exportEvidenceJson);
-    byId("playback-mode-button")?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      togglePlaybackModeMenu();
-    });
     document.querySelectorAll("[data-playback-mode]").forEach((btn) => {
       btn.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -2564,7 +2776,7 @@ export function initializeSpectra() {
     document.querySelectorAll("[data-drawer-close]").forEach((el) => el.addEventListener("click", closeDrawer));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
     document.addEventListener("click", (event) => {
-      if (!event.target?.closest?.(".player-mode-picker")) closePlaybackModeMenu();
+      if (!event.target?.closest?.(".player-settings")) closeSettingsMenu();
     });
 
     document.querySelectorAll("[data-help-close]").forEach(el => {
@@ -2574,7 +2786,8 @@ export function initializeSpectra() {
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         closeHelpModal();
-        closePlaybackModeMenu();
+        closeSettingsMenu();
+        closeShortcuts();
       }
     });
 

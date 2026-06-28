@@ -35,6 +35,23 @@
       <rect x="6" y="5" width="4" height="14" rx="1" />
       <rect x="14" y="5" width="4" height="14" rx="1" />
     </symbol>
+    <symbol id="icon-volume" viewBox="0 0 24 24">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+    </symbol>
+    <symbol id="icon-volume-mute" viewBox="0 0 24 24">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <line x1="23" y1="9" x2="17" y2="15" />
+      <line x1="17" y1="9" x2="23" y2="15" />
+    </symbol>
+    <symbol id="icon-skip-back" viewBox="0 0 24 24">
+      <polygon points="19 20 9 12 19 4 19 20" />
+      <line x1="5" y1="5" x2="5" y2="19" />
+    </symbol>
+    <symbol id="icon-skip-forward" viewBox="0 0 24 24">
+      <polygon points="5 4 15 12 5 20 5 4" />
+      <line x1="19" y1="5" x2="19" y2="19" />
+    </symbol>
     <symbol id="icon-alert" viewBox="0 0 24 24">
       <path d="M12 3 2.6 20h18.8L12 3Z" />
       <path d="M12 9v6" />
@@ -225,19 +242,14 @@
                     <use href="#icon-info"></use>
                   </svg>
                 </button>
-                <button class="side-bar-btn" type="button" id="export-snapshot" title="Export current frame snapshot" disabled>
+                <button class="side-bar-btn" data-toggle="side-panel-export" title="Export / Download">
                   <svg>
                     <use href="#icon-download"></use>
                   </svg>
                 </button>
-                <button class="side-bar-btn" type="button" id="export-evidence-image" title="Export overlay evidence image" disabled>
+                <button class="side-bar-btn" type="button" id="open-shortcuts" title="Keyboard shortcuts (?)">
                   <svg>
-                    <use href="#icon-download"></use>
-                  </svg>
-                </button>
-                <button class="side-bar-btn" type="button" id="export-evidence-json" title="Export selected frame evidence JSON" disabled>
-                  <svg>
-                    <use href="#icon-file-text"></use>
+                    <use href="#icon-help"></use>
                   </svg>
                 </button>
               </div>
@@ -249,65 +261,136 @@
                     <div>Est. Frames: -</div>
                   </div>
                 </div>
+                <div class="side-bar-panel" id="side-panel-export" hidden>
+                  <h6>Export</h6>
+                  <div class="export-menu">
+                    <button class="export-menu-item" type="button" id="export-snapshot" title="Export current frame snapshot" disabled>
+                      <svg>
+                        <use href="#icon-download"></use>
+                      </svg>
+                      <span>Frame snapshot <em>PNG</em></span>
+                    </button>
+                    <button class="export-menu-item" type="button" id="export-evidence-image" title="Export overlay evidence image" disabled>
+                      <svg>
+                        <use href="#icon-shield"></use>
+                      </svg>
+                      <span>Evidence image <em>JPG</em></span>
+                    </button>
+                    <button class="export-menu-item" type="button" id="export-evidence-json" title="Export selected frame evidence JSON" disabled>
+                      <svg>
+                        <use href="#icon-file-text"></use>
+                      </svg>
+                      <span>Evidence data <em>JSON</em></span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <!-- Player bar overlay -->
+            <!-- Player bar overlay (YouTube-style: scrubber on top, controls below) -->
             <div class="preview-bar">
-              <button class="bar-btn frame-step" id="frame-step-back" type="button" aria-label="Previous frame" title="Previous frame (←)">
-                <svg class="flip-x">
-                  <use href="#icon-chevron-right"></use>
-                </svg>
-              </button>
-              <button class="play-toggle" id="play-toggle" type="button" aria-label="Play / Pause">
-                <svg class="ic-play">
-                  <use href="#icon-play"></use>
-                </svg>
-                <svg class="ic-pause">
-                  <use href="#icon-pause"></use>
-                </svg>
-              </button>
-              <button class="bar-btn frame-step" id="frame-step-forward" type="button" aria-label="Next frame" title="Next frame (→)">
-                <svg>
-                  <use href="#icon-chevron-right"></use>
-                </svg>
-              </button>
-              <div class="player-mode-picker">
-                <button class="mode-picker-button" type="button" id="playback-mode-button" aria-haspopup="true" aria-expanded="false" title="Playback mode">
-                  <span id="playback-mode-label">Normal</span>
-                  <svg>
-                    <use href="#icon-chevron-down"></use>
-                  </svg>
-                </button>
-                <div class="playback-mode-control mode-picker-menu" id="playback-mode-menu" hidden>
-                  <button type="button" id="playback-mode-normal" class="playback-mode-btn is-active" data-playback-mode="normal" title="Normal playback">Normal</button>
-                  <button type="button" id="playback-mode-risk" class="playback-mode-btn" data-playback-mode="risk" title="Play only caution and danger moments">Risk Only</button>
-                  <button type="button" id="playback-mode-pause-risk" class="playback-mode-btn" data-playback-mode="pause-risk" title="Pause when the next risk frame is reached">Pause On Risk</button>
-                  <button type="button" id="playback-mode-slow-risk" class="playback-mode-btn" data-playback-mode="slow-risk" title="Slow down during caution and danger moments">Slow On Risk</button>
-                </div>
-              </div>
               <div class="seek-track">
                 <div class="player-risk-segments" id="player-risk-segments"></div>
                 <input id="seek-bar" type="range" min="0" max="1000" value="0" step="1" aria-label="Video progress">
+                <div class="seek-tooltip" id="seek-tooltip" hidden>
+                  <img class="seek-tooltip-thumb" id="seek-tooltip-thumb" alt="" hidden>
+                  <div class="seek-tooltip-meta">
+                    <span class="seek-tooltip-time" id="seek-tooltip-time">00:00</span>
+                  </div>
+                </div>
               </div>
-              <span class="time-readout"><span id="time-current">00:00</span> / <span
-                  id="time-total">00:00</span></span>
-              <button class="bar-btn speed-btn" id="speed-btn" type="button" aria-label="Playback speed" title="Playback speed (1×)">1×</button>
-              <button class="bar-btn" id="replay-event-btn" type="button" aria-label="Replay risk event" title="Loop the selected risk event">
-                <svg>
-                  <use href="#icon-reset"></use>
-                </svg>
-              </button>
-              <button class="bar-btn is-active" id="overlay-toggle" type="button" aria-pressed="true" aria-label="Toggle risk overlay" title="Toggle risk overlay (m)">
-                <svg>
-                  <use href="#icon-lane"></use>
-                </svg>
-              </button>
-              <button class="bar-btn" id="preview-expand" type="button" aria-label="Fullscreen">
-                <svg>
-                  <use href="#icon-expand"></use>
-                </svg>
-              </button>
+              <div class="preview-controls">
+                <div class="pc-group pc-left">
+                  <button class="bar-btn" id="event-prev" type="button" aria-label="Previous risk event" title="Previous risk event (Shift+←)">
+                    <svg>
+                      <use href="#icon-skip-back"></use>
+                    </svg>
+                  </button>
+                  <button class="bar-btn frame-step" id="frame-step-back" type="button" aria-label="Previous frame" title="Previous frame (←)">
+                    <svg class="flip-x">
+                      <use href="#icon-chevron-right"></use>
+                    </svg>
+                  </button>
+                  <button class="play-toggle" id="play-toggle" type="button" aria-label="Play / Pause">
+                    <svg class="ic-play">
+                      <use href="#icon-play"></use>
+                    </svg>
+                    <svg class="ic-pause">
+                      <use href="#icon-pause"></use>
+                    </svg>
+                  </button>
+                  <button class="bar-btn frame-step" id="frame-step-forward" type="button" aria-label="Next frame" title="Next frame (→)">
+                    <svg>
+                      <use href="#icon-chevron-right"></use>
+                    </svg>
+                  </button>
+                  <button class="bar-btn" id="event-next" type="button" aria-label="Next risk event" title="Next risk event (Shift+→)">
+                    <svg>
+                      <use href="#icon-skip-forward"></use>
+                    </svg>
+                  </button>
+                  <div class="volume-control">
+                    <button class="bar-btn is-muted" id="volume-btn" type="button" aria-label="Mute / Unmute" title="Mute / Unmute">
+                      <svg class="ic-vol">
+                        <use href="#icon-volume"></use>
+                      </svg>
+                      <svg class="ic-vol-mute">
+                        <use href="#icon-volume-mute"></use>
+                      </svg>
+                    </button>
+                    <input id="volume-slider" type="range" min="0" max="100" value="100" step="1" aria-label="Volume">
+                  </div>
+                  <button class="time-readout" id="time-readout" type="button" title="Toggle time / frame display"><span id="time-current">00:00</span> / <span
+                      id="time-total">00:00</span></button>
+                </div>
+                <div class="pc-group pc-right">
+                  <div class="player-settings">
+                    <button class="bar-btn" type="button" id="player-settings-button" aria-haspopup="true" aria-expanded="false" title="Settings">
+                      <svg>
+                        <use href="#icon-settings"></use>
+                      </svg>
+                    </button>
+                    <div class="mode-picker-menu settings-menu" id="player-settings-menu" hidden>
+                      <div class="settings-section">
+                        <span class="settings-label">Playback mode</span>
+                        <div class="settings-options">
+                          <button type="button" id="playback-mode-normal" class="playback-mode-btn is-active" data-playback-mode="normal" title="Normal playback">Normal</button>
+                          <button type="button" id="playback-mode-risk" class="playback-mode-btn" data-playback-mode="risk" title="Play only caution and danger moments">Risk Only</button>
+                          <button type="button" id="playback-mode-pause-risk" class="playback-mode-btn" data-playback-mode="pause-risk" title="Pause when the next risk frame is reached">Pause On Risk</button>
+                          <button type="button" id="playback-mode-slow-risk" class="playback-mode-btn" data-playback-mode="slow-risk" title="Slow down during caution and danger moments">Slow On Risk</button>
+                        </div>
+                      </div>
+                      <div class="settings-section">
+                        <span class="settings-label">Speed</span>
+                        <div class="settings-options speed-options">
+                          <button type="button" class="playback-mode-btn speed-opt" data-speed="0.5" title="0.5× speed">0.5×</button>
+                          <button type="button" class="playback-mode-btn speed-opt is-active" data-speed="1" title="Normal speed">1×</button>
+                          <button type="button" class="playback-mode-btn speed-opt" data-speed="2" title="2× speed">2×</button>
+                        </div>
+                      </div>
+                      <div class="settings-section settings-toggles">
+                        <button type="button" class="settings-toggle is-active" id="overlay-toggle" aria-pressed="true" title="Toggle risk overlay (m)">
+                          <svg>
+                            <use href="#icon-lane"></use>
+                          </svg>
+                          <span>Risk overlay</span>
+                        </button>
+                        <button type="button" class="settings-toggle" id="replay-event-btn" aria-pressed="false" title="Loop the selected risk event">
+                          <svg>
+                            <use href="#icon-reset"></use>
+                          </svg>
+                          <span>Loop event</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="bar-btn" id="preview-expand" type="button" aria-label="Fullscreen">
+                    <svg>
+                      <use href="#icon-expand"></use>
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </figure>
 
@@ -329,9 +412,17 @@
                 <span>00:04</span>
                 <span>00:05</span>
               </div>
-              <div class="timeline-rail">
+              <div class="timeline-rail" id="timeline-rail">
+                <div class="timeline-heat" id="timeline-heat"></div>
                 <div class="timeline-events" id="timeline-events"></div>
                 <div class="timeline-cursor" id="timeline-cursor" style="left: 0%"></div>
+                <div class="timeline-tip" id="timeline-tip" hidden></div>
+              </div>
+              <div class="timeline-legend">
+                <span class="tl-key tl-danger">Danger</span>
+                <span class="tl-key tl-caution">Caution</span>
+                <span class="tl-key tl-safe">Safe</span>
+                <span class="tl-hint">Color = State · Intensity = Risk Score</span>
               </div>
             </div>
 
@@ -832,6 +923,32 @@
     <p id="ap-status" class="ap-status">Preparing…</p>
     <div class="ap-bar">
       <div class="ap-fill"></div>
+    </div>
+  </div>
+
+  <!-- Keyboard shortcuts help -->
+  <div class="help-modal shortcuts-modal" id="shortcuts-modal" hidden>
+    <div class="modal-backdrop" data-shortcuts-close></div>
+    <div class="help-content shortcuts-content">
+      <header class="help-header">
+        <div class="help-title-group">
+          <div>
+            <h3>Keyboard Shortcuts</h3>
+          </div>
+        </div>
+        <button class="modal-close" data-shortcuts-close>&times;</button>
+      </header>
+      <div class="help-body">
+        <ul class="shortcuts-list">
+          <li><kbd>Space</kbd><span>Play / Pause</span></li>
+          <li><kbd>←</kbd> <kbd>→</kbd><span>Step one frame</span></li>
+          <li><kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd><span>Jump to previous / next risk event</span></li>
+          <li><kbd>,</kbd> <kbd>.</kbd><span>Step one frame</span></li>
+          <li><kbd>m</kbd><span>Toggle risk overlay</span></li>
+          <li><kbd>f</kbd><span>Toggle fullscreen</span></li>
+          <li><kbd>?</kbd><span>Show this shortcuts list</span></li>
+        </ul>
+      </div>
     </div>
   </div>
 

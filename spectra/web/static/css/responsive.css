@@ -291,6 +291,39 @@
   flex: 1;
   scrollbar-width: thin;
 }
+
+/* ─── Keyboard shortcuts modal ───────────────────────────── */
+.shortcuts-content { max-width: 480px; }
+.shortcuts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.shortcuts-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+.shortcuts-list li span { color: var(--muted); margin-left: auto; text-align: right; }
+.shortcuts-list kbd {
+  display: inline-block;
+  min-width: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.4;
+}
 .help-body::-webkit-scrollbar { width: 6px; }
 .help-body::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; }
 

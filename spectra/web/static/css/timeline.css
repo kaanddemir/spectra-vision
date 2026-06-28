@@ -14,12 +14,80 @@
 }
 .timeline-rail {
   position: relative;
-  height: 4px;
-  border-radius: 2px;
+  height: 16px;
+  border-radius: 4px;
   background: var(--panel-2);
   border: 1px solid var(--border-soft);
   overflow: visible;
+  cursor: pointer;
 }
+
+/* Hover scrub tooltip over the heat band. */
+.timeline-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 7px;
+  background: rgba(12,12,14,0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  pointer-events: none;
+}
+.timeline-tip[hidden] { display: none; }
+.timeline-tip .tt-time {
+  font-size: 11px; font-weight: 800; color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-tip .tt-state { font-size: 10px; font-weight: 850; letter-spacing: 0.03em; color: var(--muted); }
+.timeline-tip .tt-state.risk-danger  { color: var(--danger); }
+.timeline-tip .tt-state.risk-caution { color: var(--caution); }
+.timeline-tip .tt-state.risk-safe,
+.timeline-tip .tt-state.risk-none    { color: var(--safe); }
+
+/* ─── Risk heat band ─────────────────────────────────────── */
+.timeline-heat {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.heat-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+}
+.heat-cell.heat-safe    { background: rgb(var(--safe-rgb)); }
+.heat-cell.heat-caution { background: rgb(var(--caution-rgb)); }
+.heat-cell.heat-danger  { background: rgb(var(--danger-rgb)); }
+
+.timeline-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+.tl-key { display: inline-flex; align-items: center; gap: 5px; }
+.tl-key::before {
+  content: "";
+  width: 9px; height: 9px;
+  border-radius: 2px;
+}
+.tl-key.tl-danger::before  { background: rgb(var(--danger-rgb)); }
+.tl-key.tl-caution::before { background: rgb(var(--caution-rgb)); }
+.tl-key.tl-safe::before    { background: rgba(var(--safe-rgb), 0.45); }
+.tl-hint { margin-left: auto; color: var(--faint); font-weight: 600; }
 .timeline-risk-segment {
   position: absolute;
   top: 0;
@@ -79,10 +147,11 @@
 
 .timeline-cursor {
   position: absolute;
-  top: -8px; bottom: -8px;
+  top: -3px; bottom: -3px;
   width: 2px;
   border-radius: 1px;
   background: var(--text);
+  box-shadow: 0 0 6px rgba(0,0,0,0.6);
   pointer-events: none;
   transform: translateX(-50%);
   z-index: 12;
@@ -237,6 +306,7 @@
   color: rgba(var(--evrgb), 1);
   letter-spacing: 0.04em;
 }
+.box-item .risk-score-val { color: rgba(var(--evrgb), 1); }
 
 .card-bars {
   display: flex;
