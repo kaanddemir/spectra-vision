@@ -368,8 +368,9 @@ def _risk_factors_metric(event: RiskEvent) -> dict[str, float]:
 def _confidence_metric(event: RiskEvent) -> dict[str, float]:
     return {
         "detection": _unit_score(event.detection_confidence),
-        "tracking": _unit_score(event.tracking_confidence),
         "depth": _unit_score(event.depth_confidence),
+        "lane": _unit_score(event.lane_confidence),
+        "flow": _unit_score(event.flow_confidence),
     }
 
 
@@ -430,6 +431,7 @@ def _object_metric(
         "kinematics": _kinematics_metric(event),
         "riskFactors": _risk_factors_metric(event),
         "evidence": _evidence_metric(event),
+        "ttcAgreement": _unit_score(event.ttc_agreement),
         "bbox": _normalized_bbox(event, frame_width, frame_height),
     }
 

@@ -77,6 +77,20 @@ def test_object_metric_carries_normalized_bbox():
     assert metric["bbox"] == [0.25, 0.25, 0.75, 1.25]
 
 
+def test_object_metric_exposes_reliability_params():
+    event = _sample_event()
+    event.lane_confidence = 0.7
+    event.flow_confidence = 0.5
+    event.ttc_agreement = 0.85
+    metric = _object_metric(event, 400, 200)
+    # The previously-hidden cue confidences are now surfaced alongside the rest.
+    assert set(metric["confidence"]) == {
+        "detection", "depth", "lane", "flow",
+    }
+    assert metric["confidence"]["lane"] == 0.7
+    assert metric["ttcAgreement"] == 0.85
+
+
 def test_lane_metric_emits_normalized_corridor():
     lane = _lane_metric(None, 400, 200)
     assert lane["detected"] is False

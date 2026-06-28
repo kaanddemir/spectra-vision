@@ -64,8 +64,14 @@ class RiskEvent:
     closing_mps: float | None = None
     depth_ttc_sec: float | None = None
     detection_confidence: float = 0.0
-    tracking_confidence: float = 0.0
     depth_confidence: float = 0.0
+    # Reliability transparency: already-computed cue confidences that previously
+    # were not surfaced (lane geometry trust + the flow TTC cue).
+    lane_confidence: float = 0.0
+    flow_confidence: float = 0.0
+    # Agreement among the three TTC cues (1.0 = consistent). Tempers the trust
+    # gate so a single divergent cue cannot read DANGER on its own.
+    ttc_agreement: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -119,6 +125,11 @@ _LON_MIN_UPDATES_FOR_TTC = 2        # need 2 measurements before trusting veloci
 # reaction-time before impact, 3 s is roughly the recommended following gap.
 _DANGER_TTC_SEC = 1.0
 _CAUTION_TTC_SEC = 3.0
+
+# Lowest multiplier applied to the trust gate when the TTC cues fully disagree
+# (agreement → 0). Worst case tempers confidence to ×0.7; agreement → 1 leaves
+# it unchanged so the validated score is backward-compatible.
+_TTC_AGREEMENT_FLOOR = 0.7
 
 # Smoothing constants for per-track expansion rate.
 _EXPANSION_EMA_RISE = 0.55
@@ -500,6 +511,28 @@ def fuse_ttc(components: list[TtcComponent]) -> tuple[Optional[float], list[TtcC
             break
 
     return chosen, components
+
+
+def ttc_agreement(components: list[TtcComponent]) -> float:
+    """How much the independent TTC cues corroborate each other, in [0, 1].
+
+    1.0 when fewer than two cues have a usable estimate (nothing to disagree
+    about — the eta term is already 0 in that case) or when the cues are tight.
+    Drops toward 0 as the cues diverge, measured as the relative spread of their
+    values. This only ever *lowers* trust, so it can never fabricate risk.
+    """
+
+    values = [
+        float(c.value)
+        for c in components
+        if c.value is not None and c.confidence > 0.0 and c.value > 0.0
+    ]
+    if len(values) < 2:
+        return 1.0
+    lo, hi = min(values), max(values)
+    mid = float(np.median(values))
+    spread = (hi - lo) / max(mid, 1e-3)
+    return float(np.clip(1.0 - spread, 0.0, 1.0))
 
 
 # ── Lane-relative crossing prediction ────────────────────────────────────────
@@ -1031,6 +1064,11 @@ def calculate_track_risk(
             1.0,
         )
     )
+    # Down-weight trust when the three TTC cues disagree, so a single divergent
+    # cue cannot read DANGER on its own. Bounded by ``_TTC_AGREEMENT_FLOOR`` —
+    # tempers, never annihilates. agreement==1.0 leaves the score unchanged.
+    agreement = ttc_agreement(components)
+    fused_confidence *= _TTC_AGREEMENT_FLOOR + ((1.0 - _TTC_AGREEMENT_FLOOR) * agreement)
     if confidence_smoother is not None:
         fused_confidence = confidence_smoother.update(track.track_id, fused_confidence)
 
@@ -1061,15 +1099,6 @@ def calculate_track_risk(
 
     reason = _risk_reason(state, risk_time_hint, pos)
 
-    tracking_confidence = float(
-        np.clip(
-            (0.55 if track.confirmed else 0.30)
-            + (0.10 * min(max(track.hits, 0), 4))
-            - (0.18 * max(track.misses, 0)),
-            0.0,
-            1.0,
-        )
-    )
     depth_confidence = float(np.clip(depth_component.confidence, 0.0, 1.0))
 
     return RiskEvent(
@@ -1097,8 +1126,10 @@ def calculate_track_risk(
         distance_m=None if distance_m is None else round(float(distance_m), 2),
         closing_mps=None if depth_closing_mps is None else round(float(depth_closing_mps), 2),
         detection_confidence=round(float(detection_confidence), 3),
-        tracking_confidence=round(float(tracking_confidence), 3),
         depth_confidence=round(float(depth_confidence), 3),
+        lane_confidence=round(float(np.clip(lane.confidence, 0.0, 1.0)), 3),
+        flow_confidence=round(float(np.clip(flow_component.confidence, 0.0, 1.0)), 3),
+        ttc_agreement=round(float(agreement), 3),
         depth_ttc_sec=depth_component.value,
     )
 

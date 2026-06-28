@@ -137,7 +137,6 @@ def test_object_metric_emits_v3_collision_eta_contract():
         distance_m=4.0,
         closing_mps=8.0,
         detection_confidence=0.76,
-        tracking_confidence=0.66,
         depth_confidence=0.8,
         ttc_components=(TtcComponent("depth", 0.5, 0.8),),
     )
@@ -155,8 +154,9 @@ def test_object_metric_emits_v3_collision_eta_contract():
     assert obj["overallConfidence"] == 0.82
     assert obj["confidence"] == {
         "detection": 0.76,
-        "tracking": 0.66,
         "depth": 0.8,
+        "lane": 0.0,
+        "flow": 0.0,
     }
     assert obj["riskFactors"]["approach"] == 0.83
     assert all(0.0 <= value <= 1.0 for value in obj["riskFactors"].values())
@@ -193,7 +193,6 @@ def test_object_metric_uses_status_instead_of_null_user_eta():
         distance_m=8.0,
         closing_mps=-1.2,
         detection_confidence=0.7,
-        tracking_confidence=0.5,
         depth_confidence=0.0,
         ttc_components=(TtcComponent("depth", None, 0.0),),
     )

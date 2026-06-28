@@ -826,6 +826,7 @@
   background: rgba(255,255,255,0.025);
 }
 .evidence-group--tracking,
+.evidence-group--advisory,
 .evidence-group--fusion {
   grid-column: span 2;
   display: grid;
@@ -841,6 +842,7 @@
   margin-bottom: 3px;
 }
 .evidence-group--tracking .evidence-group-lbl,
+.evidence-group--advisory .evidence-group-lbl,
 .evidence-group--fusion .evidence-group-lbl {
   grid-column: 1 / -1;
 }
@@ -876,6 +878,7 @@
 @media (max-width: 700px) {
   .evidence-grid { grid-template-columns: 1fr; }
   .evidence-group--tracking,
+  .evidence-group--advisory,
   .evidence-group--fusion { grid-column: span 1; }
 }
 

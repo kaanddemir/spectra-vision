@@ -77,7 +77,7 @@ def test_active_ui_contracts_are_kept():
     controls = read_static("js/controls.js")
     drawers_css = read_static("css/drawers.css")
 
-    object_tracking_heading = index.index("<h5>Object Tracking</h5>")
+    object_tracking_heading = index.index("<h5>Objects &amp; Tracks</h5>")
     assert '<symbol id="icon-car"' in index
     assert index.rfind('<use href="#icon-car"></use>', 0, object_tracking_heading) != -1
 
@@ -85,6 +85,90 @@ def test_active_ui_contracts_are_kept():
     assert "resetAdvancedSampling" in controls
     assert 'setSegmentedValue("adaptive_depth", 1)' in controls
     assert ".drawer-icon-btn" in drawers_css
+
+
+def test_help_modal_uses_routed_flow_pages():
+    index = read_static("index.html")
+    controls = read_static("js/controls.js")
+    responsive_css = read_static("css/responsive.css")
+
+    for page in ("home", "overview", "detection", "depth-motion", "lane", "risk-score", "per-frame"):
+        assert f'data-help-page="{page}"' in index
+
+    for target in ("overview", "detection", "depth-motion", "lane", "risk-score", "per-frame"):
+        assert f'data-help-goto="{target}"' in index
+
+    for data_flow_contract in (
+        "<h5>Data Flow</h5>",
+        'overview: "Data Flow"',
+        "Objects &amp; Tracks",
+        "Depth &amp; Motion",
+        "Lane Context",
+        "Risk Calculation",
+        "Frame Schedule",
+    ):
+        assert data_flow_contract in index or data_flow_contract in controls
+
+    for contract in (
+        'const HELP_PAGES = {',
+        "function showHelpPage",
+        'showHelpPage("home");',
+        'byId("help-back")?.addEventListener("click", () => showHelpPage("home"))',
+    ):
+        assert contract in controls
+
+    for flow_term in (
+        "flow-board",
+        "flow-board--vertical",
+        "flow-stage",
+        "flow-stage-grid",
+        "flow-connector",
+        "flow-connector--down",
+        "flow-node",
+        "flow-node--compact",
+        "flow-node--hub",
+        "Frame Ingest",
+        "Depth + Optical Flow",
+        "TTC Fusion",
+        "Traffic Light",
+    ):
+        assert flow_term in index
+
+    for removed_flow_detail in (
+        'class="flow-io"',
+        "<span>IN</span>",
+        "<span>OUT</span>",
+        "<span>NEXT</span>",
+        'class="flow-quick-nav"',
+    ):
+        assert removed_flow_detail not in index
+
+    for style_contract in (
+        ".help-page.is-active",
+        ".help-back-btn",
+        "width: 100vw",
+        "height: 100vh",
+        "max-width: none",
+        "max-height: none",
+        "overflow-y: auto",
+        "overflow-x: hidden",
+        "width: min(100%, 1560px)",
+        ".flow-board--vertical",
+        ".flow-stage",
+        ".flow-stage-grid",
+        ".flow-connector--down",
+        "grid-template-columns: repeat(3, minmax(220px, 1fr))",
+        ".flow-board",
+        ".flow-connector",
+        ".flow-node",
+        ".flow-node--compact",
+        ".flow-node--hub",
+        ".flow-badge",
+    ):
+        assert style_contract in responsive_css
+
+    assert ".flow-io" not in responsive_css
+    assert ".flow-quick-nav" not in responsive_css
 
 
 def test_timeline_uses_backend_risk_score():
@@ -231,15 +315,39 @@ def test_banner_metrics_have_no_duplicated_data():
     # Detail Mode is the full diagnostic report: raw pipeline inputs plus fusion outputs,
     # intentionally repeating values shown elsewhere so the panel is self-contained.
     for kept_ev in (
-        "ev-detector-class", "ev-detector-conf", "ev-tracking-conf",
-        "ev-depth-distance", "ev-depth-closing", "ev-depth-conf",
-        "ev-flow-expansion", "ev-flow-radial",
-        "ev-lane-bucket", "ev-lane-pos", "ev-lane-crossing",
-        "ev-fusion-eta", "ev-fusion-score", "ev-fusion-state",
-        "ev-fusion-approach", "ev-fusion-brake",
-        "ev-fusion-confidence",
+        # Detection + Tracking: detector outputs plus tracker-assigned id.
+        "ev-detector-class", "ev-detector-conf", "ev-tracking-id",
+        # Depth / Kinematics: proximity is a depth-derived measurement.
+        "ev-depth-distance", "ev-depth-closing", "ev-depth-proximity", "ev-depth-conf",
+        # Expansion: bbox growth plus radial optical-flow cue.
+        "ev-expansion-rate", "ev-flow-radial", "ev-flow-conf",
+        "ev-lane-bucket", "ev-lane-pos", "ev-lane-crossing", "ev-lane-conf",
+        # Advisory: cues that do not gate collision logic.
+        "ev-advisory-traffic", "ev-advisory-brake",
+        # Fusion / Risk: fused outputs + the one genuinely-fused contributor.
+        "ev-fusion-state", "ev-fusion-eta", "ev-fusion-eta-pressure",
+        "ev-fusion-score", "ev-fusion-approach",
+        "ev-fusion-agreement", "ev-fusion-confidence",
     ):
         assert f'id="{kept_ev}"' in index
+
+    assert "Detection &amp; Tracking (IoU)" in index
+    assert '<span class="evidence-group-lbl">Optical Flow (DIS)</span>' in index
+    assert '<span class="evidence-group-lbl">Lane</span>' in index
+    assert '<div class="evidence-row"><span>Expansion</span><span id="ev-expansion-rate">' in index
+    assert "Expansion rate" not in index
+    assert '"None"' not in controls
+    assert '<span class="evidence-group-lbl">Detector (YOLO)</span>' not in index
+    assert '<span class="evidence-group-lbl">Detection (YOLO) &amp; Tracking (IoU)</span>' not in index
+    assert '<span class="evidence-group-lbl">Tracking (IoU)</span>' not in index
+    assert '<span class="evidence-group-lbl">Lane (UFLDv2)</span>' not in index
+    assert '<span class="evidence-group-lbl">Expansion (bbox)</span>' not in index
+    assert '<span class="evidence-group-lbl">Flow (DIS)</span>' not in index
+
+    detail_mode = index[index.index("<summary>Detail Mode</summary>"):index.index("<!-- SUB PANEL 3", index.index("<summary>Detail Mode</summary>"))]
+    assert detail_mode.index("Detection &amp; Tracking (IoU)") < detail_mode.index("Optical Flow (DIS)")
+    assert detail_mode.index("Optical Flow (DIS)") < detail_mode.index('<span class="evidence-group-lbl">Lane</span>')
+    assert detail_mode.index('<span class="evidence-group-lbl">Lane</span>') < detail_mode.index("Depth / Kinematics")
 
     # ETA pressure is derived client-side from the collision ETA seconds.
     assert "const etaPressure" in controls

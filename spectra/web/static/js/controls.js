@@ -974,35 +974,48 @@ export function initializeSpectra() {
   };
 
   // Detail Mode: a self-contained report of raw inputs and fusion outputs.
-  function renderAdvanced(source) {
+  function renderAdvanced(source, trafficLight) {
     const ev = source?.evidence || null;
     const conf = source?.confidence || {};
     const riskFactors = source?.riskFactors || {};
+    const oid = source?.displayId ?? source?.objectId;
+    // Detection + Tracking: detector outputs plus the tracker-assigned object id.
     setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
     setText("ev-detector-conf", pctLabel(conf.detection));
-    setText("ev-tracking-conf", pctLabel(conf.tracking));
+    setText("ev-tracking-id", isReal(oid) ? `#${oid}` : MISSING);
+    // Depth / Kinematics: proximity is a depth-derived measurement.
     setText("ev-depth-distance", distanceLabel(source?.kinematics?.distanceM));
     setText("ev-depth-closing", closingShort(source?.kinematics?.closingMps));
+    setText("ev-depth-proximity", pctLabel(riskFactors.proximity));
     setText("ev-depth-conf", pctLabel(conf.depth));
+    // Optical flow: bbox expansion plus the radial flow cue.
     const flow = ev?.flow || {};
-    setText("ev-flow-expansion", pctLabel(flow.expansionScore));
+    setText("ev-expansion-rate", pctLabel(flow.expansionScore));
     setText("ev-flow-radial", pctLabel(flow.radialScore));
+    setText("ev-flow-conf", pctLabel(conf.flow));
     setText("ev-lane-bucket", isReal(source?.lane) ? titleCase(source.lane) : MISSING);
     const pos = num(source?.lanePosition, null);
     setText("ev-lane-pos", pos === null ? MISSING : pos.toFixed(2));
     setText("ev-lane-crossing", pctLabel(riskFactors.crossing));
+    setText("ev-lane-conf", pctLabel(conf.lane));
+    // Advisory: cues that do not gate collision logic.
+    const tl = trafficLight;
+    setText("ev-advisory-traffic", (tl === "red" || tl === "yellow" || tl === "green") ? titleCase(tl) : MISSING);
+    setText("ev-advisory-brake", pctLabel(riskFactors.brake));
+    // Fusion / Risk: fused outputs and the one genuinely-fused contributor (approach).
+    setText("ev-fusion-state", (() => { const rawState = source?.rawRiskState ?? source?.riskState; return isReal(rawState) ? titleCase(rawState) : MISSING; })());
     setText("ev-fusion-eta", etaDisplay(source?.collisionEta));
+    const etaSec = etaSeconds(source?.collisionEta);
+    setText("ev-fusion-eta-pressure", etaSec === null ? MISSING : pctLabel(etaPressure(source?.collisionEta)));
     setText("ev-fusion-score", riskScoreLabel(source?.riskScore));
-    const rawState = source?.rawRiskState ?? source?.riskState;
-    setText("ev-fusion-state", isReal(rawState) ? titleCase(rawState) : MISSING);
     setText("ev-fusion-approach", pctLabel(riskFactors.approach));
-    setText("ev-fusion-brake", pctLabel(riskFactors.brake));
+    setText("ev-fusion-agreement", pctLabel(source?.ttcAgreement));
     setText("ev-fusion-confidence", confidenceLabel(source));
   }
 
   const confidenceBreakdown = (conf) => {
-    if (!conf) return "Overall confidence scales the final Risk Score using detection, tracking and depth reliability.";
-    return `Overall confidence scales the final Risk Score. Detection ${pctLabel(conf.detection)} · Tracking ${pctLabel(conf.tracking)} · Depth ${pctLabel(conf.depth)}.`;
+    if (!conf) return "Overall confidence scales the final Risk Score using detection and lane-geometry reliability.";
+    return `Overall confidence scales the final Risk Score. Detection ${pctLabel(conf.detection)} · Lane ${pctLabel(conf.lane)} · Depth ${pctLabel(conf.depth)}.`;
   };
 
   // Frame-level traffic-light advisory (red/yellow/green); hidden otherwise.
@@ -1153,7 +1166,7 @@ export function initializeSpectra() {
     const conf = num(activeObject?.confidencePct, null);
     setSignalBar("confidence", conf === null ? null : conf / 100);
     setText("confidence-breakdown", confidenceBreakdown(activeObject?.confidence));
-    renderAdvanced(activeObject);
+    renderAdvanced(activeObject, source?.trafficLight);
   }
 
   // ─── Timeline + event strip ──────────────────────────────
@@ -2231,9 +2244,36 @@ export function initializeSpectra() {
   }
 
   // ─── help modal ──────────────────────────────────────────
+  const HELP_PAGES = {
+    home: "How Spectra Works",
+    overview: "Data Flow",
+    detection: "Detection & Tracking",
+    "depth-motion": "Depth & Motion",
+    lane: "Lane Analysis",
+    "risk-score": "Risk Score",
+    "per-frame": "Per-Frame Processing",
+  };
+
+  function showHelpPage(name = "home") {
+    const pageName = Object.prototype.hasOwnProperty.call(HELP_PAGES, name) ? name : "home";
+    document.querySelectorAll("[data-help-page]").forEach((page) => {
+      page.classList.toggle("is-active", page.dataset.helpPage === pageName);
+    });
+
+    const title = byId("help-title");
+    if (title) title.textContent = HELP_PAGES[pageName];
+
+    const back = byId("help-back");
+    if (back) back.hidden = pageName === "home";
+
+    const body = document.querySelector("#help-modal .help-body");
+    if (body) body.scrollTop = 0;
+  }
+
   function openHelpModal() {
     const modal = byId("help-modal");
     if (!modal) return;
+    showHelpPage("home");
     modal.hidden = false;
     void modal.offsetHeight;
     modal.classList.add("is-open");
@@ -2242,7 +2282,12 @@ export function initializeSpectra() {
     const modal = byId("help-modal");
     if (!modal) return;
     modal.classList.remove("is-open");
-    setTimeout(() => { if (!modal.classList.contains("is-open")) modal.hidden = true; }, 400);
+    setTimeout(() => {
+      if (!modal.classList.contains("is-open")) {
+        modal.hidden = true;
+        showHelpPage("home");
+      }
+    }, 400);
   }
 
 
@@ -2782,6 +2827,10 @@ export function initializeSpectra() {
     document.querySelectorAll("[data-help-close]").forEach(el => {
       el.addEventListener("click", closeHelpModal);
     });
+    document.querySelectorAll("[data-help-goto]").forEach(el => {
+      el.addEventListener("click", () => showHelpPage(el.dataset.helpGoto));
+    });
+    byId("help-back")?.addEventListener("click", () => showHelpPage("home"));
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {

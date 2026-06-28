@@ -620,39 +620,45 @@
                   <summary>Detail Mode</summary>
                   <div class="evidence-grid">
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Detector (YOLO)</span>
+                      <span class="evidence-group-lbl">Detection &amp; Tracking (IoU)</span>
                       <div class="evidence-row"><span>Class</span><span id="ev-detector-class">—</span></div>
                       <div class="evidence-row"><span>Confidence</span><span id="ev-detector-conf">—</span></div>
+                      <div class="evidence-row"><span>Object ID</span><span id="ev-tracking-id">—</span></div>
                     </div>
                     <div class="evidence-group">
-                      <span class="evidence-group-lbl">Flow (DIS)</span>
-                      <div class="evidence-row"><span>Expansion</span><span id="ev-flow-expansion">—</span></div>
+                      <span class="evidence-group-lbl">Optical Flow (DIS)</span>
+                      <div class="evidence-row"><span>Expansion</span><span id="ev-expansion-rate">—</span></div>
                       <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-flow-conf">—</span></div>
+                    </div>
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Lane</span>
+                      <div class="evidence-row"><span>Bucket</span><span id="ev-lane-bucket">—</span></div>
+                      <div class="evidence-row"><span>Position</span><span id="ev-lane-pos">—</span></div>
+                      <div class="evidence-row"><span>Lane relevance</span><span id="ev-lane-crossing">—</span></div>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-lane-conf">—</span></div>
                     </div>
                     <div class="evidence-group">
                       <span class="evidence-group-lbl">Depth / Kinematics</span>
                       <div class="evidence-row"><span>Distance</span><span id="ev-depth-distance">—</span></div>
                       <div class="evidence-row"><span>Closing speed</span><span id="ev-depth-closing">—</span></div>
+                      <div class="evidence-row"><span>Proximity</span><span id="ev-depth-proximity">—</span></div>
                       <div class="evidence-row"><span>Confidence</span><span id="ev-depth-conf">—</span></div>
                     </div>
-                    <div class="evidence-group">
-                      <span class="evidence-group-lbl">Lane (UFLDv2)</span>
-                      <div class="evidence-row"><span>Bucket</span><span id="ev-lane-bucket">—</span></div>
-                      <div class="evidence-row"><span>Position</span><span id="ev-lane-pos">—</span></div>
-                      <div class="evidence-row"><span>Crossing</span><span id="ev-lane-crossing">—</span></div>
-                    </div>
-                    <div class="evidence-group evidence-group--tracking">
-                      <span class="evidence-group-lbl">Tracking (IoU)</span>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-tracking-conf">—</span></div>
+                    <div class="evidence-group evidence-group--advisory">
+                      <span class="evidence-group-lbl">Advisory</span>
+                      <div class="evidence-row"><span>Traffic light</span><span id="ev-advisory-traffic">—</span></div>
+                      <div class="evidence-row"><span>Brake</span><span id="ev-advisory-brake">—</span></div>
                     </div>
                     <div class="evidence-group evidence-group--fusion">
                       <span class="evidence-group-lbl">Fusion / Risk</span>
                       <div class="evidence-row evidence-row--wide"><span>State</span><span id="ev-fusion-state">—</span></div>
                       <div class="evidence-row"><span>Collision ETA</span><span id="ev-fusion-eta">—</span></div>
+                      <div class="evidence-row"><span>ETA pressure</span><span id="ev-fusion-eta-pressure">—</span></div>
                       <div class="evidence-row"><span>Risk Score</span><span id="ev-fusion-score">—</span></div>
                       <div class="evidence-row"><span>Approach</span><span id="ev-fusion-approach">—</span></div>
-                      <div class="evidence-row"><span>Brake</span><span id="ev-fusion-brake">—</span></div>
-                      <div class="evidence-row evidence-row--wide"><span>Confidence</span><span id="ev-fusion-confidence">—</span></div>
+                      <div class="evidence-row"><span>TTC agreement</span><span id="ev-fusion-agreement">—</span></div>
+                      <div class="evidence-row"><span>Confidence</span><span id="ev-fusion-confidence">—</span></div>
                     </div>
                   </div>
                 </details>
@@ -958,160 +964,253 @@
     <div class="help-content">
       <header class="help-header">
         <div class="help-title-group">
+          <button class="help-back-btn" id="help-back" type="button" aria-label="Back to help home" hidden>
+            <svg><use href="#icon-skip-back"></use></svg>
+            <span>Back</span>
+          </button>
           <div>
-            <h3>How Spectra Works</h3>
+            <h3 id="help-title">How Spectra Works</h3>
           </div>
         </div>
         <button class="modal-close" data-help-close>&times;</button>
       </header>
 
       <div class="help-body">
-        <section class="help-section">
+        <section class="help-page is-active" data-help-page="home">
           <div class="help-steps">
-            <!-- Step 1: Ingestion -->
-            <div class="help-step">
+            <button type="button" class="help-step" data-help-goto="overview">
               <div class="step-icon-wrap">
                 <svg class="step-svg">
                   <use href="#icon-upload"></use>
                 </svg>
-                <div class="step-num">01</div>
               </div>
-              <h5>Data Ingestion</h5>
-              <p>Frames are streamed through a WebSocket for real-time preview while the backend initializes the vision
-                stack.</p>
-              <div class="step-tags">
-                <span>FastAPI</span>
-                <span>WebSockets</span>
-              </div>
-            </div>
+              <h5>Data Flow</h5>
+            </button>
 
-            <!-- Step 2: Geometry -->
-            <div class="help-step">
-              <div class="step-icon-wrap">
-                <svg class="step-svg">
-                  <use href="#icon-lane"></use>
-                </svg>
-                <div class="step-num">02</div>
-              </div>
-              <h5>Road Geometry</h5>
-              <p>Runs UFLDv2 every 3rd frame by default, reuses the smoothed ego-lane corridor between updates, and
-                normalizes object positions relative to that lane.</p>
-              <div class="step-tags">
-                <span>Lane ROI</span>
-                <span>Vanishing Point</span>
-              </div>
-            </div>
-
-            <!-- Step 3: Spatial -->
-            <div class="help-step">
-              <div class="step-icon-wrap">
-                <svg class="step-svg">
-                  <use href="#icon-expand"></use>
-                </svg>
-                <div class="step-num">03</div>
-              </div>
-              <h5>Depth (Spatial)</h5>
-              <p>Depth Anything V2 Metric VKITTI estimates object distance in meters. A normalized nearness map is
-                derived only for compatibility with filtering and scoring.</p>
-              <div class="step-tags">
-                <span>Metric Depth</span>
-                <span>80m Range</span>
-              </div>
-            </div>
-
-            <!-- Step 4: Motion -->
-            <div class="help-step">
-              <div class="step-icon-wrap">
-                <svg class="step-svg">
-                  <use href="#icon-pulse"></use>
-                </svg>
-                <div class="step-num">04</div>
-              </div>
-              <h5>Motion Analysis</h5>
-              <p>DIS Optical Flow runs every frame by default. RANSAC-based homography compensates for camera
-                ego-motion before object-level motion is scored.</p>
-              <div class="step-tags">
-                <span>OpenCV DIS</span>
-                <span>Ego-Motion</span>
-              </div>
-            </div>
-
-            <!-- Step 5: Perception -->
-            <div class="help-step">
+            <button type="button" class="help-step" data-help-goto="detection">
               <div class="step-icon-wrap">
                 <svg class="step-svg">
                   <use href="#icon-car"></use>
                 </svg>
-                <div class="step-num">05</div>
               </div>
-              <h5>Object Tracking</h5>
-              <p>YOLO detects road participants every 3rd frame by default. The tracker propagates objects between
-                detections while display IDs are numbered per class, such as Car #1 and Truck #1.</p>
-              <div class="step-tags">
-                <span>YOLOv8</span>
-                <span>IoU Tracker</span>
-              </div>
-            </div>
+              <h5>Objects &amp; Tracks</h5>
+            </button>
 
-            <!-- Step 6: Fusion -->
-            <div class="help-step">
+            <button type="button" class="help-step" data-help-goto="depth-motion">
+              <div class="step-icon-wrap">
+                <svg class="step-svg">
+                  <use href="#icon-expand"></use>
+                </svg>
+              </div>
+              <h5>Depth &amp; Motion</h5>
+            </button>
+
+            <button type="button" class="help-step" data-help-goto="lane">
+              <div class="step-icon-wrap">
+                <svg class="step-svg">
+                  <use href="#icon-lane"></use>
+                </svg>
+              </div>
+              <h5>Lane Context</h5>
+            </button>
+
+            <button type="button" class="help-step" data-help-goto="risk-score">
               <div class="step-icon-wrap">
                 <svg class="step-svg">
                   <use href="#icon-shield"></use>
                 </svg>
-                <div class="step-num">06</div>
               </div>
-              <h5>Risk Fusion</h5>
-              <p>Separates physical Collision ETA from risk evidence. Depth + Kalman estimates range motion, while
-                bbox growth, optical flow, lane crossing and brake cues explain the risk evaluation.
-              </p>
-              <div class="step-tags">
-                <span>Collision ETA</span>
-                <span>Risk Evidence</span>
-              </div>
-            </div>
+              <h5>Risk Calculation</h5>
+            </button>
 
-            <!-- Step 7: Decision -->
-            <div class="help-step">
-              <div class="step-icon-wrap">
-                <svg class="step-svg">
-                  <use href="#icon-alert"></use>
-                </svg>
-                <div class="step-num">07</div>
-              </div>
-              <h5>Decision Engine</h5>
-              <p>Classifies state as SAFE, CAUTION, or DANGER. Hysteresis stabilization prevents jitter in risk
-                transitions.</p>
-              <div class="step-tags">
-                <span>Hysteresis</span>
-                <span>State Machine</span>
-              </div>
-            </div>
-
-            <!-- Step 8: Output -->
-            <div class="help-step">
+            <button type="button" class="help-step" data-help-goto="per-frame">
               <div class="step-icon-wrap">
                 <svg class="step-svg">
                   <use href="#icon-list"></use>
                 </svg>
-                <div class="step-num">08</div>
               </div>
-              <h5>Efficiency</h5>
-              <p>SAFE objects remain tracked for continuity but are hidden from the object list and overlay so the view
-                stays focused on CAUTION and DANGER cases.</p>
-              <div class="step-tags">
-                <span>Telemetry</span>
-                <span>Deferred Render</span>
-              </div>
+              <h5>Frame Schedule</h5>
+            </button>
+          </div>
+        </section>
+
+        <section class="help-page" data-help-page="overview">
+          <div class="flow-board flow-board--vertical">
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>Frame Ingest</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage flow-stage-grid">
+              <article class="flow-node">
+                <h5>YOLO Detection</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Lane (UFLDv2)</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Depth + Optical Flow</h5>
+              </article>
+              <article class="flow-node">
+                <h5>IoU Tracker</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node flow-node--hub">
+                <h5>TTC Fusion</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+              <article class="flow-node flow-node--hub">
+                <h5>Risk Assembly</h5>
+              </article>
+              <article class="flow-node flow-node--compact flow-node--advisory">
+                <h5>Traffic Light</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>State + Output</h5>
+              </article>
             </div>
           </div>
         </section>
 
-        <section class="help-section" style="margin-top: 28px;">
-          <div class="help-section-header">
-            <h4>Per-Frame Processing Plan</h4>
+        <section class="help-page" data-help-page="detection">
+          <div class="flow-board flow-board--vertical">
+            <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+              <article class="flow-node">
+                <h5>YOLO Detection</h5>
+              </article>
+              <article class="flow-node flow-node--compact flow-node--advisory">
+                <h5>Traffic Light Classifier</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>Lane Filter</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>IoU Tracker</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>Primary Object</h5>
+              </article>
+            </div>
           </div>
+        </section>
 
+        <section class="help-page" data-help-page="depth-motion">
+          <div class="flow-board flow-board--vertical">
+            <div class="flow-stage flow-stage-grid">
+              <article class="flow-node">
+                <h5>Depth (Metric, Kalman)</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Optical Flow (DIS)</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Expansion (bbox)</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node flow-node--hub">
+                <h5>fuse_ttc</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+              <article class="flow-node">
+                <h5>Proximity</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Approach</h5>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="help-page" data-help-page="lane">
+          <div class="flow-board flow-board--vertical">
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>Lane (UFLDv2)</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage flow-stage-grid">
+              <article class="flow-node">
+                <h5>Object Normalization</h5>
+              </article>
+              <article class="flow-node">
+                <h5>crossing_risk</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Confidence Input</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node flow-node--hub">
+                <h5>Risk Score</h5>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="help-page" data-help-page="risk-score">
+          <div class="flow-board flow-board--vertical">
+            <div class="flow-stage flow-stage-grid">
+              <article class="flow-node">
+                <h5>ETA Pressure 40%</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Proximity 30%</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Approach 25%</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Brake 5%</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+              <article class="flow-node">
+                <h5>Confidence Gate</h5>
+              </article>
+              <article class="flow-node">
+                <h5>Lane Relevance</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node flow-node--hub">
+                <h5>score_raw</h5>
+              </article>
+            </div>
+            <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
+            <div class="flow-stage">
+              <article class="flow-node">
+                <h5>State</h5>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="help-page" data-help-page="per-frame">
           <div class="frame-plan-table-wrap">
             <table class="frame-plan-table">
               <thead>
@@ -1130,12 +1229,17 @@
                 <tr>
                   <td><span class="module-name">Optical Flow</span></td>
                   <td><span class="freq-badge freq-every">Default: every frame</span></td>
-                  <td class="skip-cell">Previous flow reused</td>
+                  <td class="skip-cell">DIS flow uses ego-motion compensation; downscaled to 320px for the flow pass</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">YOLO Detection</span></td>
                   <td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td>
                   <td class="skip-cell">Tracker propagates existing IDs</td>
+                </tr>
+                <tr>
+                  <td><span class="module-name">Traffic Light</span></td>
+                  <td><span class="freq-badge freq-periodic">On YOLO frames</span></td>
+                  <td class="skip-cell">Advisory coasts between detections; does not gate Risk Score</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">Detection Filtering</span></td>
@@ -1160,7 +1264,7 @@
                 <tr>
                   <td><span class="module-name">Risk Calculation</span></td>
                   <td><span class="freq-badge freq-every">Every frame</span></td>
-                  <td class="skip-cell">—</td>
+                  <td class="skip-cell">Combines ETA, proximity, approach, lane relevance, confidence, and brake_score cue</td>
                 </tr>
                 <tr>
                   <td><span class="module-name">State Stabilization</span></td>
