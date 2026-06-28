@@ -80,6 +80,7 @@ def _serialize_event(
         "primaryRiskScore": event.get("primary_risk_score"),
         "primaryLane": event.get("primary_lane"),
         "trafficLight": event.get("traffic_light_state"),
+        "laneGeometry": event.get("laneGeometry"),
         "objects": event.get("objects") or [],
     }
     if image_ref is not None:
@@ -138,6 +139,8 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
             "fps": result.get("fps"),
             "frameCount": result.get("frame_count"),
             "processedFrames": result.get("processed_frames"),
+            "frameWidth": result.get("frame_width"),
+            "frameHeight": result.get("frame_height"),
             "elapsedSec": round(elapsed_sec, 3),
         },
         "frames": result.get("frames") or [],

@@ -12,11 +12,17 @@ export function initializeSpectra() {
 
   const previewVideo = document.querySelector("#visual-original-video");
   const previewBlend = document.querySelector("#visual-blend");
+  const previewCanvas = document.querySelector("#visual-overlay");
+  const overlayCtx = previewCanvas ? previewCanvas.getContext("2d") : null;
   const previewFrame = document.querySelector("#frame-original");
   const playToggle = document.querySelector("#play-toggle");
   const seekBar = document.querySelector("#seek-bar");
   const timeCurrent = document.querySelector("#time-current");
   const timeTotal = document.querySelector("#time-total");
+
+  // CSS-side risk colours (mirror of overlay.py COLORS, BGR→hex).
+  const RISK_COLORS = { DANGER: "#ff3b3b", CAUTION: "#ffb020", SAFE: "#12d492" };
+  const SPEED_STEPS = [0.5, 1, 2];
 
   const state = {
     previewUrl: "",
@@ -51,6 +57,10 @@ export function initializeSpectra() {
     objectsMenuCollapsed: false,
     playbackMode: "normal",
     pauseRiskLastKey: null,
+    overlayEnabled: true,
+    playbackRate: 1,
+    overlayRafId: null,
+    loopSegment: null,
   };
 
   const byId = (id) => document.getElementById(id);
@@ -145,6 +155,8 @@ export function initializeSpectra() {
     return {
       ...frame,
       objects: objs,
+      // Normalized ego-lane corridor polygon for the canvas overlay.
+      laneGeometry: frame.laneGeometry ?? null,
       timeSec: ts === null ? null : Math.round(ts * 100) / 100,
       riskState: frame.stabilizedRiskState ?? null,
       riskScore: num(frame.primaryRiskScore, null),
@@ -345,6 +357,7 @@ export function initializeSpectra() {
       seekBar.value = 0;
       seekBar.style.setProperty("--fill", "0%");
       hidePreviewOverlay();
+      if (previewCanvas) { previewCanvas.hidden = true; clearOverlayCanvas(); }
       refreshEmptyStates();
       updateEvidenceControls();
       return;
@@ -357,6 +370,7 @@ export function initializeSpectra() {
       const el = byId(id);
       if (el) el.hidden = true;
     });
+    updateOverlayVisibility();
     updateEvidenceControls();
   }
 
@@ -391,6 +405,198 @@ export function initializeSpectra() {
     clearPreviewOverlayTimer();
     previewBlend.hidden = true;
     previewBlend.removeAttribute("src");
+  }
+
+  // ─── live risk overlay (canvas) ───────────────────────────
+  // Compute the displayed video rect inside the container, honoring
+  // object-fit: contain (letterboxing). bbox/lane coords are normalized to the
+  // processed frame and share the source aspect ratio, so they map onto this
+  // rect regardless of render size.
+  function containRect(boxW, boxH) {
+    const intrinsicW = previewVideo?.videoWidth || state.currentResult?.frameWidth || boxW;
+    const intrinsicH = previewVideo?.videoHeight || state.currentResult?.frameHeight || boxH;
+    if (!intrinsicW || !intrinsicH || !boxW || !boxH) return { x: 0, y: 0, w: boxW, h: boxH };
+    const scale = Math.min(boxW / intrinsicW, boxH / intrinsicH);
+    const w = intrinsicW * scale;
+    const h = intrinsicH * scale;
+    return { x: (boxW - w) / 2, y: (boxH - h) / 2, w, h };
+  }
+
+  function resizeOverlayCanvas() {
+    if (!previewCanvas || !previewFrame) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cw = previewFrame.clientWidth;
+    const ch = previewFrame.clientHeight;
+    previewCanvas.width = Math.max(1, Math.round(cw * dpr));
+    previewCanvas.height = Math.max(1, Math.round(ch * dpr));
+    previewCanvas.style.width = `${cw}px`;
+    previewCanvas.style.height = `${ch}px`;
+    if (overlayCtx) overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function clearOverlayCanvas() {
+    if (!overlayCtx || !previewCanvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    overlayCtx.clearRect(0, 0, previewCanvas.width / dpr, previewCanvas.height / dpr);
+  }
+
+  function overlayActive() {
+    return state.overlayEnabled
+      && !!previewVideo?.src
+      && !previewVideo.hidden
+      && !previewFrame.classList.contains("is-analyzing");
+  }
+
+  function updateOverlayVisibility() {
+    if (!previewCanvas) return;
+    const active = overlayActive();
+    previewCanvas.hidden = !active;
+    if (!active) clearOverlayCanvas();
+  }
+
+  function drawOverlay(row) {
+    if (!overlayCtx || !previewCanvas) return;
+    if (!overlayActive()) { clearOverlayCanvas(); return; }
+    clearOverlayCanvas();
+    if (!row) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = containRect(previewCanvas.width / dpr, previewCanvas.height / dpr);
+    const px = (nx) => rect.x + nx * rect.w;
+    const py = (ny) => rect.y + ny * rect.h;
+
+    // Ego-lane corridor.
+    const lane = row.laneGeometry;
+    const corridor = Array.isArray(lane?.corridor) ? lane.corridor : [];
+    if (corridor.length >= 3) {
+      const stateColor = RISK_COLORS[row.riskState] || "#8aa0b4";
+      overlayCtx.beginPath();
+      corridor.forEach(([nx, ny], i) => {
+        const x = px(nx), y = py(ny);
+        if (i === 0) overlayCtx.moveTo(x, y); else overlayCtx.lineTo(x, y);
+      });
+      overlayCtx.closePath();
+      overlayCtx.fillStyle = lane?.detected ? "rgba(120,190,185,0.10)" : "rgba(120,140,140,0.06)";
+      overlayCtx.fill();
+      overlayCtx.lineWidth = 1.5;
+      overlayCtx.strokeStyle = lane?.detected ? "rgba(214,228,222,0.65)" : "rgba(150,165,160,0.4)";
+      if (!lane?.detected) overlayCtx.setLineDash([10, 7]);
+      overlayCtx.stroke();
+      overlayCtx.setLineDash([]);
+    }
+
+    // Per-object boxes — skip SAFE to match the baked overlay.
+    const objects = Array.isArray(row.objects) ? row.objects : [];
+    objects.forEach((obj) => {
+      const st = obj?.rawRiskState ?? obj?.riskState;
+      if (!obj?.bbox || st === "SAFE" || !st) return;
+      const [x1, y1, x2, y2] = obj.bbox;
+      const bx = px(x1), by = py(y1), bw = px(x2) - px(x1), bh = py(y2) - py(y1);
+      const color = RISK_COLORS[st] || "#8aa0b4";
+      overlayCtx.lineWidth = st === "DANGER" ? 2.5 : 1.5;
+      overlayCtx.strokeStyle = color;
+      overlayCtx.strokeRect(bx, by, bw, bh);
+
+      const parts = [];
+      const did = obj.displayId ?? obj.objectId;
+      if (did !== null && did !== undefined) parts.push(`#${did}`);
+      if (obj.objectType) parts.push(String(obj.objectType).toUpperCase());
+      const eta = num(obj.collisionEta?.sec, null);
+      if (eta !== null) parts.push(`ETA ${eta.toFixed(1)}s`);
+      if (num(obj.riskFactors?.brake, 0) >= 0.5) parts.push("BRAKE");
+      const label = parts.join(" ");
+      if (label) {
+        overlayCtx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+        const tw = overlayCtx.measureText(label).width;
+        const lh = 15;
+        const ly = Math.max(rect.y, by - lh);
+        overlayCtx.fillStyle = color;
+        overlayCtx.fillRect(bx, ly, tw + 8, lh);
+        overlayCtx.fillStyle = "#0f1218";
+        overlayCtx.fillText(label, bx + 4, ly + lh - 4);
+      }
+    });
+  }
+
+  function redrawOverlayAtCurrentTime() {
+    drawOverlay(findTimelineRowAt(previewVideo?.currentTime ?? 0));
+  }
+
+  function overlayLoop() {
+    if (!previewVideo || previewVideo.paused || previewVideo.ended) {
+      state.overlayRafId = null;
+      return;
+    }
+    redrawOverlayAtCurrentTime();
+    state.overlayRafId = requestAnimationFrame(overlayLoop);
+  }
+  function startOverlayLoop() {
+    if (state.overlayRafId === null) state.overlayRafId = requestAnimationFrame(overlayLoop);
+  }
+  function stopOverlayLoop() {
+    if (state.overlayRafId !== null) { cancelAnimationFrame(state.overlayRafId); state.overlayRafId = null; }
+  }
+
+  function toggleOverlay(force = null) {
+    state.overlayEnabled = force === null ? !state.overlayEnabled : !!force;
+    const btn = byId("overlay-toggle");
+    if (btn) {
+      btn.classList.toggle("is-active", state.overlayEnabled);
+      btn.setAttribute("aria-pressed", state.overlayEnabled ? "true" : "false");
+    }
+    updateOverlayVisibility();
+    if (state.overlayEnabled) redrawOverlayAtCurrentTime();
+  }
+
+  // ─── player polish: frame step, speed, replay ─────────────
+  function togglePlay() {
+    if (!previewVideo || previewVideo.hidden || !previewVideo.src) return;
+    if (previewVideo.paused) playWithinWindow(); else previewVideo.pause();
+  }
+
+  function stepFrame(dir) {
+    if (!previewVideo || previewVideo.hidden || !previewVideo.src) return;
+    const fps = num(state.currentResult?.fps, 0) || 30;
+    const { start, end } = winBounds();
+    previewVideo.pause();
+    const target = clamp(previewVideo.currentTime + (dir / fps), start, end);
+    try { previewVideo.currentTime = target; } catch {}
+  }
+
+  function setPlaybackRate(rate) {
+    state.playbackRate = rate;
+    if (previewVideo && state.playbackMode !== "slow-risk") previewVideo.playbackRate = rate;
+    const btn = byId("speed-btn");
+    if (btn) { btn.textContent = `${rate}×`; btn.title = `Playback speed (${rate}×)`; }
+  }
+  function cyclePlaybackRate() {
+    const i = SPEED_STEPS.indexOf(state.playbackRate);
+    setPlaybackRate(SPEED_STEPS[(i + 1) % SPEED_STEPS.length]);
+  }
+
+  function currentRiskSegment() {
+    const segments = riskSegmentsFromTimelineRows(state.timelineRows);
+    if (!segments.length) return null;
+    const t = previewVideo?.currentTime ?? 0;
+    return segments.find((s) => t >= s.start - 0.25 && t < s.end + 0.25)
+      || segments.find((s) => s.start >= t)
+      || segments[0];
+  }
+  function updateReplayButton() {
+    const btn = byId("replay-event-btn");
+    if (btn) {
+      const on = !!state.loopSegment;
+      btn.classList.toggle("is-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+  function toggleReplayLoop() {
+    if (state.loopSegment) { state.loopSegment = null; updateReplayButton(); return; }
+    const seg = currentRiskSegment();
+    if (!seg) return;
+    state.loopSegment = seg;
+    updateReplayButton();
+    seekPreviewVideo(seg.start);
+    playWithinWindow();
   }
 
   function imageSetForEvent(ev) {
@@ -449,6 +655,8 @@ export function initializeSpectra() {
       fps: num(metadata.fps, null),
       frameCount: num(metadata.frameCount, null),
       processedFrames: num(metadata.processedFrames, null),
+      frameWidth: num(metadata.frameWidth, null),
+      frameHeight: num(metadata.frameHeight, null),
       peakEvent,
       events,
       timelineRows: frames,
@@ -1323,13 +1531,18 @@ export function initializeSpectra() {
         ? "Risk Only"
         : state.playbackMode === "pause-risk"
           ? "Pause On Risk"
-          : "Normal";
+          : state.playbackMode === "slow-risk"
+            ? "Slow On Risk"
+            : "Normal";
     }
   }
 
   function setPlaybackMode(mode) {
-    state.playbackMode = mode === "risk" || mode === "pause-risk" ? mode : "normal";
+    const allowed = ["risk", "pause-risk", "slow-risk"];
+    state.playbackMode = allowed.includes(mode) ? mode : "normal";
     state.pauseRiskLastKey = null;
+    // Leaving slow-risk restores the user's chosen base rate.
+    if (previewVideo && state.playbackMode !== "slow-risk") previewVideo.playbackRate = state.playbackRate;
     updatePlaybackModeButtons();
     closePlaybackModeMenu();
   }
@@ -1354,6 +1567,13 @@ export function initializeSpectra() {
   function handlePlaybackModeTick(currentTime) {
     if (!previewVideo || previewVideo.paused) return;
     if (state.playbackMode === "normal") return;
+
+    if (state.playbackMode === "slow-risk") {
+      const inRisk = isRiskRow(findTimelineRowAt(currentTime));
+      const desired = inRisk ? Math.min(0.4, state.playbackRate) : state.playbackRate;
+      if (Math.abs(previewVideo.playbackRate - desired) > 1e-3) previewVideo.playbackRate = desired;
+      return;
+    }
 
     if (state.playbackMode === "risk") {
       const segments = riskSegmentsFromTimelineRows(state.timelineRows);
@@ -1402,6 +1622,7 @@ export function initializeSpectra() {
 
     const row = findTimelineRowAt(t);
     state.currentTimelineRow = row;
+    drawOverlay(row);
     if (switchMode) setUiMode("live", { timeSec: t });
     else renderRiskPanel();
     updateEvidenceControls();
@@ -1455,6 +1676,11 @@ export function initializeSpectra() {
     const { start: winStart } = winBounds();
     seekPreviewVideo(winStart);
     state.currentTimelineRow = findTimelineRowAt(winStart) || null;
+    state.loopSegment = null;
+    updateReplayButton();
+    resizeOverlayCanvas();
+    updateOverlayVisibility();
+    redrawOverlayAtCurrentTime();
     setUiMode("summary");
     updateEvidenceControls();
   }
@@ -1468,7 +1694,11 @@ export function initializeSpectra() {
     state.selectedSummaryEvent = null;
     state.currentTimelineRow = null;
     state.analysisWindow = { startSec: 0, endSec: null };
+    state.loopSegment = null;
+    updateReplayButton();
     hidePreviewOverlay();
+    if (previewCanvas) { previewCanvas.hidden = true; clearOverlayCanvas(); }
+    stopOverlayLoop();
     renderStatRow(null);
     setUiMode("live");
     renderTimeline({ events: [] });
@@ -1718,6 +1948,7 @@ export function initializeSpectra() {
     document.body.classList.toggle("is-analysis-running", isRunning);
     runButton.classList.toggle("is-running", isRunning);
     previewFrame.classList.toggle("is-analyzing", isRunning);
+    updateOverlayVisibility();
     const label = runButton.querySelector("span");
     if (label) label.textContent = isRunning ? "Analyzing…" : "Start Analysis";
     runButton.disabled = isRunning;
@@ -1935,11 +2166,20 @@ export function initializeSpectra() {
     if (!previewVideo) return;
     previewVideo.addEventListener("loadedmetadata", () => {
       updateSourceMetaFromVideo();
+      resizeOverlayCanvas();
+      redrawOverlayAtCurrentTime();
       updateEvidenceControls();
     });
     previewVideo.addEventListener("timeupdate", () => {
       const cur = previewVideo.currentTime;
       const { start, end } = winBounds();
+      // Replay loop takes precedence: bounce back to the segment start.
+      if (state.loopSegment) {
+        if (cur >= state.loopSegment.end - 0.04 || cur < state.loopSegment.start - 0.04) {
+          try { previewVideo.currentTime = state.loopSegment.start; } catch {}
+          return;
+        }
+      }
       // Keep playback inside the analyzed window: stop at the end, never run
       // before the start.
       if (cur >= end - 0.04) {
@@ -1955,10 +2195,14 @@ export function initializeSpectra() {
     previewVideo.addEventListener("seeked", syncToVideoTime);
     previewVideo.addEventListener("play", () => {
       previewFrame.classList.add("is-playing");
+      if (previewVideo.playbackRate !== state.playbackRate && state.playbackMode !== "slow-risk") {
+        previewVideo.playbackRate = state.playbackRate;
+      }
       setUiMode("live", { timeSec: previewVideo.currentTime });
+      startOverlayLoop();
     });
-    previewVideo.addEventListener("pause", () => previewFrame.classList.remove("is-playing"));
-    previewVideo.addEventListener("ended", () => previewFrame.classList.remove("is-playing"));
+    previewVideo.addEventListener("pause", () => { previewFrame.classList.remove("is-playing"); stopOverlayLoop(); });
+    previewVideo.addEventListener("ended", () => { previewFrame.classList.remove("is-playing"); stopOverlayLoop(); });
 
     playToggle.addEventListener("click", () => {
       if (previewVideo.hidden || !previewVideo.src) return;
@@ -1988,6 +2232,32 @@ export function initializeSpectra() {
       }
     });
     byId("preview-expand")?.addEventListener("click", () => expandMedia(previewVideo.src, "video"));
+
+    byId("frame-step-back")?.addEventListener("click", () => stepFrame(-1));
+    byId("frame-step-forward")?.addEventListener("click", () => stepFrame(1));
+    byId("speed-btn")?.addEventListener("click", cyclePlaybackRate);
+    byId("overlay-toggle")?.addEventListener("click", () => toggleOverlay());
+    byId("replay-event-btn")?.addEventListener("click", toggleReplayLoop);
+
+    // Keep the canvas matched to the displayed video rect on layout changes.
+    if (typeof ResizeObserver !== "undefined" && previewFrame) {
+      const ro = new ResizeObserver(() => { resizeOverlayCanvas(); redrawOverlayAtCurrentTime(); });
+      ro.observe(previewFrame);
+    }
+
+    // Player keyboard shortcuts (ignored while typing in form controls).
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (["input", "textarea", "select", "button", "a"].includes(tag) || e.target?.isContentEditable) return;
+      if (!previewVideo?.src || previewVideo.hidden) return;
+      switch (e.key) {
+        case " ": e.preventDefault(); togglePlay(); break;
+        case "ArrowLeft": case ",": e.preventDefault(); stepFrame(-1); break;
+        case "ArrowRight": case ".": e.preventDefault(); stepFrame(1); break;
+        case "f": case "F": expandMedia(previewVideo.src, "video"); break;
+        case "m": case "M": toggleOverlay(); break;
+      }
+    });
   }
 
   function expandMedia(src, kind) {

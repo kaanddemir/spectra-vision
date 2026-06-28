@@ -206,6 +206,7 @@
         <article class="card unified-analysis-card">
           <figure id="frame-original" class="preview-frame">
             <video id="visual-original-video" muted playsinline preload="metadata" hidden></video>
+            <canvas id="visual-overlay" class="preview-canvas" hidden></canvas>
             <img id="visual-blend" class="preview-overlay" alt="Risk overlay" hidden>
 
             <figcaption class="preview-empty" id="empty-video">No video uploaded</figcaption>
@@ -253,12 +254,22 @@
 
             <!-- Player bar overlay -->
             <div class="preview-bar">
+              <button class="bar-btn frame-step" id="frame-step-back" type="button" aria-label="Previous frame" title="Previous frame (←)">
+                <svg class="flip-x">
+                  <use href="#icon-chevron-right"></use>
+                </svg>
+              </button>
               <button class="play-toggle" id="play-toggle" type="button" aria-label="Play / Pause">
                 <svg class="ic-play">
                   <use href="#icon-play"></use>
                 </svg>
                 <svg class="ic-pause">
                   <use href="#icon-pause"></use>
+                </svg>
+              </button>
+              <button class="bar-btn frame-step" id="frame-step-forward" type="button" aria-label="Next frame" title="Next frame (→)">
+                <svg>
+                  <use href="#icon-chevron-right"></use>
                 </svg>
               </button>
               <div class="player-mode-picker">
@@ -272,6 +283,7 @@
                   <button type="button" id="playback-mode-normal" class="playback-mode-btn is-active" data-playback-mode="normal" title="Normal playback">Normal</button>
                   <button type="button" id="playback-mode-risk" class="playback-mode-btn" data-playback-mode="risk" title="Play only caution and danger moments">Risk Only</button>
                   <button type="button" id="playback-mode-pause-risk" class="playback-mode-btn" data-playback-mode="pause-risk" title="Pause when the next risk frame is reached">Pause On Risk</button>
+                  <button type="button" id="playback-mode-slow-risk" class="playback-mode-btn" data-playback-mode="slow-risk" title="Slow down during caution and danger moments">Slow On Risk</button>
                 </div>
               </div>
               <div class="seek-track">
@@ -280,6 +292,17 @@
               </div>
               <span class="time-readout"><span id="time-current">00:00</span> / <span
                   id="time-total">00:00</span></span>
+              <button class="bar-btn speed-btn" id="speed-btn" type="button" aria-label="Playback speed" title="Playback speed (1×)">1×</button>
+              <button class="bar-btn" id="replay-event-btn" type="button" aria-label="Replay risk event" title="Loop the selected risk event">
+                <svg>
+                  <use href="#icon-reset"></use>
+                </svg>
+              </button>
+              <button class="bar-btn is-active" id="overlay-toggle" type="button" aria-pressed="true" aria-label="Toggle risk overlay" title="Toggle risk overlay (m)">
+                <svg>
+                  <use href="#icon-lane"></use>
+                </svg>
+              </button>
               <button class="bar-btn" id="preview-expand" type="button" aria-label="Fullscreen">
                 <svg>
                   <use href="#icon-expand"></use>

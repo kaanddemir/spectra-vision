@@ -33,6 +33,7 @@ from ..vision.motion import compute_velocity
 from ..vision.preprocessing import preprocess_frame
 from ..vision.traffic_light import frame_light_state
 from ..vision.road import (
+    LaneFrame,
     LaneKalman,
     RoadROI,
     apply_lane_kalman,
@@ -42,7 +43,7 @@ from ..vision.road import (
     filter_relevant_detections,
 )
 from .tracking import IoUTracker
-from .overlay import annotate_frame
+from .overlay import _lane_corridor, annotate_frame
 
 
 
@@ -389,7 +390,30 @@ def _evidence_metric(event: RiskEvent) -> dict[str, Any]:
     }
 
 
-def _object_metric(event: RiskEvent) -> dict[str, Any]:
+def _normalized_bbox(
+    event: RiskEvent, frame_width: int, frame_height: int
+) -> list[float] | None:
+    """Return the bbox as ``[x1, y1, x2, y2]`` normalized to ``[0, 1]``.
+
+    Coordinates are in the processed (resized) frame space; normalizing keeps
+    them resolution-independent so the frontend can scale them onto the
+    displayed video regardless of its render size.
+    """
+
+    if event.bbox is None or frame_width <= 0 or frame_height <= 0:
+        return None
+    x1, y1, x2, y2 = event.bbox
+    return [
+        round(float(x1) / frame_width, 4),
+        round(float(y1) / frame_height, 4),
+        round(float(x2) / frame_width, 4),
+        round(float(y2) / frame_height, 4),
+    ]
+
+
+def _object_metric(
+    event: RiskEvent, frame_width: int = 0, frame_height: int = 0
+) -> dict[str, Any]:
     lane_position = _display_lane_position(event.lane_position)
     confidence = _confidence_metric(event)
     return {
@@ -406,6 +430,33 @@ def _object_metric(event: RiskEvent) -> dict[str, Any]:
         "kinematics": _kinematics_metric(event),
         "riskFactors": _risk_factors_metric(event),
         "evidence": _evidence_metric(event),
+        "bbox": _normalized_bbox(event, frame_width, frame_height),
+    }
+
+
+def _lane_metric(
+    lane: LaneFrame | None, frame_width: int, frame_height: int
+) -> dict[str, Any]:
+    """Serialize the ego-lane corridor as a normalized polygon.
+
+    Reuses the same ``_lane_corridor`` geometry the rendered saved-event
+    overlays use, so the live canvas overlay matches the baked-in imagery.
+    """
+
+    if frame_width <= 0 or frame_height <= 0:
+        return {"detected": False, "confidence": 0.0, "corridor": []}
+    safe_lane = lane if isinstance(lane, LaneFrame) else None
+    corridor = _lane_corridor(frame_width, frame_height, safe_lane)
+    detected = bool(safe_lane is not None and safe_lane.detected)
+    confidence = float(np.clip(safe_lane.confidence if safe_lane is not None else 0.25, 0.0, 1.0))
+    norm = [
+        [round(float(x) / frame_width, 4), round(float(y) / frame_height, 4)]
+        for x, y in corridor
+    ]
+    return {
+        "detected": detected,
+        "confidence": round(confidence, 3),
+        "corridor": norm,
     }
 
 
@@ -415,6 +466,9 @@ def _event_payload_base(
     all_events: list[RiskEvent],
     primary_risk_score: float,
     traffic_light_state: str = "none",
+    lane: LaneFrame | None = None,
+    frame_width: int = 0,
+    frame_height: int = 0,
 ) -> dict[str, Any]:
     """Build the metadata-only event payload. RGB views are attached later.
 
@@ -442,7 +496,12 @@ def _event_payload_base(
         "collision_eta_sec": event.ttc_sec,
         "proximity_score": event.near_score,
         "approach_score": event.closing_speed,
-        "objects": [_object_metric(item) for item in all_events if item.object_id is not None],
+        "laneGeometry": _lane_metric(lane, frame_width, frame_height),
+        "objects": [
+            _object_metric(item, frame_width, frame_height)
+            for item in all_events
+            if item.object_id is not None
+        ],
     }
 
 
@@ -890,6 +949,8 @@ def analyze_spatial_video(
     pending_renders: dict[int, _DeferredRender] = {}
     frames: list[dict[str, Any]] = []
     preview_rows_buffer: list[dict[str, Any]] = []
+    frame_width = 0
+    frame_height = 0
     processing_start = time.perf_counter()
 
     for video_frame in loader.frames():
@@ -902,6 +963,7 @@ def analyze_spatial_video(
         all_events = analysis.all_events
         primary_risk_score = analysis.primary_risk_score
         lane = analysis.lane
+        frame_height, frame_width = analysis.frame_bgr.shape[:2]
 
         # Build the metadata-only payload first; heavy RGB views are deferred
         # so we can skip them entirely on frames that won't be saved or
@@ -911,6 +973,9 @@ def analyze_spatial_video(
             all_events=all_events,
             primary_risk_score=primary_risk_score,
             traffic_light_state=analysis.traffic_light_state,
+            lane=lane,
+            frame_width=frame_width,
+            frame_height=frame_height,
         )
         deferred = _DeferredRender(
             frame_bgr=analysis.frame_bgr,
@@ -941,7 +1006,11 @@ def analyze_spatial_video(
         live_ids = {id(item) for item in saved_events}
         pending_renders = {pid: ref for pid, ref in pending_renders.items() if pid in live_ids}
 
-        object_metrics = [_object_metric(ev) for ev in all_events if ev.object_id is not None]
+        object_metrics = [
+            _object_metric(ev, frame_width, frame_height)
+            for ev in all_events
+            if ev.object_id is not None
+        ]
         frame_row = {
             "frameIndex": primary_event.frame_index,
             "timestampSec": float(primary_event.timestamp_sec),
@@ -950,6 +1019,7 @@ def analyze_spatial_video(
             "primaryRiskScore": primary_risk_score,
             "primaryLane": primary_event.lane,
             "trafficLight": analysis.traffic_light_state,
+            "laneGeometry": _lane_metric(lane, frame_width, frame_height),
             "objects": object_metrics,
         }
         frames.append(frame_row)
@@ -1028,6 +1098,8 @@ def analyze_spatial_video(
         "fps": loader.fps,
         "frame_count": loader.frame_count,
         "processed_frames": analyzer.processed_frames,
+        "frame_width": frame_width,
+        "frame_height": frame_height,
         "frames": frames,
         "events": saved_events,
         "peak_event": peak_event,

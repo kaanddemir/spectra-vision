@@ -137,6 +137,42 @@ def test_video_risk_analysis_player_controls_are_present():
     assert ".side-bar-btn:disabled" in preview_css
 
 
+def test_live_risk_overlay_and_player_polish_present():
+    index = read_static("index.html")
+    controls = read_static("js/controls.js")
+    preview_css = read_static("css/preview.css")
+
+    # New DOM: canvas overlay layer + player-bar controls.
+    for element_id in (
+        "visual-overlay",
+        "frame-step-back",
+        "frame-step-forward",
+        "speed-btn",
+        "overlay-toggle",
+        "replay-event-btn",
+        "playback-mode-slow-risk",
+    ):
+        assert f'id="{element_id}"' in index
+
+    # The canvas overlay is driven from the per-frame bbox/lane metadata that
+    # the backend now serializes, synced to playback.
+    for contract in (
+        "function drawOverlay",
+        "function containRect",
+        "function resizeOverlayCanvas",
+        "function stepFrame",
+        "laneGeometry",
+        "obj.bbox",
+        "ResizeObserver",
+        '"slow-risk"',
+        "function toggleReplayLoop",
+        "requestAnimationFrame(overlayLoop)",
+    ):
+        assert contract in controls
+
+    assert ".preview-canvas" in preview_css
+
+
 def test_banner_metrics_have_no_duplicated_data():
     """Each datum appears exactly once: measurements, score contributors,
     multipliers, and advanced diagnostics never repeat the same value."""
