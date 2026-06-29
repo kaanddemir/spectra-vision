@@ -50,7 +50,6 @@
   flex: 0 0 auto;
 }
 .doc-icon-btn,
-.doc-output-toggle,
 .doc-back {
   display: flex;
   align-items: center;
@@ -70,13 +69,11 @@
   font-weight: 700;
   white-space: nowrap;
 }
-.doc-icon-btn svg,
-.doc-output-toggle svg {
+.doc-icon-btn svg {
   width: 16px;
   height: 16px;
 }
 .doc-icon-btn:hover,
-.doc-output-toggle:hover,
 .doc-back:hover {
   color: var(--text);
   border-color: var(--red-line);
@@ -84,13 +81,11 @@
   transform: translateY(-1px);
 }
 .doc-icon-btn:focus-visible,
-.doc-output-toggle:focus-visible,
 .doc-back:focus-visible {
   outline: 2px solid var(--red);
   outline-offset: 2px;
 }
-.doc-icon-btn[aria-expanded="true"],
-.doc-output-toggle[aria-pressed="true"] {
+.doc-icon-btn[aria-expanded="true"] {
   color: #fff;
   border-color: var(--red-line);
   background: var(--panel-2);
@@ -122,13 +117,6 @@
   color: #fff;
   background: var(--panel-2);
   outline: none;
-}
-.doc-output-toggle {
-  gap: 7px;
-  padding: 8px 12px;
-  font-size: 12.5px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 .doc-back {
   gap: 7px;
@@ -162,6 +150,34 @@
   line-height: 1.6;
 }
 .doc-section--map { margin-top: 30px; }
+.pipeline-group {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(14, 14, 18, 0.44);
+}
+.pipeline-group--hub {
+  border-color: var(--red-line);
+  background: rgba(255, 59, 59, 0.045);
+}
+.pipeline-group h3 {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.pipeline-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.pipeline-steps--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 
 /* Section lead + formula reused inside the popups. */
 .doc-section-lead {
@@ -267,64 +283,48 @@
   opacity: 1;
   transform: translate(-50%, 0);
 }
-.flow-node__io {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  align-self: center;
-  justify-content: center;
-  justify-self: center;
-  gap: 5px;
-  width: min(100%, 760px);
-  min-height: 58px;
-  margin: 0;
-}
-/* "OUTPUTS" caption: takes a full row so the chips wrap beneath it. */
-.flow-node__io-label {
-  flex-basis: 100%;
-  margin-bottom: 1px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-/* Standardized chips: every produced variable is neutral mono; only the final
-   risk outputs (risk.score, state, SAFE/CAUTION/DANGER) get the red accent. */
-.flow-node__io .flow-badge {
-  margin: 0;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  letter-spacing: 0;
-  color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-soft);
-}
-.flow-node__io .flow-badge--out {
-  color: var(--red-hi);
-  background: rgba(255, 59, 59, 0.13);
-  border-color: var(--red-line);
-}
-body.doc-hide-outputs .flow-node__io,
-.doc-modal.doc-hide-outputs .flow-node__io,
-.doc-section--map .flow-node__io,
-.doc-section--map .flow-connector__label {
-  display: none !important;
-}
-.doc-modal.doc-hide-outputs .flow-node,
-.doc-section--map .flow-node {
+.doc-section--map .flow-node,
+.doc-modal .flow-node {
   grid-template-rows: auto auto;
-  gap: 14px;
-  min-height: 96px;
-  padding: 18px;
+  gap: 8px;
+  min-height: 82px;
+  padding: 14px 16px;
 }
-.doc-modal.doc-hide-outputs .flow-node:not(.flow-node--link),
-.doc-section--map .flow-node:not(.flow-node--link) {
-  min-height: 76px;
+.doc-section--map .flow-node:not(.flow-node--link),
+.doc-modal .flow-node:not(.flow-node--link) {
+  min-height: 72px;
 }
-.doc-modal.doc-hide-outputs .flow-connector--labeled,
-.doc-section--map .flow-connector--labeled {
-  height: 22px;
-  margin: 2px 0;
+.doc-section--map .flow-node[data-module] {
+  --module-rgb: 150, 160, 180;
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(var(--module-rgb), 0.34);
+  background:
+    linear-gradient(180deg, rgba(var(--module-rgb), 0.075), rgba(var(--module-rgb), 0.025)),
+    #111116;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--module-rgb), 0.18),
+    0 12px 28px rgba(0, 0, 0, 0.28);
+}
+.doc-section--map .flow-node[data-module="input"] { --module-rgb: 130, 154, 190; }
+.doc-section--map .flow-node[data-module="lane"] { --module-rgb: 64, 210, 148; }
+.doc-section--map .flow-node[data-module="motion-depth"] { --module-rgb: 82, 178, 255; }
+.doc-section--map .flow-node[data-module="detection"] { --module-rgb: 255, 154, 74; }
+.doc-section--map .flow-node[data-module="tracking"] { --module-rgb: 96, 132, 255; }
+.doc-section--map .flow-node[data-module="risk"] { --module-rgb: 255, 88, 128; }
+.doc-section--map .flow-node[data-module="decision"] { --module-rgb: 255, 190, 72; }
+.doc-section--map .flow-node[data-module="performance"] { --module-rgb: 174, 118, 255; }
+.doc-section--map .flow-node--hub[data-module] {
+  border-color: rgba(var(--module-rgb), 0.42);
+  background:
+    linear-gradient(180deg, rgba(var(--module-rgb), 0.1), rgba(var(--module-rgb), 0.035)),
+    #151013;
+}
+.doc-section--map .flow-node--advisory[data-module] {
+  border-color: rgba(var(--module-rgb), 0.28);
+  background:
+    linear-gradient(180deg, rgba(var(--module-rgb), 0.055), rgba(var(--module-rgb), 0.018)),
+    #101014;
 }
 
 /* Clickable map stage (a <button>) that opens its detail popup. */
@@ -337,6 +337,13 @@ body.doc-hide-outputs .flow-node__io,
   border-color: var(--red-line);
   transform: translateY(-2px);
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4);
+}
+.doc-section--map .flow-node--link[data-module]:hover {
+  border-color: rgba(var(--module-rgb), 0.68);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--module-rgb), 0.24),
+    0 10px 30px rgba(var(--module-rgb), 0.12),
+    0 12px 32px rgba(0, 0, 0, 0.42);
 }
 .flow-node--link:focus-visible {
   outline: 2px solid var(--red);
@@ -354,29 +361,6 @@ body.doc-hide-outputs .flow-node__io,
   color: var(--muted);
 }
 .flow-node--link:hover .flow-jump { color: var(--red-hi); }
-
-/* Force the perception stage into a balanced 2×2. */
-.flow-stage-grid--2x2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-/* ─── Labeled connectors (what data flows along the arrow) ───── */
-.flow-connector--labeled { height: 40px; }
-.flow-connector__label {
-  position: absolute;
-  left: calc(50% + 16px);
-  top: 50%;
-  transform: translateY(-50%);
-  white-space: nowrap;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-soft);
-  color: var(--muted);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 10px;
-  font-weight: 700;
-}
 
 /* ─── Full-screen detail popups ──────────────────────────────── */
 body.doc-modal-open { overflow: hidden; }
@@ -418,12 +402,6 @@ body.doc-modal-open { overflow: hidden; }
   background: rgba(9, 9, 13, 0.92);
   border-bottom: 1px solid var(--border-soft);
 }
-.doc-modal__actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-}
 .doc-modal__head h2 {
   margin: 0;
   font-size: 18px;
@@ -454,29 +432,29 @@ body.doc-modal-open { overflow: hidden; }
 .doc-modal__body > .flow-board,
 .doc-modal__body > .doc-formula,
 .doc-modal__body > .doc-section-lead,
+.doc-modal__body > .pipeline-group,
 .doc-modal__body > .frame-plan-table-wrap,
 .doc-modal__body > .frame-plan-note {
   margin-left: auto;
   margin-right: auto;
-  max-width: 1040px;
+  max-width: 1120px;
+}
+.doc-modal__body > .flow-connector {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 760px) {
-  .flow-stage-grid--2x2 { grid-template-columns: minmax(0, 1fr); }
+  .pipeline-steps,
+  .pipeline-steps--two {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 @media (max-width: 640px) {
   .doc-topbar-inner {
     padding: 10px 16px;
     gap: 8px;
-  }
-  .doc-output-toggle span {
-    display: none;
-  }
-  .doc-output-toggle {
-    width: 36px;
-    height: 36px;
-    padding: 0;
   }
   .doc-back {
     padding: 8px 10px;
@@ -488,12 +466,4 @@ body.doc-modal-open { overflow: hidden; }
   .doc { padding: 0 16px 72px; }
   .doc-modal__body { padding: 20px 16px; }
   .doc-modal__head { padding: 14px 16px; }
-  .flow-connector--labeled { height: auto; }
-  .flow-connector__label {
-    position: static;
-    transform: none;
-    display: block;
-    width: max-content;
-    margin: 6px auto 0;
-  }
 }

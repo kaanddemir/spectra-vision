@@ -104,69 +104,149 @@ def test_how_it_works_is_a_standalone_routed_page():
     # The landing carries the pipeline map (only) plus its own popup driver.
     for flow_term in (
         "flow-board--vertical",
-        "flow-stage-grid--2x2",
-        "flow-connector--labeled",
-        "flow-connector__label",
+        "pipeline-group",
+        "pipeline-steps",
         "flow-node--link",
-        "flow-node__io",
-        "flow-badge",
         "Frame Ingest",
-        "Depth + Optical Flow",
+        "Preprocess",
+        "Lane Pipeline",
+        "UFLDv2 Lane Detection",
+        "Lane Kalman Smoothing / Coasting",
+        "Lane Confidence Smoothing",
+        "Motion + Depth",
+        "Optical Flow",
+        "Quick Motion Risk",
+        "Depth Estimation",
+        "Adaptive Depth Refresh",
+        "Detection Pipeline",
+        "YOLO Detection",
+        "Traffic Light Split",
+        "Traffic Light Classification",
+        "Lane-Relevance Filter",
+        "Tracking",
+        "IoU Tracker Update",
+        "Track Propagation",
+        "Per-Object Risk Evaluation",
+        "Depth / Kalman Distance",
+        "BBox Expansion",
+        "Flow TTC",
+        "Lane Crossing Risk",
+        "Brake Light Cue",
+        "ETA Pressure",
+        "Proximity",
+        "Approach",
+        "Proximity Score",
+        "Approach Score",
+        "Confidence Gate",
+        "Lane Relevance",
+        "Object Detection",
+        "Road-Class Filter",
+        "Lane Line Detection",
+        "Lane Corridor Build",
+        "Lane Position",
+        "Corridor Overlap",
+        "Cut-In Motion",
         "TTC Fusion",
-        "Risk Assembly",
-        "Traffic Light",
+        "Confidence Smoothing",
+        "Risk Score",
+        "Decision + Delivery",
+        "Primary Object Selection",
+        "State From Score",
+        "Detection Confidence Floor",
+        "State Stabilization",
+        "Frame Row",
+        "Saved Event Pipeline",
+        "Render Overlay Images",
+        "Peak Event",
+        "Performance Summary",
+        "Per-Frame Schedule",
+        "Saved Events + Diagnostics",
     ):
         assert flow_term in page
     assert 'src="/static/js/how-it-works.js"' in page
     assert 'href="/"' in page  # back-to-app link
 
-    # Each topic is available from the compact topic menu + a full-screen popup;
-    # both share the id.
-    for topic in ("detection", "depth-motion", "lane", "risk-score", "per-frame"):
+    # Each page in the menu mirrors a top-level pipeline group and has a
+    # matching full-screen popup.
+    for topic in (
+        "input",
+        "lane-pipeline",
+        "motion-depth",
+        "detection-pipeline",
+        "tracking",
+        "per-object-risk",
+        "decision-delivery",
+        "performance-summary",
+        "per-frame",
+    ):
         assert f'data-doc-open="{topic}"' in page
         assert f'id="doc-modal-{topic}"' in page
     assert 'data-doc-menu-toggle' in page
     assert ">Pages<" in page
     assert 'id="doc-topic-menu-list"' in page
     assert 'data-doc-output-toggle' not in page
+    for module in (
+        "input",
+        "lane",
+        "motion-depth",
+        "detection",
+        "tracking",
+        "risk",
+        "decision",
+        "performance",
+    ):
+        assert f'data-module="{module}"' in page
 
     # Popups open/close via the standalone driver (no inline-section anchors).
     assert "data-doc-close" in page
     assert "openModal" in page_js and "closeModal" in page_js
-    assert "enhanceModalOutputToggles" in page_js
-    assert "toggleModalOutputs" in page_js and "doc-hide-outputs" in page_js
-    assert "data-doc-modal-output-toggle" in page_js
     assert "enhanceInfoTooltips" in page_js and "flow-info-icon" in page_js
 
-    # Standardized chips are retained for detail pages, but the main pipeline
-    # map hides them so its cards stay conceptual.
-    assert "flow-node__io-label" in page and ">Outputs<" in page
-    assert "flow-badge--out" in page
+    # Output chip lists were removed from the landing and detail pages; this is
+    # now a heading-based process map, not a variable/schema view.
+    for removed_output_contract in (
+        "flow-node__io",
+        "flow-node__io-label",
+        "flow-badge--out",
+        ">Outputs<",
+        "data-doc-modal-output-toggle",
+        "doc-hide-outputs",
+    ):
+        assert removed_output_contract not in page
+        assert removed_output_contract not in page_js
 
-    # Page-specific styling for the topbar nav, 2×2 grid, popups and chip standard.
+    # Page-specific styling for the topbar nav, grouped pipeline map, popups,
+    # and title info tooltips.
     for style_contract in (
         ".doc-topbar",
         ".doc-icon-btn",
         ".doc-menu-btn",
         ".doc-menu-btn.is-active",
-        ".doc-output-toggle",
-        ".doc-modal.doc-hide-outputs .flow-node__io",
-        ".doc-section--map .flow-node__io",
-        ".doc-modal.doc-hide-outputs .flow-node",
+        ".pipeline-group",
+        ".pipeline-steps",
+        ".pipeline-group--hub",
+        ".doc-modal__body > .pipeline-group",
         ".doc-section--map .flow-node",
-        ".doc-modal__actions",
-        "min-height: 96px",
+        ".doc-section--map .flow-node[data-module]",
+        '.doc-section--map .flow-node[data-module="input"]',
+        '.doc-section--map .flow-node[data-module="lane"]',
+        '.doc-section--map .flow-node[data-module="motion-depth"]',
+        '.doc-section--map .flow-node[data-module="detection"]',
+        '.doc-section--map .flow-node[data-module="tracking"]',
+        '.doc-section--map .flow-node[data-module="risk"]',
+        '.doc-section--map .flow-node[data-module="decision"]',
+        '.doc-section--map .flow-node[data-module="performance"]',
+        ".doc-section--map .flow-node--link[data-module]:hover",
+        "--module-rgb",
+        ".doc-modal .flow-node",
+        "min-height: 82px",
         ".flow-info-icon",
         ".flow-info-icon::after",
         "grid-template-rows: auto minmax(58px, auto) auto",
         "justify-items: center",
         "min-height: 148px",
-        ".flow-stage-grid--2x2",
         ".doc-modal",
         ".flow-node--link",
-        ".flow-connector__label",
-        ".flow-node__io-label",
-        ".flow-node__io .flow-badge--out",
     ):
         assert style_contract in page_css
 
