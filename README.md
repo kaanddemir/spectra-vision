@@ -99,9 +99,9 @@ spectra/
    - Provides frame index and timestamp metadata
 
 3. `spectra/vision/preprocessing.py`
-   - Resizes frames
+   - Resizes frames preserving aspect ratio
    - Converts BGR frames to RGB and grayscale
-   - Keeps compatibility aliases for enhanced grayscale and denoised RGB without running heavy denoise/CLAHE
+   - Skips heavy denoise/CLAHE (Depth Anything V2 and DIS flow are robust to raw frames; denoise was the biggest CPU sink)
 
 4. `spectra/vision/motion.py`
    - Uses OpenCV DIS dense optical flow with ego-motion compensation
@@ -270,11 +270,11 @@ Depth Anything V2 Metric VKITTI produces estimated metric depth in meters (`dept
 
 Metric depth usage:
 
-- Object distance is read from the lower-center portion of each bbox using a 25th-percentile distance sample.
-- Depth TTC uses metric closing speed: `(previous_distance_m - current_distance_m) / dt`.
-- The UI exposes estimated object distance in meters while preserving normalized proximity bars.
+- Object distance is read from the lower-center portion of each bbox using a 25th-percentile distance sample. This raw sample is the *measurement* fed to a per-track constant-velocity Kalman filter.
+- Depth TTC is the physical backbone: the Kalman filters distance into a smooth `(distance, range-rate)` state and computes `TTC = distance / closing_speed` every frame (coasting between depth refreshes). Innovation gating rejects single-step metric glitches, so closing speed stays physical.
+- The UI exposes the filtered object distance in meters while preserving normalized proximity bars.
 
-Metric monocular depth is still an estimate, not a calibrated sensor measurement, so expansion and optical-flow TTC remain part of the final fusion.
+Because `TTC = d / (-ṡ)`, a constant scale bias in the uncalibrated monocular depth cancels in the ratio. The depth estimate is still not a calibrated sensor, so expansion and optical-flow TTC remain part of the final fusion as corroborating cues.
 
 Depth is not recomputed every frame. In `spectra/analysis/video.py`, depth refresh happens when:
 
@@ -307,7 +307,7 @@ Each detection is stored as `Detection`:
 
 Class contribution is weighted through `CLASS_RISK_WEIGHT`. Larger and more stable traffic participants receive stronger trust in expansion signals.
 
-Traffic lights are detected but are not collision participants: they are split out before the corridor filter and tracker (so they never get track IDs or TTC) and feed only the advisory traffic-light colour cue in `spectra/vision/traffic_light.py` (`red`/`yellow`/`green`/`unknown`, surfaced per timeline row and in the overlay).
+Traffic lights are detected but are not collision participants: they are split out before the corridor filter and tracker (so they never get track IDs or TTC) and feed only the advisory traffic-light colour cue in `spectra/vision/traffic_light.py`. `frame_light_state()` returns a frame-level `(state, confidence)` pair (`red`/`yellow`/`green`/`unknown`), surfaced per timeline row as `trafficLight: {state, confidence}` and as a coloured dot in the overlay. It stays frame-level and never gates collision logic.
 
 ### 10. Object Tracking
 
@@ -358,28 +358,28 @@ Logic:
 
 This provides additional evidence when bounding-box size changes are weak.
 
-#### 11.3 Depth Delta TTC
+#### 11.3 Longitudinal Kinematic TTC (the physical backbone)
 
-Code: `ttc_from_depth_delta()`
+Code: `ttc_from_depth_delta()` — a per-track constant-velocity Kalman.
 
 Logic:
 
-- Compute estimated metric distance in meters from the object's lower-center bbox crop.
-- Compare it with the previous metric distance for the same track.
-- If distance is decreasing faster than 0.30 m/s, the object is closing.
-- Estimate TTC as `current_distance_m / closing_mps`.
+- The metric distance sampled from the bbox lower-center is the measurement.
+- A 2-state Kalman filters it into a smooth `(distance, range-rate)` state; closing speed is `-range-rate`.
+- `TTC = distance / closing_speed`, read from the filtered state **every frame** — the filter predicts (coasts) between depth refreshes, so the estimate is continuous rather than intermittent.
+- Innovation gating rejects a depth sample whose error exceeds ~3σ of the predicted distance (the filter coasts instead), so a single metric glitch cannot whip the velocity to a non-physical value.
 
-This component updates history only when depth is fresh. If an old depth map is reused, history is not mutated, preventing false deltas.
+The filter is committed only on a fresh-depth frame with a valid measurement; stale-depth frames predict-and-return without mutating state.
 
 ### 11.4 Approach Score
 
-Approach is the normalized "getting closer" factor shown in the UI as a percentage. It is led by metric closing speed:
+Approach is the normalized "getting closer" factor shown in the UI as a percentage (`_approach_score`). It is led by metric closing speed:
 
-- 50% estimated closing speed in m/s from metric depth
+- 50% metric closing speed (depth Kalman range-rate)
 - 30% bounding-box expansion
-- 20% radial optical flow
+- 20% optical-flow magnitude
 
-Metric closing speed below 0.30 m/s is treated as no approach. Around 12 m/s and above is treated as a full metric approach signal.
+This signal is multiplied by class risk weight (people and bicycles are slightly more sensitive) and becomes the `approach` term in the Risk Score.
 
 ### 12. TTC Fusion
 
@@ -418,48 +418,34 @@ For example, a vehicle in the right lane may stay low risk even if it is approac
 
 Collision-cone distance reliability: because `lane_position` is normalized by the lane width at the object's row, far objects (near the horizon) yield jittery positions. `lane_crossing_risk()` damps the velocity-extrapolated crossing for far objects while keeping the static corridor relevance as a floor, so phantom far cut-ins fade and genuine near cut-ins are untouched. (Curved-path / ego-yaw handling is not modeled; lane geometry is straight lines.)
 
-### 14. Closing Speed and Confidence
+### 14. Confidence
 
-For every object, Spectra computes a normalized closing-speed-like signal:
+Fused confidence combines detection confidence and lane-geometry confidence; it drives the Risk Score's confidence gate (section 15). The per-cue reliabilities (detection, lane, depth, flow, expansion) and the TTC-cue agreement (`ttc_agreement`) are also surfaced per object. Very low detection confidence forces the status to `SAFE` (a trust guard).
 
-- 50% bounding-box expansion
-- 30% crossing risk
-- 20% optical-flow magnitude
+### 15. Risk Score and State Classification
 
-This signal is multiplied by class risk weight. People and bicycles are slightly more sensitive.
+There are two distinct outputs, and **the state is derived from the score** (no circular dependency, no double-counted lane signal).
 
-Fused confidence combines:
+**Risk Score (how dangerous)** — `score_raw()` / `score_event()`. A single continuous `[0, 1]` value where lane relevance is a *multiplicative gate*, not an additive term, so an off-path object scores ~0 regardless of how close or fast it is:
 
-- Detection confidence
-- Crossing risk
-- Expansion strength
-- Lane geometry confidence
+```
+signal     = 0.40·eta_pressure(ttc) + 0.30·proximity + 0.25·approach + 0.05·brake
+gate       = 0.65 + 0.35·confidence
+relevance  = crossing_risk                # probability of being in the ego lane at impact
+Risk Score = gate · relevance · signal
+```
 
-Very low detection confidence can force the state to `SAFE`.
+`eta_pressure(ttc) = clamp((3 − ttc) / 3, 0, 1)`.
 
-### 15. Risk State Classification
+**Status (which band)** — `state_from_score()` bands the Risk Score:
 
-Code: `classify_state()`
+- Risk Score ≥ 0.60: `DANGER`
+- Risk Score ≥ 0.25: `CAUTION`
+- otherwise: `SAFE`
+- Imminent escalation: a confirmed TTC < 1.0s on an object already in at least the CAUTION band snaps to `DANGER`.
+- Detection confidence < 0.20 forces `SAFE`.
 
-There are three states:
-
-- `SAFE`
-- `CAUTION`
-- `DANGER`
-
-Main thresholds:
-
-- TTC < 1.0s and the object is in or entering the ego lane: `DANGER`
-- TTC < 3.0s and the object is lane-relevant: `CAUTION`
-- TTC < 3.0s and nearness is high: `CAUTION`
-- Strong expansion with meaningful crossing and nearness: `DANGER`
-- Moderate expansion with lane relevance: `CAUTION`
-- Very high nearness with meaningful crossing: `CAUTION`
-- Otherwise: `SAFE`
-
-A brake-light cue (`spectra/vision/brake_lights.py`) escalates an in-path lead vehicle by one band when a confident brake-lamp pair is detected (`SAFE`→`CAUTION`, `CAUTION`→`DANGER` only with a closing TTC). It is corroborating only.
-
-This raw decision is later stabilized.
+The brake-light cue (`spectra/vision/brake_lights.py`) feeds the Risk Score directly (the 5% `brake` term above) rather than overriding the state band; it is corroborating only. This raw decision is later stabilized (section 16).
 
 ### 16. State Stabilization
 
@@ -490,15 +476,19 @@ If there are no active tracks, Spectra emits a synthetic `SAFE` event. This keep
 
 ### 18. Event Payload and Timeline
 
-For each frame, `spectra/analysis/video.py` produces:
+For each frame, `spectra/analysis/video.py` produces frame rows, saved events (deduplicated + top-N trimmed), the peak event, per-object metrics, and shared image payloads. Saved events are deduplicated within a 1-second window; a stronger event replaces the previous one in the same window.
 
-- `frames`: frame-level risk history for the timeline
-- `events`: saved high-risk moments after deduplication and top-N trimming
-- `peak_event`: highest-risk saved event in the analysis
-- `objects`: per-frame object metrics, including TTC, estimated distance, metric closing speed, lane, risk score, proximity, approach, crossing, and confidence
-- `images`: shared image payloads referenced by saved events
+The client-facing JSON contract is **schemaVersion 5** (`_serialize_result` in `spectra/app.py`), an object-centric nested shape. Each frame/event row carries `frameIndex`, `timestampSec`, `state`, a `primary` pointer (`{trackId, score, lane}`), a frame-level `trafficLight` (`{state, confidence}`), `laneGeometry`, and `objects[]`. Each object groups its metrics:
 
-Saved events are deduplicated within a 1-second window. If a stronger event appears in the same window, it replaces the previous saved event.
+- `id` / `class` / `label` / `state`, `tracking.trackId`
+- `risk`: `{score, factors{etaPressure, proximity, approach, crossing, brake}}`
+- `eta`: `{collisionSec, display, agreement, sources{depth, flow, expansion → {etaSec, confidence}}}`
+- `motion`: `{distanceM, closingSpeedMps, expansionScore, radialScore}`
+- `lane`: `{bucket, position, crossing}`
+- `confidence`: `{overall, detection, lane, depth, flow, expansion}`
+- `bbox`: normalized `[x1, y1, x2, y2]`
+
+The envelope also carries `metadata`, `images`, and `performance` (`{summary, logs}`). The frontend flattens this nested shape back to flat field names at a single seam (`flattenObject` / `flattenFrame` in `controls.js`); it does not compute risk.
 
 ### 19. Visual Overlay
 
@@ -507,14 +497,11 @@ Overlay rendering is implemented in `spectra/analysis/overlay.py`.
 It draws:
 
 - Ego lane corridor
-- Object bounding boxes
-- Risk-state colors
-- State and fused TTC
-- Object class
-- Lane position
-- Compact proximity, approach, crossing, and confidence bars
+- Object bounding boxes coloured by stabilized risk state, with a per-box `#id TYPE TTC` label (plus a `BRAKE` tag when the brake-light cue fires)
+- A coloured traffic-light dot + label (advisory) when a light state is known
+- A compact top-left card (CAUTION/DANGER only): a coloured `STATE` pill, the fused `TTC`, and an `object · lane` subtitle
 
-This overlay is used for live preview and saved event imagery.
+The numeric risk factors (proximity, approach, crossing, confidence) live in the right-side dashboard panel, not as in-frame bars. This overlay is used for live preview and saved event imagery.
 
 ### 20. Frontend Role
 

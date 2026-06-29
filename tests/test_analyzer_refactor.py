@@ -1,5 +1,5 @@
 """Faz 1 regression: the SpatialFrameAnalyzer extraction preserves the
-analyze_spatial_video orchestration contract (v2 result shape, per-second
+analyze_spatial_video orchestration contract (v5 result shape, per-second
 event dedup, deferred RGB render) without needing the real vision models."""
 
 from types import SimpleNamespace
@@ -106,14 +106,16 @@ def test_result_shape_and_processed_count(monkeypatch):
     assert result["frame_count"] == 2
     assert result["processed_frames"] == 2
     assert len(result["frames"]) == 2
-    # Frame rows carry the v2 field names.
+    # Frame rows carry the v5 field names.
     assert set(result["frames"][0]) >= {
-        "frameIndex", "timestampSec", "stabilizedRiskState", "primaryObjectId",
-        "primaryRiskScore", "primaryLane", "objects",
+        "frameIndex", "timestampSec", "state", "primary", "trafficLight",
+        "laneGeometry", "objects",
     }
+    assert set(result["frames"][0]["primary"]) == {"trackId", "score", "lane"}
+    assert set(result["frames"][0]["trafficLight"]) == {"state", "confidence"}
 
 
-def test_object_metric_emits_v3_collision_eta_contract():
+def test_object_metric_emits_v5_eta_contract():
     event = RiskEvent(
         frame_index=1,
         timestamp_sec=0.1,
@@ -143,34 +145,32 @@ def test_object_metric_emits_v3_collision_eta_contract():
 
     obj = video._object_metric(event)
 
-    assert obj["collisionEta"] == {
-        "display": "0.5s",
-        "sec": 0.5,
-    }
-    assert obj["kinematics"]["distanceM"] == 4.0
-    assert obj["kinematics"]["closingMps"] == 8.0
-    for removed_kinematic in ("rangeStatus", "distanceDisplay", "closingDisplay"):
-        assert removed_kinematic not in obj["kinematics"]
-    assert obj["overallConfidence"] == 0.82
+    assert obj["id"] == 2  # display_id
+    assert obj["label"] == "Car"
+    assert obj["class"] == "car"
+    assert obj["state"] == "DANGER"
+    assert obj["tracking"]["trackId"] == 9  # object_id
+    assert obj["eta"]["collisionSec"] == 0.5
+    assert obj["eta"]["display"] == "0.5s"
+    assert obj["eta"]["sources"]["depth"] == {"etaSec": 0.5, "confidence": 0.8}
+    assert obj["motion"]["distanceM"] == 4.0
+    assert obj["motion"]["closingSpeedMps"] == 8.0
+    assert obj["motion"]["expansionScore"] == 0.42
+    assert obj["motion"]["radialScore"] == 0.31
+    assert obj["confidence"]["overall"] == 0.82
     assert obj["confidence"] == {
+        "overall": 0.82,
         "detection": 0.76,
-        "depth": 0.8,
         "lane": 0.0,
+        "depth": 0.8,
         "flow": 0.0,
+        "expansion": 0.0,
     }
-    assert obj["riskFactors"]["approach"] == 0.83
-    assert all(0.0 <= value <= 1.0 for value in obj["riskFactors"].values())
-    # evidence carries only the unique flow diagnostics; the rest lives once at the
-    # canonical top level (objectType, confidence, lane, lanePosition, kinematics).
-    assert obj["evidence"] == {
-        "flow": {"expansionScore": 0.42, "radialScore": 0.31},
-    }
-    assert "detector" not in obj["evidence"]
-    assert "depth" not in obj["evidence"]
-    assert "lane" not in obj["evidence"]
-    assert obj["lanePosition"] == -1.5
-    assert "riskReason" not in obj
-    for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
+    assert obj["risk"]["factors"]["approach"] == 0.83
+    assert all(0.0 <= value <= 1.0 for value in obj["risk"]["factors"].values())
+    assert obj["lane"]["bucket"] == "left"
+    assert obj["lane"]["position"] == -1.5  # lane_position clamped
+    for removed in ("collisionEta", "kinematics", "evidence", "overallConfidence", "riskFactors", "lanePosition", "objectId", "displayId", "objectType", "rawRiskState"):
         assert removed not in obj
 
 
@@ -197,10 +197,9 @@ def test_object_metric_uses_status_instead_of_null_user_eta():
         ttc_components=(TtcComponent("depth", None, 0.0),),
     )
 
-    eta = video._object_metric(event)["collisionEta"]
-    assert "status" not in eta
+    eta = video._object_metric(event)["eta"]
     assert eta["display"] == "—"
-    assert "sec" not in eta
+    assert eta["collisionSec"] is None
 
 
 def test_object_metric_clamps_risk_factors_to_unit_interval():
@@ -224,13 +223,14 @@ def test_object_metric_clamps_risk_factors_to_unit_interval():
     )
 
     obj = video._object_metric(event)
-    assert obj["overallConfidence"] == 1.0
-    assert obj["riskFactors"] == {
-        "proximity": 1.0,
-        "approach": 1.0,
-        "crossing": 0.0,
-        "brake": 1.0,
-    }
+    assert obj["confidence"]["overall"] == 1.0
+    factors = obj["risk"]["factors"]
+    assert factors["proximity"] == 1.0
+    assert factors["approach"] == 1.0
+    assert factors["crossing"] == 0.0
+    assert factors["brake"] == 1.0
+    assert "etaPressure" in factors
+    assert all(0.0 <= value <= 1.0 for value in factors.values())
 
 
 def test_per_second_dedup_keeps_higher_score(monkeypatch):

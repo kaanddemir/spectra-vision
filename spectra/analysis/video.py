@@ -22,6 +22,7 @@ from .risk import (
     TtcImminenceSmoother,
     build_object_events,
     compute_quick_risk,
+    eta_pressure,
     score_event,
     stabilized_event_state,
 )
@@ -306,15 +307,23 @@ def _display_lane_position(lane_position: float) -> float:
     return round(float(np.clip(lane_position, -1.5, 1.5)), 3)
 
 
-def _depth_component(event: RiskEvent) -> Any | None:
+def _component(event: RiskEvent, name: str) -> Any | None:
     for component in event.ttc_components:
-        if component.name == "depth":
+        if component.name == name:
             return component
     return None
 
 
-def _collision_eta_metric(event: RiskEvent) -> dict[str, Any]:
-    depth_component = _depth_component(event)
+def _eta_metric(event: RiskEvent) -> dict[str, Any]:
+    """Collision ETA: the fused physical reading plus the per-cue breakdown.
+
+    ``collisionSec`` + ``display`` reproduce the previous gated display logic
+    (depth + Kalman only). ``sources`` exposes each TTC cue's own estimate and
+    confidence — data that already lives on ``event.ttc_components`` but was
+    never serialized before.
+    """
+
+    depth_component = _component(event, "depth")
     distance_m = event.distance_m
     closing_mps = event.closing_mps
     display = "—"
@@ -335,60 +344,84 @@ def _collision_eta_metric(event: RiskEvent) -> dict[str, Any]:
             sec = event.ttc_sec if event.ttc_sec is not None else raw_eta
             display = f"{float(sec):.1f}s"
 
+    sources: dict[str, Any] = {}
+    for name in ("depth", "flow", "expansion"):
+        component = _component(event, name)
+        if component is None:
+            continue
+        value = getattr(component, "value", None)
+        sources[name] = {
+            "etaSec": None if value is None else round(float(value), 2),
+            "confidence": _unit_score(getattr(component, "confidence", 0.0)),
+        }
+
     eta: dict[str, Any] = {
+        "collisionSec": None if sec is None else round(float(sec), 2),
         "display": display,
+        "agreement": _unit_score(event.ttc_agreement),
+        "sources": sources,
     }
-    if sec is not None:
-        eta["sec"] = round(float(sec), 2)
     return eta
 
 
-def _kinematics_metric(event: RiskEvent) -> dict[str, Any]:
-    kinematics: dict[str, Any] = {}
+def _motion_metric(event: RiskEvent) -> dict[str, Any]:
+    """Physical kinematics plus the raw image-space motion cues.
+
+    Folds in the old ``evidence.flow`` diagnostics (bbox expansion + radial
+    flow) so all per-object motion lives under one key.
+    """
+
+    motion: dict[str, Any] = {
+        "expansionScore": round(float(np.clip(event.expansion_rate, 0.0, 1.0)), 3),
+        "radialScore": round(float(np.clip(event.velocity_magnitude, 0.0, 1.0)), 3),
+    }
     if event.distance_m is not None:
-        kinematics["distanceM"] = round(float(event.distance_m), 2)
+        motion["distanceM"] = round(float(event.distance_m), 2)
     if event.closing_mps is not None:
-        kinematics["closingMps"] = round(float(event.closing_mps), 2)
-    return kinematics
+        motion["closingSpeedMps"] = round(float(event.closing_mps), 2)
+    return motion
 
 
 def _unit_score(value: float | int | None) -> float:
     return round(float(np.clip(0.0 if value is None else float(value), 0.0, 1.0)), 3)
 
 
-def _risk_factors_metric(event: RiskEvent) -> dict[str, float]:
+def _risk_metric(event: RiskEvent) -> dict[str, Any]:
     return {
-        "proximity": _unit_score(event.near_score),
-        "approach": _unit_score(event.closing_speed),
+        "score": _risk_score(event),
+        "factors": {
+            "etaPressure": _unit_score(eta_pressure(event.ttc_sec)),
+            "proximity": _unit_score(event.near_score),
+            "approach": _unit_score(event.closing_speed),
+            "crossing": _unit_score(event.crossing_risk),
+            "brake": _unit_score(event.brake_score),
+        },
+    }
+
+
+def _lane_obj_metric(event: RiskEvent) -> dict[str, Any]:
+    return {
+        "bucket": event.lane,
+        "position": _display_lane_position(event.lane_position),
         "crossing": _unit_score(event.crossing_risk),
-        "brake": _unit_score(event.brake_score),
     }
 
 
 def _confidence_metric(event: RiskEvent) -> dict[str, float]:
+    expansion_component = _component(event, "expansion")
     return {
+        "overall": _unit_score(event.confidence),
         "detection": _unit_score(event.detection_confidence),
-        "depth": _unit_score(event.depth_confidence),
         "lane": _unit_score(event.lane_confidence),
+        "depth": _unit_score(event.depth_confidence),
         "flow": _unit_score(event.flow_confidence),
+        "expansion": _unit_score(getattr(expansion_component, "confidence", 0.0)),
     }
 
 
-def _evidence_metric(event: RiskEvent) -> dict[str, Any]:
-    """Diagnostic signals that are NOT already exposed at the top level.
-
-    Everything else the old ``evidence`` block carried (detector class/confidence,
-    depth distance/closing/confidence, lane bucket/position, crossing) duplicated
-    canonical fields (``objectType``, ``kinematics``, ``confidence``, ``lane``,
-    ``lanePosition``, ``riskFactors.crossing``); the UI now reads those directly,
-    so only the genuinely-unique flow signals remain here.
-    """
-    return {
-        "flow": {
-            "expansionScore": round(float(np.clip(event.expansion_rate, 0.0, 1.0)), 3),
-            "radialScore": round(float(np.clip(event.velocity_magnitude, 0.0, 1.0)), 3),
-        },
-    }
+def _traffic_light_metric(state: tuple[str, float]) -> dict[str, Any]:
+    name, confidence = state
+    return {"state": name, "confidence": round(float(confidence), 3)}
 
 
 def _normalized_bbox(
@@ -412,26 +445,26 @@ def _normalized_bbox(
     ]
 
 
+def _object_label(object_type: str | None) -> str | None:
+    if not object_type:
+        return None
+    return object_type.replace("_", " ").title()
+
+
 def _object_metric(
     event: RiskEvent, frame_width: int = 0, frame_height: int = 0
 ) -> dict[str, Any]:
-    lane_position = _display_lane_position(event.lane_position)
-    confidence = _confidence_metric(event)
     return {
-        "objectId": event.object_id,
-        "displayId": event.display_id,
-        "objectType": event.object_type,
-        "rawRiskState": event.state,
-        "riskScore": _risk_score(event),
-        "lane": event.lane,
-        "lanePosition": lane_position,
-        "overallConfidence": _unit_score(event.confidence),
-        "confidence": confidence,
-        "collisionEta": _collision_eta_metric(event),
-        "kinematics": _kinematics_metric(event),
-        "riskFactors": _risk_factors_metric(event),
-        "evidence": _evidence_metric(event),
-        "ttcAgreement": _unit_score(event.ttc_agreement),
+        "id": event.display_id,
+        "label": _object_label(event.object_type),
+        "class": event.object_type,
+        "state": event.state,
+        "risk": _risk_metric(event),
+        "eta": _eta_metric(event),
+        "motion": _motion_metric(event),
+        "lane": _lane_obj_metric(event),
+        "confidence": _confidence_metric(event),
+        "tracking": {"trackId": event.object_id},
         "bbox": _normalized_bbox(event, frame_width, frame_height),
     }
 
@@ -462,42 +495,34 @@ def _lane_metric(
     }
 
 
-def _event_payload_base(
+def _frame_row(
     *,
     event: RiskEvent,
     all_events: list[RiskEvent],
     primary_risk_score: float,
-    traffic_light_state: str = "none",
+    traffic_light_state: tuple[str, float] = ("none", 0.0),
     lane: LaneFrame | None = None,
     frame_width: int = 0,
     frame_height: int = 0,
 ) -> dict[str, Any]:
-    """Build the metadata-only event payload. RGB views are attached later.
+    """Build the v5 client-facing row shared by timeline frames and events.
 
-    Client-facing fields use schema names (``stabilized_risk_state``,
-    ``primary_*``). The primary event's raw scoring inputs are kept on the
-    payload as internal diagnostics; saved-event ranking uses the canonical
-    ``risk_score``/``primary_risk_score`` values.
-
-    ``primary_risk_score`` is computed from the **raw** primary event (before
-    hysteresis stabilization) so it stays consistent with the matching entry
-    in ``objects[]`` — i.e. ``payload.primary_risk_score`` always equals
-    ``payload.objects[primary_object_id].riskScore``. The state band is
-    decoupled in ``stabilized_risk_state``.
+    ``primary.score`` is computed from the **raw** primary event (before
+    hysteresis stabilization) so it matches the corresponding entry in
+    ``objects[]`` (``objects[i].risk.score`` where ``tracking.trackId`` equals
+    ``primary.trackId``). The state band is decoupled in ``state``.
     """
 
     return {
-        "frame_index": event.frame_index,
-        "timestamp_sec": event.timestamp_sec,
-        "stabilized_risk_state": event.state,
-        "primary_object_id": event.object_id,
-        "primary_risk_score": primary_risk_score,
-        "primary_lane": event.lane,
-        "traffic_light_state": traffic_light_state,
-        "risk_score": _risk_score(event),
-        "collision_eta_sec": event.ttc_sec,
-        "proximity_score": event.near_score,
-        "approach_score": event.closing_speed,
+        "frameIndex": event.frame_index,
+        "timestampSec": float(event.timestamp_sec),
+        "state": event.state,
+        "primary": {
+            "trackId": event.object_id,
+            "score": primary_risk_score,
+            "lane": event.lane,
+        },
+        "trafficLight": _traffic_light_metric(traffic_light_state),
         "laneGeometry": _lane_metric(lane, frame_width, frame_height),
         "objects": [
             _object_metric(item, frame_width, frame_height)
@@ -505,6 +530,47 @@ def _event_payload_base(
             if item.object_id is not None
         ],
     }
+
+
+def _event_payload_base(
+    *,
+    event: RiskEvent,
+    all_events: list[RiskEvent],
+    primary_risk_score: float,
+    traffic_light_state: tuple[str, float] = ("none", 0.0),
+    lane: LaneFrame | None = None,
+    frame_width: int = 0,
+    frame_height: int = 0,
+) -> dict[str, Any]:
+    """Build the metadata-only event payload. RGB views are attached later.
+
+    Carries the v5 client-facing row (see ``_frame_row``) plus snake_case
+    diagnostics used only for saved-event dedup/ranking (``risk_score``,
+    ``collision_eta_sec``, ...); those internal keys are stripped by
+    ``_serialize_event`` before the payload reaches the frontend.
+    """
+
+    payload = _frame_row(
+        event=event,
+        all_events=all_events,
+        primary_risk_score=primary_risk_score,
+        traffic_light_state=traffic_light_state,
+        lane=lane,
+        frame_width=frame_width,
+        frame_height=frame_height,
+    )
+    payload.update(
+        {
+            "frame_index": event.frame_index,
+            "timestamp_sec": event.timestamp_sec,
+            "primary_risk_score": primary_risk_score,
+            "risk_score": _risk_score(event),
+            "collision_eta_sec": event.ttc_sec,
+            "proximity_score": event.near_score,
+            "approach_score": event.closing_speed,
+        }
+    )
+    return payload
 
 
 @dataclass
@@ -610,7 +676,7 @@ class FrameAnalysis:
     primary_risk_score: float
     frame_bgr: np.ndarray
     lane: Any
-    traffic_light_state: str = "none"
+    traffic_light_state: tuple[str, float] = ("none", 0.0)
 
 
 class SpatialFrameAnalyzer:
@@ -668,9 +734,9 @@ class SpatialFrameAnalyzer:
         self.lane_confidence_ema: float | None = None
         self.previous_timestamp_sec: float | None = None
         self.last_motion_depth_frame: int | None = None
-        # Advisory traffic-light colour, refreshed on detection frames and
-        # coasted on skipped frames.
-        self.last_traffic_light_state = "none"
+        # Advisory traffic-light colour + confidence, refreshed on detection
+        # frames and coasted on skipped frames.
+        self.last_traffic_light_state: tuple[str, float] = ("none", 0.0)
 
         # Per-track history / hysteresis.
         self.expansion_smoother = ExpansionSmoother()
@@ -874,9 +940,9 @@ class SpatialFrameAnalyzer:
         # timeline can stay continuous while the scene is calm.
         # The primary's RAW risk score is captured before stabilization
         # mutates the event, so it stays consistent with the entry in
-        # ``all_events`` (and therefore with ``objects[primaryObjectId]``).
-        # ``stabilized_risk_state`` carries the hysteresis-smoothed state
-        # band independently.
+        # ``all_events`` (i.e. the ``objects[]`` row whose
+        # ``tracking.trackId`` equals ``primary.trackId``). The frame-level
+        # ``state`` carries the hysteresis-smoothed band independently.
         primary_risk_score = _risk_score(primary_event)
         # Stabilize on the frame's WORST raw-state object, not just the selected
         # primary. After the eligibility fix this is normally the primary, but
@@ -984,7 +1050,7 @@ def analyze_spatial_video(
             primary_event=primary_event,
             all_events=all_events,
             lane=lane,
-            traffic_light_state=analysis.traffic_light_state,
+            traffic_light_state=analysis.traffic_light_state[0],
         )
 
         # Deduplicate events within 1.0 second window
@@ -1008,22 +1074,15 @@ def analyze_spatial_video(
         live_ids = {id(item) for item in saved_events}
         pending_renders = {pid: ref for pid, ref in pending_renders.items() if pid in live_ids}
 
-        object_metrics = [
-            _object_metric(ev, frame_width, frame_height)
-            for ev in all_events
-            if ev.object_id is not None
-        ]
-        frame_row = {
-            "frameIndex": primary_event.frame_index,
-            "timestampSec": float(primary_event.timestamp_sec),
-            "stabilizedRiskState": primary_event.state,
-            "primaryObjectId": primary_event.object_id,
-            "primaryRiskScore": primary_risk_score,
-            "primaryLane": primary_event.lane,
-            "trafficLight": analysis.traffic_light_state,
-            "laneGeometry": _lane_metric(lane, frame_width, frame_height),
-            "objects": object_metrics,
-        }
+        frame_row = _frame_row(
+            event=primary_event,
+            all_events=all_events,
+            primary_risk_score=primary_risk_score,
+            traffic_light_state=analysis.traffic_light_state,
+            lane=lane,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
         frames.append(frame_row)
         if progress_callback is not None:
             preview_rows_buffer.append(frame_row)
@@ -1038,7 +1097,7 @@ def analyze_spatial_video(
                 primary_event,
                 all_events,
                 lane=lane,
-                traffic_light_state=analysis.traffic_light_state,
+                traffic_light_state=analysis.traffic_light_state[0],
             )
             preview_uri = _encode_preview_jpeg(annotated)
             progress_pct = min(100.0, round((processed_frames / max(1, max_processed_frames)) * 100.0, 1))

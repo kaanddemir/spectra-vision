@@ -22,8 +22,9 @@ def test_serialize_result_includes_performance_logs():
 
     serialized = _serialize_result(result, elapsed_sec=0.1234, source_name="sample.mp4")
 
-    assert serialized["payload"]["performance_summary"] == summary
-    assert serialized["payload"]["performance_logs"] == ["[FRAME    0] preprocess=1ms"]
+    assert serialized["payload"]["schemaVersion"] == 5
+    assert serialized["payload"]["performance"]["summary"] == summary
+    assert serialized["payload"]["performance"]["logs"] == ["[FRAME    0] preprocess=1ms"]
 
 
 def test_serialize_result_exposes_frame_dimensions():
@@ -85,10 +86,10 @@ def test_object_metric_exposes_reliability_params():
     metric = _object_metric(event, 400, 200)
     # The previously-hidden cue confidences are now surfaced alongside the rest.
     assert set(metric["confidence"]) == {
-        "detection", "depth", "lane", "flow",
+        "overall", "detection", "lane", "depth", "flow", "expansion",
     }
     assert metric["confidence"]["lane"] == 0.7
-    assert metric["ttcAgreement"] == 0.85
+    assert metric["eta"]["agreement"] == 0.85
 
 
 def test_lane_metric_emits_normalized_corridor():

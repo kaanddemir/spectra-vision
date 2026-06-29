@@ -137,8 +137,8 @@ export function initializeSpectra() {
     return t === null ? "" : t.toFixed(2);
   };
 
-  // Lift the primary object's v3 fields onto the row so chart, banner and
-  // panel consumers can read the selected object's ETA/risk data directly.
+  // Lift the primary object's fields onto the row so chart, banner and panel
+  // consumers can read the selected object's ETA/risk data directly.
   const getPrimaryObject = (row) => {
     if (!row || !Array.isArray(row.objects)) return null;
     const id = row.primaryObjectId;
@@ -146,20 +146,56 @@ export function initializeSpectra() {
     return row.objects.find((o) => o && o.objectId === id) || null;
   };
 
-  const flattenObjectV3 = (obj) => {
+  // Translate one v5 object-centric metric into the flat field names the panels,
+  // chart, banner, overlay and exports consume. This is the single migration
+  // seam: the backend speaks v5 (``risk``/``eta``/``motion``/``lane``/
+  // ``tracking`` groups), everything downstream keeps reading the flat keys.
+  const flattenObject = (obj) => {
     if (!obj) return obj;
-    const conf = num(obj.overallConfidence, null);
+    const risk = obj.risk || {};
+    const eta = obj.eta || {};
+    const motion = obj.motion || {};
+    const laneInfo = obj.lane || {};
+    const conf = obj.confidence || {};
+    const overall = num(conf.overall, null);
     return {
       ...obj,
-      riskState: obj.rawRiskState ?? obj.riskState,
-      confidencePct: conf === null ? null : Math.round(conf * 1000) / 10,
+      // Identity + state
+      objectId: obj.tracking?.trackId ?? null,
+      displayId: obj.id ?? null,
+      objectType: obj.class ?? null,
+      riskState: obj.state ?? null,
+      rawRiskState: obj.state ?? null,
+      riskScore: num(risk.score, null),
+      // Flat signal blocks the panels/overlay/exports read directly.
+      riskFactors: risk.factors || {},
+      collisionEta: { display: eta.display ?? null, sec: num(eta.collisionSec, null) },
+      kinematics: {
+        distanceM: num(motion.distanceM, null),
+        closingMps: num(motion.closingSpeedMps, null),
+      },
+      evidence: {
+        flow: {
+          expansionScore: num(motion.expansionScore, null),
+          radialScore: num(motion.radialScore, null),
+        },
+      },
+      confidence: conf,
+      overallConfidence: overall,
+      ttcAgreement: num(eta.agreement, null),
+      lane: laneInfo.bucket ?? null,
+      lanePosition: num(laneInfo.position, null),
+      bbox: obj.bbox ?? null,
+      confidencePct: overall === null ? null : Math.round(overall * 1000) / 10,
     };
   };
 
-  const flattenFrameV3 = (frame) => {
+  const flattenFrame = (frame) => {
     if (!frame) return frame;
-    const objs = Array.isArray(frame.objects) ? frame.objects.map(flattenObjectV3) : [];
-    const primary = objs.find((o) => o && o.objectId === frame.primaryObjectId) || null;
+    const objs = Array.isArray(frame.objects) ? frame.objects.map(flattenObject) : [];
+    const primaryInfo = frame.primary || {};
+    const primaryId = primaryInfo.trackId ?? null;
+    const primary = objs.find((o) => o && o.objectId === primaryId) || null;
     const ts = num(frame.timestampSec, null);
     const riskFactors = primary?.riskFactors || {};
     const kinematics = primary?.kinematics || {};
@@ -168,13 +204,17 @@ export function initializeSpectra() {
       objects: objs,
       // Normalized ego-lane corridor polygon for the canvas overlay.
       laneGeometry: frame.laneGeometry ?? null,
+      // Frame-level traffic-light advisory: collapse {state, confidence} to the
+      // state string the renderers compare against.
+      trafficLight: frame.trafficLight?.state ?? null,
       timeSec: ts === null ? null : Math.round(ts * 100) / 100,
-      riskState: frame.stabilizedRiskState ?? null,
-      riskScore: num(frame.primaryRiskScore, null),
-      objectId: frame.primaryObjectId ?? null,
-      displayId: primary?.displayId ?? frame.primaryDisplayId ?? frame.primaryObjectId ?? null,
+      riskState: frame.state ?? null,
+      riskScore: num(primaryInfo.score, null),
+      primaryObjectId: primaryId,
+      objectId: primaryId,
+      displayId: primary?.displayId ?? primaryId,
       objectType: primary?.objectType ?? null,
-      lane: primary ? (frame.primaryLane ?? null) : null,
+      lane: primary ? (primaryInfo.lane ?? null) : null,
       collisionEta: primary?.collisionEta ?? null,
       riskFactors: primary?.riskFactors ?? null,
       kinematics: primary?.kinematics ?? null,
@@ -190,14 +230,14 @@ export function initializeSpectra() {
     };
   };
 
-  const flattenEventV3 = (event, imagesByRef) => {
+  const flattenEvent = (event, imagesByRef) => {
     if (!event) return event;
-    const flat = flattenFrameV3(event);
+    const flat = flattenFrame(event);
     const ref = event.imageRef;
     const images = ref && imagesByRef && imagesByRef[ref] ? imagesByRef[ref] : null;
     return {
       ...flat,
-      riskScore: event.primaryRiskScore ?? null,
+      riskScore: num(event.primary?.score, null) ?? flat.riskScore ?? null,
       images: images || {},
     };
   };
@@ -210,7 +250,7 @@ export function initializeSpectra() {
     return "none";
   };
   const eventSeverityScore = (ev) => {
-    return num(ev?.riskScore ?? ev?.primaryRiskScore, 0);
+    return num(ev?.riskScore, 0);
   };
   const eventStateClass = (ev) => stateClass(ev?.riskState);
   const isActionableObject = (obj) => {
@@ -756,7 +796,7 @@ export function initializeSpectra() {
     const metadata = payload?.metadata || {};
     const imagesByRef = (payload?.images && typeof payload.images === "object") ? payload.images : {};
     const peakEventRaw = payload?.peakEvent || null;
-    const peakEvent = peakEventRaw ? flattenEventV3(peakEventRaw, imagesByRef) : null;
+    const peakEvent = peakEventRaw ? flattenEvent(peakEventRaw, imagesByRef) : null;
     const peakImages = peakEvent?.images || {};
 
     const eventKey = (ev) => `${ev?.frameIndex ?? ""}:${num(ev?.timestampSec, null) ?? ""}`;
@@ -768,7 +808,7 @@ export function initializeSpectra() {
     }
     if (Array.isArray(payload?.events)) {
       payload.events.forEach((evRaw) => {
-        const flat = flattenEventV3(evRaw, imagesByRef);
+        const flat = flattenEvent(evRaw, imagesByRef);
         const key = eventKey(flat);
         if (seenEvents.has(key)) return;
         events.push(flat);
@@ -776,7 +816,7 @@ export function initializeSpectra() {
       });
     }
 
-    const frames = Array.isArray(payload?.frames) ? payload.frames.map(flattenFrameV3) : [];
+    const frames = Array.isArray(payload?.frames) ? payload.frames.map(flattenFrame) : [];
 
     return {
       images: {
@@ -1938,8 +1978,8 @@ export function initializeSpectra() {
       showPreviewOverlay(msg.frameImage);
     }
 
-    const flatFrame = msg.frame ? flattenFrameV3(msg.frame) : null;
-    const flatFrames = Array.isArray(msg.frames) ? msg.frames.map(flattenFrameV3) : null;
+    const flatFrame = msg.frame ? flattenFrame(msg.frame) : null;
+    const flatFrames = Array.isArray(msg.frames) ? msg.frames.map(flattenFrame) : null;
     const ts = num(flatFrame?.timestampSec, 0);
 
     const status = byId("ap-status");
@@ -2569,8 +2609,8 @@ export function initializeSpectra() {
       sourceName: state.currentResult?.sourceName || fileInput.files[0]?.name || null,
       frameIndex: source.frameIndex ?? null,
       timestampSec: num(source.timestampSec ?? source.timeSec, null),
-      riskState: source.riskState || source.stabilizedRiskState || null,
-      riskScore: num(source.riskScore ?? source.primaryRiskScore, null),
+      riskState: source.riskState || null,
+      riskScore: num(source.riskScore, null),
       primaryObject: primaryObject ? {
         objectId: primaryObject.objectId ?? null,
         displayId: primaryObject.displayId ?? null,
@@ -2671,11 +2711,12 @@ export function initializeSpectra() {
 
   function openLogsView() {
     const payload = state.lastResult?.payload;
-    if (!payload || !payload.performance_logs) {
+    const perfLogs = payload?.performance?.logs;
+    if (!perfLogs || !perfLogs.length) {
       const view = byId("logs-view");
       if (view) view.textContent = "No performance logs available for this analysis.";
     } else {
-      const logs = payload.performance_logs.join("\n");
+      const logs = perfLogs.join("\n");
       const view = byId("logs-view");
       if (view) view.textContent = logs;
     }
@@ -2697,8 +2738,9 @@ export function initializeSpectra() {
 
   async function copyLogs() {
     const payload = state.lastResult?.payload;
-    if (!payload || !payload.performance_logs) return;
-    const text = payload.performance_logs.join("\n");
+    const perfLogs = payload?.performance?.logs;
+    if (!perfLogs || !perfLogs.length) return;
+    const text = perfLogs.join("\n");
     try {
       await navigator.clipboard.writeText(text);
       const btn = byId("copy-logs-btn");

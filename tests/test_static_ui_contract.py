@@ -178,7 +178,6 @@ def test_timeline_uses_backend_risk_score():
     score_fn = controls[score_fn_start:score_fn_end]
 
     assert "riskScore" in score_fn
-    assert "primaryRiskScore" in score_fn
     assert "etaSeconds" not in score_fn
     assert "riskFactors" not in score_fn
 

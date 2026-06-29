@@ -203,7 +203,7 @@ Traffic lights are detected but are **not collision participants**: `spectra/ana
 
 Colour classification is implemented in `spectra/vision/traffic_light.py`.
 
-For each detected traffic-light bbox, `classify_light_state()` reads the HSV histogram and returns `red`, `yellow`, `green`, or `unknown`. `frame_light_state()` picks the largest (nearest) light and returns one frame-level state, coasted on detection-skipped frames. This is surfaced as a frame-level advisory (`trafficLight` on each timeline row and a coloured dot in the overlay); it never gates collision logic, because "which light applies to my lane" is ambiguous from a single forward camera.
+For each detected traffic-light bbox, `classify_light_state()` reads the HSV histogram and returns a `(state, confidence)` pair where state is `red`, `yellow`, `green`, or `unknown` (confidence is the dominant-colour margin, attenuated by lit fraction). `frame_light_state()` picks the largest (nearest) light and returns one frame-level `(state, confidence)`, coasted on detection-skipped frames. This is surfaced as a frame-level advisory (`trafficLight: {state, confidence}` on each timeline row and a coloured dot in the overlay); it stays frame-level and never gates collision logic, because "which light applies to my lane" is ambiguous from a single forward camera.
 
 ## 10. Object Tracking
 
@@ -396,6 +396,18 @@ For each frame, `spectra/analysis/video.py` produces:
 - `peak_event`: highest-risk saved event in the analysis
 - `objects`: per-frame object metrics, including TTC, estimated distance, metric closing speed, lane, risk score, proximity, approach, crossing, and confidence
 - `images`: shared image payloads referenced by saved events
+
+The client-facing JSON contract is **schemaVersion 5** (`_serialize_result` in `spectra/app.py`), an object-centric nested shape. Each frame/event row carries `frameIndex`, `timestampSec`, `state` (stabilized band), a `primary` pointer (`{trackId, score, lane}`), a frame-level `trafficLight` (`{state, confidence}`), `laneGeometry`, and `objects[]`. Each `objects[]` entry (`_object_metric`) is grouped into:
+
+- `id` / `class` / `label` / `state` and `tracking.trackId`
+- `risk`: `{score, factors{etaPressure, proximity, approach, crossing, brake}}`
+- `eta`: `{collisionSec, display, agreement, sources{depth, flow, expansion → {etaSec, confidence}}}` — `sources` exposes each TTC cue's own estimate (serialized from `RiskEvent.ttc_components`)
+- `motion`: `{distanceM, closingSpeedMps, expansionScore, radialScore}`
+- `lane`: `{bucket, position, crossing}`
+- `confidence`: `{overall, detection, lane, depth, flow, expansion}`
+- `bbox`: normalized `[x1, y1, x2, y2]`
+
+The envelope also carries `metadata`, `images`, and `performance` (`{summary, logs}`). The frontend (`controls.js`) flattens this nested shape back to flat field names at a single seam (`flattenObjectV3` / `flattenFrameV3`); it does not compute risk.
 
 For events that are kept in the saved-events list, the following RGB views are attached:
 

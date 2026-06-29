@@ -23,77 +23,86 @@ def test_compute_velocity_runs_without_neural_flow_model():
     assert result.magnitude_norm.shape == previous.gray.shape
 
 
-def _v3_object(**overrides):
+def _v5_object(**overrides):
     obj = {
-        "objectId": 7,
-        "displayId": 7,
-        "objectType": "car",
-        "rawRiskState": "CAUTION",
-        "riskScore": 0.42,
-        "lane": "center",
-        "lanePosition": 0.0,
-        "overallConfidence": 0.67,
-        "confidence": {
-            "detection": 0.72,
-            "tracking": 0.81,
-            "depth": 0.64,
+        "id": 7,
+        "label": "Car",
+        "class": "car",
+        "state": "CAUTION",
+        "risk": {
+            "score": 0.42,
+            "factors": {
+                "etaPressure": 0.2,
+                "proximity": 0.4,
+                "approach": 0.3,
+                "crossing": 0.2,
+                "brake": 0.0,
+            },
         },
-        "collisionEta": {
+        "eta": {
+            "collisionSec": 2.2,
             "display": "2.2s",
-            "sec": 2.2,
+            "agreement": 0.9,
+            "sources": {
+                "depth": {"etaSec": 2.2, "confidence": 0.64},
+                "flow": {"etaSec": 2.4, "confidence": 0.5},
+                "expansion": {"etaSec": 2.1, "confidence": 0.55},
+            },
         },
-        "kinematics": {
+        "motion": {
             "distanceM": 18.5,
-            "closingMps": 8.4,
+            "closingSpeedMps": 8.4,
+            "expansionScore": 0.1,
+            "radialScore": 0.2,
         },
-        "riskFactors": {
-            "proximity": 0.4,
-            "approach": 0.3,
-            "crossing": 0.2,
-            "brake": 0.0,
+        "lane": {"bucket": "center", "position": 0.0, "crossing": 0.2},
+        "confidence": {
+            "overall": 0.67,
+            "detection": 0.72,
+            "lane": 0.8,
+            "depth": 0.64,
+            "flow": 0.5,
+            "expansion": 0.55,
         },
-        "evidence": {
-            "flow": {"expansionScore": 0.1, "radialScore": 0.2},
-        },
+        "tracking": {"trackId": 7},
+        "bbox": [0.1, 0.1, 0.5, 0.5],
     }
     obj.update(overrides)
     return obj
 
 
-def test_serialized_result_uses_v3_schema():
-    """``_serialize_result`` must emit the v4 schema:
-       - ``schemaVersion: 4``
-       - ``frames`` (renamed from ``timelineRows``)
-       - top-level ``primary*`` pointers + ``stabilizedRiskState`` only;
-       per-object metrics live in ``objects[]``
-       - per-object ``rawRiskState`` (not ``riskState``), ``overallConfidence``
-         and source-specific ``confidence``
-       - collision ETA, kinematics, risk factors, and evidence are nested
+def test_serialized_result_uses_v5_schema():
+    """``_serialize_result`` must emit the v5 schema:
+       - ``schemaVersion: 5``
+       - ``frames`` timeline rows with a ``primary`` pointer + ``state``
+       - object-centric per-object metrics under ``objects[]`` (``risk``,
+         ``eta``, ``motion``, ``lane``, ``confidence``, ``tracking``)
+       - frame-level ``trafficLight`` as ``{state, confidence}``
        - ``imageRef`` on events + separate ``images`` dict
+       - internal snake_case diagnostics stripped from the client payload
     """
 
-    objects = [_v3_object()]
+    objects = [_v5_object()]
     event = {
+        # internal diagnostics used for dedup / image keying
         "frame_index": 1,
         "timestamp_sec": 0.1,
-        "stabilized_risk_state": "CAUTION",
-        "primary_object_id": 7,
-        "primary_risk_score": 0.42,
-        "primary_lane": "center",
-        "traffic_light_state": "red",
-        "collision_eta_sec": 2.2,
-        "proximity_score": 0.4,
-        "approach_score": 0.3,
+        # v5 client-facing row (as produced by _frame_row / _event_payload_base)
+        "frameIndex": 1,
+        "timestampSec": 0.1,
+        "state": "CAUTION",
+        "primary": {"trackId": 7, "score": 0.42, "lane": "center"},
+        "trafficLight": {"state": "red", "confidence": 0.8},
+        "laneGeometry": {"detected": False, "confidence": 0.25, "corridor": []},
         "objects": objects,
         # RGB attached fields are absent — exercises the no-image path
     }
     frame_row = {
         "frameIndex": 1,
         "timestampSec": 0.1,
-        "stabilizedRiskState": "CAUTION",
-        "primaryObjectId": 7,
-        "primaryRiskScore": 0.42,
-        "primaryLane": "center",
+        "state": "CAUTION",
+        "primary": {"trackId": 7, "score": 0.42, "lane": "center"},
+        "trafficLight": {"state": "red", "confidence": 0.8},
         "objects": objects,
     }
     result = {
@@ -108,81 +117,61 @@ def test_serialized_result_uses_v3_schema():
     payload = _serialize_result(result, elapsed_sec=0.01, source_name="sample.mp4")["payload"]
 
     # Schema version + top-level shape
-    assert payload["schemaVersion"] == 4
+    assert payload["schemaVersion"] == 5
     assert "frames" in payload and "timelineRows" not in payload
     assert "images" in payload and isinstance(payload["images"], dict)
+    assert set(payload["performance"]) == {"summary", "logs"}
 
-    # Frame row shape — primary pointers, no redundant per-object fields
+    # Frame row shape — primary pointer, no redundant per-object fields
     row = payload["frames"][0]
     assert row["frameIndex"] == 1
     assert row["timestampSec"] == 0.1
-    assert row["stabilizedRiskState"] == "CAUTION"
-    assert row["primaryObjectId"] == 7
-    assert row["primaryRiskScore"] == 0.42
-    assert row["primaryLane"] == "center"
+    assert row["state"] == "CAUTION"
+    assert row["primary"] == {"trackId": 7, "score": 0.42, "lane": "center"}
     assert row["objects"] == objects
-    # v1 redundant top-level fields must be gone
-    for legacy_key in ("ttcSec", "nearScore", "closingSpeed", "crossingRisk", "lanePosition", "confidencePct", "objectId", "objectType", "lane", "riskState", "timeSec"):
-        assert legacy_key not in row, f"v1 field {legacy_key!r} leaked into frame row"
+    # legacy flat fields must be gone
+    for legacy_key in ("stabilizedRiskState", "primaryObjectId", "primaryRiskScore", "primaryLane", "ttcSec", "lanePosition", "objectId", "objectType", "lane", "riskState", "timeSec"):
+        assert legacy_key not in row, f"legacy field {legacy_key!r} leaked into frame row"
 
     # peakEvent shape
     peak = payload["peakEvent"]
     assert peak["frameIndex"] == 1
-    assert peak["stabilizedRiskState"] == "CAUTION"
-    assert peak["primaryObjectId"] == 7
-    assert peak["primaryRiskScore"] == 0.42
-    assert peak["primaryLane"] == "center"
-    assert peak["trafficLight"] == "red"
+    assert peak["state"] == "CAUTION"
+    assert peak["primary"] == {"trackId": 7, "score": 0.42, "lane": "center"}
+    assert peak["trafficLight"] == {"state": "red", "confidence": 0.8}
     assert peak["objects"] == objects
-    # v1 keys gone from event too
-    for legacy_key in ("riskState", "riskScore", "lane", "ttcSec", "objectId", "objectType", "nearScore", "closingSpeed", "crossingRisk", "lanePosition", "confidencePct"):
-        assert legacy_key not in peak, f"v1 field {legacy_key!r} leaked into peakEvent"
+    # internal diagnostics must not leak to the client
+    for internal_key in ("frame_index", "timestamp_sec", "risk_score", "primary_risk_score", "stabilizedRiskState", "primaryObjectId"):
+        assert internal_key not in peak, f"internal field {internal_key!r} leaked into peakEvent"
     # Image attachment: event had no RGB → no imageRef
     assert "imageRef" not in peak
     assert "images" not in peak
 
-    # Per-object schema
+    # Per-object schema (object-centric v5 shape)
     obj = peak["objects"][0]
-    assert obj["rawRiskState"] == "CAUTION"
-    assert obj["overallConfidence"] == 0.67
-    assert obj["confidence"] == {
-        "detection": 0.72,
-        "tracking": 0.81,
-        "depth": 0.64,
-    }
-    assert "status" not in obj["collisionEta"]
-    assert obj["collisionEta"]["display"] == "2.2s"
-    assert obj["collisionEta"]["sec"] == 2.2
-    assert "source" not in obj["collisionEta"]  # dead constant removed
-    assert obj["kinematics"]["distanceM"] == 18.5
-    assert obj["kinematics"]["closingMps"] == 8.4
-    for removed_kinematic in ("rangeStatus", "distanceDisplay", "closingDisplay"):
-        assert removed_kinematic not in obj["kinematics"]
-    assert obj["riskFactors"] == {
-        "proximity": 0.4,
-        "approach": 0.3,
-        "crossing": 0.2,
-        "brake": 0.0,
-    }
-    for value in obj["riskFactors"].values():
+    assert obj["id"] == 7
+    assert obj["label"] == "Car"
+    assert obj["class"] == "car"
+    assert obj["state"] == "CAUTION"
+    assert obj["tracking"]["trackId"] == 7
+    assert obj["risk"]["score"] == 0.42
+    assert set(obj["risk"]["factors"]) == {"etaPressure", "proximity", "approach", "crossing", "brake"}
+    for value in obj["risk"]["factors"].values():
         assert 0.0 <= value <= 1.0
-    # evidence is now slimmed to ONLY the unique flow diagnostics; everything it
-    # used to copy lives once at the canonical top level.
-    assert obj["evidence"] == {
-        "flow": {"expansionScore": 0.1, "radialScore": 0.2},
-    }
-    for dead_evidence_key in ("detector", "depth", "lane"):
-        assert dead_evidence_key not in obj["evidence"]
-    assert "riskReason" not in obj
-    for removed in ("ttcSec", "depthTtcSec", "nearScore", "closingSpeed", "crossingRisk", "brakeScore", "distanceM", "closingMps"):
-        assert removed not in obj
-    assert "riskState" not in obj or obj["riskState"] == obj["rawRiskState"]  # objects[].riskState removed
-    assert "confidencePct" not in obj
+    assert obj["eta"]["collisionSec"] == 2.2
+    assert obj["eta"]["display"] == "2.2s"
+    assert set(obj["eta"]["sources"]) == {"depth", "flow", "expansion"}
+    assert obj["eta"]["sources"]["depth"] == {"etaSec": 2.2, "confidence": 0.64}
+    assert obj["motion"]["distanceM"] == 18.5
+    assert obj["motion"]["closingSpeedMps"] == 8.4
+    assert obj["lane"] == {"bucket": "center", "position": 0.0, "crossing": 0.2}
+    assert obj["confidence"]["overall"] == 0.67
+    assert set(obj["confidence"]) == {"overall", "detection", "lane", "depth", "flow", "expansion"}
+    # legacy flat per-object keys gone
+    for removed in ("objectId", "displayId", "objectType", "rawRiskState", "riskScore", "riskFactors", "collisionEta", "kinematics", "evidence", "overallConfidence", "ttcAgreement", "lanePosition"):
+        assert removed not in obj, f"legacy per-object field {removed!r} leaked"
 
-    # Legacy regression guards (kept from v1 era)
-    legacy_lane_key = "zo" + "ne"
-    assert legacy_lane_key not in peak
-    assert (legacy_lane_key + "Metrics") not in peak
+    # Legacy regression guards
     assert "detections" not in peak
     assert "laneScores" not in row
 
@@ -194,26 +183,20 @@ def test_serialized_result_separates_images_via_imageref():
     def _stub_rgb():
         return np.zeros((4, 4, 3), dtype=np.uint8)
 
-    objects = [_v3_object(
-        objectId=1,
-        displayId=1,
-        rawRiskState="DANGER",
-        riskScore=0.9,
-        lane="left",
-        lanePosition=-0.5,
-        overallConfidence=0.95,
-        confidence={"detection": 0.95, "tracking": 0.9, "depth": 0.85},
+    objects = [_v5_object(
+        id=1,
+        state="DANGER",
+        tracking={"trackId": 1},
     )]
     peak = {
         "frame_index": 42,
         "timestamp_sec": 1.4,
-        "stabilized_risk_state": "DANGER",
-        "primary_object_id": 1,
-        "primary_risk_score": 0.9,
-        "primary_lane": "left",
-        "collision_eta_sec": 0.8,
-        "proximity_score": 0.7,
-        "approach_score": 0.8,
+        "frameIndex": 42,
+        "timestampSec": 1.4,
+        "state": "DANGER",
+        "primary": {"trackId": 1, "score": 0.9, "lane": "left"},
+        "trafficLight": {"state": "none", "confidence": 0.0},
+        "laneGeometry": {"detected": False, "confidence": 0.25, "corridor": []},
         "objects": objects,
         "original_rgb": _stub_rgb(),
         "overlay_rgb": _stub_rgb(),
@@ -236,55 +219,41 @@ def test_serialized_result_separates_images_via_imageref():
 
 
 def test_primary_risk_score_matches_objects_entry():
-    """Pointer invariant: ``primaryRiskScore`` must equal the matching
-    ``objects[primaryObjectId].riskScore`` even when the stabilized state
-    differs from the primary's raw state. The score is computed from the
-    raw primary event so hysteresis lag never leaks into the value.
+    """Pointer invariant: ``primary.score`` must equal the matching
+    ``objects[trackId].risk.score`` even when the stabilized frame ``state``
+    differs from the primary's raw object ``state``. The score is computed
+    from the raw primary event so hysteresis lag never leaks into the value.
     """
 
-    objects = [_v3_object(
-        objectId=4,
-        displayId=4,
-        rawRiskState="CAUTION",
-        riskScore=0.558,  # raw classifier output
-        lane="left",
-        lanePosition=-1.4,
-        overallConfidence=0.54,
-        confidence={"detection": 0.54, "tracking": 0.76, "depth": 0.33},
-        collisionEta={
-            "display": "0.9s",
-            "sec": 0.87,
+    objects = [_v5_object(
+        id=4,
+        state="CAUTION",
+        risk={
+            "score": 0.558,  # raw classifier output
+            "factors": {"etaPressure": 0.5, "proximity": 0.704, "approach": 0.055, "crossing": 0.5, "brake": 0.0},
         },
-        riskFactors={
-            "proximity": 0.704,
-            "approach": 0.055,
-            "crossing": 0.5,
-            "brake": 0.0,
-        },
+        tracking={"trackId": 4},
     )]
     # Hysteresis hasn't upgraded yet, so the FRAME's stabilized state is SAFE
-    # while the primary object's RAW state is CAUTION. Without the fix,
-    # primary_risk_score would be ~0.188 (computed from stabilized=SAFE)
-    # and disagree with objects[0].riskScore == 0.558.
+    # while the primary object's RAW state is CAUTION. primary.score MUST still
+    # equal objects[0].risk.score == 0.558.
     frame_row = {
         "frameIndex": 213,
         "timestampSec": 7.1,
-        "stabilizedRiskState": "SAFE",
-        "primaryObjectId": 4,
-        "primaryRiskScore": 0.558,  # MUST equal objects[0].riskScore
-        "primaryLane": "left",
+        "state": "SAFE",
+        "primary": {"trackId": 4, "score": 0.558, "lane": "left"},
+        "trafficLight": {"state": "none", "confidence": 0.0},
         "objects": objects,
     }
     event = {
         "frame_index": 213,
         "timestamp_sec": 7.1,
-        "stabilized_risk_state": "SAFE",
-        "primary_object_id": 4,
-        "primary_risk_score": 0.558,
-        "primary_lane": "left",
-        "collision_eta_sec": 0.87,
-        "proximity_score": 0.704,
-        "approach_score": 0.055,
+        "frameIndex": 213,
+        "timestampSec": 7.1,
+        "state": "SAFE",
+        "primary": {"trackId": 4, "score": 0.558, "lane": "left"},
+        "trafficLight": {"state": "none", "confidence": 0.0},
+        "laneGeometry": {"detected": False, "confidence": 0.25, "corridor": []},
         "objects": objects,
     }
     result = {
@@ -300,18 +269,18 @@ def test_primary_risk_score_matches_objects_entry():
 
     # Frame-level invariant
     row = payload["frames"][0]
-    primary_obj = next(o for o in row["objects"] if o["objectId"] == row["primaryObjectId"])
-    assert row["primaryRiskScore"] == primary_obj["riskScore"], (
-        f"primaryRiskScore {row['primaryRiskScore']} != objects[primary].riskScore {primary_obj['riskScore']}"
+    primary_obj = next(o for o in row["objects"] if o["tracking"]["trackId"] == row["primary"]["trackId"])
+    assert row["primary"]["score"] == primary_obj["risk"]["score"], (
+        f"primary.score {row['primary']['score']} != objects[primary].risk.score {primary_obj['risk']['score']}"
     )
-    # Stabilized state can still differ from object's raw state
-    assert row["stabilizedRiskState"] == "SAFE"
-    assert primary_obj["rawRiskState"] == "CAUTION"
+    # Stabilized frame state can still differ from object's raw state
+    assert row["state"] == "SAFE"
+    assert primary_obj["state"] == "CAUTION"
 
     # Same invariant for peakEvent
     peak = payload["peakEvent"]
-    peak_primary = next(o for o in peak["objects"] if o["objectId"] == peak["primaryObjectId"])
-    assert peak["primaryRiskScore"] == peak_primary["riskScore"]
+    peak_primary = next(o for o in peak["objects"] if o["tracking"]["trackId"] == peak["primary"]["trackId"])
+    assert peak["primary"]["score"] == peak_primary["risk"]["score"]
 
 
 def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
@@ -352,7 +321,7 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
 
     response = asyncio.run(call_endpoint())
 
-    assert response["payload"]["schemaVersion"] == 4
+    assert response["payload"]["schemaVersion"] == 5
     assert captured["max_processed_frames"] == 1
     assert captured["max_saved_events"] == 50
     assert captured["resize_max_side"] == 1024

@@ -72,14 +72,20 @@ def _serialize_event(
     *,
     image_ref: str | None,
 ) -> dict[str, Any]:
+    """Strip internal snake_case diagnostics, keep the v5 client-facing row.
+
+    ``_event_payload_base`` already builds the v5 row (``frameIndex``,
+    ``state``, ``primary``, ``trafficLight``, ``laneGeometry``, ``objects``)
+    and overlays snake_case keys used only for dedup/ranking; here we select
+    just the client-facing fields and attach the shared image reference.
+    """
+
     payload: dict[str, Any] = {
-        "frameIndex": event.get("frame_index"),
-        "timestampSec": event.get("timestamp_sec"),
-        "stabilizedRiskState": event.get("stabilized_risk_state"),
-        "primaryObjectId": event.get("primary_object_id"),
-        "primaryRiskScore": event.get("primary_risk_score"),
-        "primaryLane": event.get("primary_lane"),
-        "trafficLight": event.get("traffic_light_state"),
+        "frameIndex": event.get("frameIndex"),
+        "timestampSec": event.get("timestampSec"),
+        "state": event.get("state"),
+        "primary": event.get("primary"),
+        "trafficLight": event.get("trafficLight"),
         "laneGeometry": event.get("laneGeometry"),
         "objects": event.get("objects") or [],
     }
@@ -133,7 +139,7 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
     ]
 
     payload: dict[str, Any] = {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "metadata": {
             "sourceName": source_name,
             "fps": result.get("fps"),
@@ -147,8 +153,10 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
         "peakEvent": None if peak_event is None else _serialize_event(peak_event, image_ref=peak_ref),
         "events": serialized_events,
         "images": images,
-        "performance_summary": result.get("performance_summary") or {},
-        "performance_logs": result.get("performance_logs") or [],
+        "performance": {
+            "summary": result.get("performance_summary") or {},
+            "logs": result.get("performance_logs") or [],
+        },
     }
     return {"payload": payload}
 

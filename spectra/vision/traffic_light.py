@@ -29,8 +29,15 @@ def _masks(hsv: np.ndarray) -> dict[str, int]:
     return {"red": red, "yellow": yellow, "green": green}
 
 
-def classify_light_state(frame_bgr: np.ndarray, bbox: tuple[int, int, int, int]) -> str:
-    """Return ``"red"|"yellow"|"green"|"unknown"`` for one light bbox."""
+def classify_light_state(
+    frame_bgr: np.ndarray, bbox: tuple[int, int, int, int]
+) -> tuple[str, float]:
+    """Return ``(state, confidence)`` for one light bbox.
+
+    ``state`` is ``"red"|"yellow"|"green"|"unknown"``; ``confidence`` in
+    ``[0, 1]`` is how dominant the winning colour is over the other two lit
+    colours (``0.0`` when the call is ``"unknown"``).
+    """
 
     h_img, w_img = frame_bgr.shape[:2]
     x1, y1, x2, y2 = bbox
@@ -39,7 +46,7 @@ def classify_light_state(frame_bgr: np.ndarray, bbox: tuple[int, int, int, int])
     y1 = max(0, min(h_img, int(y1)))
     y2 = max(0, min(h_img, int(y2)))
     if x2 - x1 < 3 or y2 - y1 < 3:
-        return "unknown"
+        return "unknown", 0.0
 
     roi = frame_bgr[y1:y2, x1:x2]
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -47,19 +54,25 @@ def classify_light_state(frame_bgr: np.ndarray, bbox: tuple[int, int, int, int])
     total = roi.shape[0] * roi.shape[1]
     color, lit = max(counts.items(), key=lambda kv: kv[1])
     if total == 0 or (lit / total) < _MIN_LIT_FRAC:
-        return "unknown"
-    return color
+        return "unknown", 0.0
+    # Dominance of the winning colour over all lit colour pixels, attenuated by
+    # how much of the bbox is actually lit (small/faint lights read less sure).
+    colour_total = sum(counts.values())
+    dominance = lit / colour_total if colour_total > 0 else 0.0
+    lit_frac = min(lit / total, 1.0)
+    confidence = float(min(1.0, dominance * (0.5 + 0.5 * min(lit_frac / _MIN_LIT_FRAC, 1.0))))
+    return color, confidence
 
 
-def frame_light_state(frame_bgr: np.ndarray, lights: list[Detection]) -> str:
-    """Aggregate to one advisory state for the frame.
+def frame_light_state(frame_bgr: np.ndarray, lights: list[Detection]) -> tuple[str, float]:
+    """Aggregate to one advisory ``(state, confidence)`` for the frame.
 
     Picks the largest (nearest / most relevant) light bbox and classifies it.
-    Returns ``"none"`` when no lights are present.
+    Returns ``("none", 0.0)`` when no lights are present.
     """
 
     if not lights:
-        return "none"
+        return "none", 0.0
     nearest = max(
         lights,
         key=lambda d: (d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]),
