@@ -77,9 +77,8 @@ def test_active_ui_contracts_are_kept():
     controls = read_static("js/controls.js")
     drawers_css = read_static("css/drawers.css")
 
-    object_tracking_heading = index.index("<h5>Objects &amp; Tracks</h5>")
-    assert '<symbol id="icon-car"' in index
-    assert index.rfind('<use href="#icon-car"></use>', 0, object_tracking_heading) != -1
+    assert '<symbol id="icon-help"' in index
+    assert '<use href="#icon-help"></use>' in index
 
     assert 'id="reset-advanced-sampling"' in index
     assert "resetAdvancedSampling" in controls
@@ -87,84 +86,83 @@ def test_active_ui_contracts_are_kept():
     assert ".drawer-icon-btn" in drawers_css
 
 
-def test_help_modal_uses_routed_flow_pages():
+def test_how_it_works_is_a_standalone_routed_page():
     index = read_static("index.html")
     controls = read_static("js/controls.js")
-    responsive_css = read_static("css/responsive.css")
+    page = read_static("how-it-works.html")
+    page_css = read_static("css/how-it-works.css")
+    page_js = read_static("js/how-it-works.js")
 
-    for page in ("home", "overview", "detection", "depth-motion", "lane", "risk-score", "per-frame"):
-        assert f'data-help-page="{page}"' in index
+    # The in-app help modal moved out to /how-it-works: the header button is now
+    # a plain link, and the modal markup + its JS are gone from the app shell.
+    assert 'href="/how-it-works"' in index
+    assert 'id="help-modal"' not in index
+    assert "data-help-page" not in index
+    for removed_js in ("const HELP_PAGES = {", "function showHelpPage", "function openHelpModal"):
+        assert removed_js not in controls
 
-    for target in ("overview", "detection", "depth-motion", "lane", "risk-score", "per-frame"):
-        assert f'data-help-goto="{target}"' in index
-
-    for data_flow_contract in (
-        "<h5>Data Flow</h5>",
-        'overview: "Data Flow"',
-        "Objects &amp; Tracks",
-        "Depth &amp; Motion",
-        "Lane Context",
-        "Risk Calculation",
-        "Frame Schedule",
-    ):
-        assert data_flow_contract in index or data_flow_contract in controls
-
-    for contract in (
-        'const HELP_PAGES = {',
-        "function showHelpPage",
-        'showHelpPage("home");',
-        'byId("help-back")?.addEventListener("click", () => showHelpPage("home"))',
-    ):
-        assert contract in controls
-
+    # The landing carries the pipeline map (only) plus its own popup driver.
     for flow_term in (
-        "flow-board",
         "flow-board--vertical",
-        "flow-stage",
-        "flow-stage-grid",
-        "flow-connector",
-        "flow-connector--down",
-        "flow-node",
-        "flow-node--compact",
-        "flow-node--hub",
+        "flow-stage-grid--2x2",
+        "flow-connector--labeled",
+        "flow-connector__label",
+        "flow-node--link",
+        "flow-node__io",
+        "flow-badge",
         "Frame Ingest",
         "Depth + Optical Flow",
         "TTC Fusion",
+        "Risk Assembly",
         "Traffic Light",
     ):
-        assert flow_term in index
+        assert flow_term in page
+    assert 'src="/static/js/how-it-works.js"' in page
+    assert 'href="/"' in page  # back-to-app link
 
-    for removed_flow_detail in (
-        'class="flow-io"',
-        "<span>IN</span>",
-        "<span>OUT</span>",
-        "<span>NEXT</span>",
-        'class="flow-quick-nav"',
-    ):
-        assert removed_flow_detail not in index
+    # Each topic is available from the compact topic menu + a full-screen popup;
+    # both share the id.
+    for topic in ("detection", "depth-motion", "lane", "risk-score", "per-frame"):
+        assert f'data-doc-open="{topic}"' in page
+        assert f'id="doc-modal-{topic}"' in page
+    assert 'data-doc-menu-toggle' in page
+    assert ">Pages<" in page
+    assert 'id="doc-topic-menu-list"' in page
+    assert 'data-doc-output-toggle' in page
 
+    # Popups open/close via the standalone driver (no inline-section anchors).
+    assert "data-doc-close" in page
+    assert "openModal" in page_js and "closeModal" in page_js
+    assert "toggleOutputs" in page_js and "doc-hide-outputs" in page_js
+    assert "enhanceInfoTooltips" in page_js and "flow-info-icon" in page_js
+
+    # Standardized chips: an "Outputs" caption per card, neutral data chips, and
+    # the red accent reserved for the final risk verdict only.
+    assert "flow-node__io-label" in page and ">Outputs<" in page
+    assert "flow-badge--out" in page
+
+    # Page-specific styling for the topbar nav, 2×2 grid, popups and chip standard.
     for style_contract in (
-        ".help-page.is-active",
-        ".help-back-btn",
-        "width: 100vw",
-        "height: 100vh",
-        "max-width: none",
-        "max-height: none",
-        "overflow-y: auto",
-        "overflow-x: hidden",
-        "width: min(100%, 1560px)",
-        ".flow-board--vertical",
-        ".flow-stage",
-        ".flow-stage-grid",
-        ".flow-connector--down",
-        "grid-template-columns: repeat(3, minmax(220px, 1fr))",
-        ".flow-board",
-        ".flow-connector",
-        ".flow-node",
-        ".flow-node--compact",
-        ".flow-node--hub",
-        ".flow-badge",
+        ".doc-topbar",
+        ".doc-icon-btn",
+        ".doc-menu-btn",
+        ".doc-menu-btn.is-active",
+        ".doc-output-toggle",
+        "body.doc-hide-outputs .flow-node__io",
+        ".flow-info-icon",
+        ".flow-info-icon::after",
+        ".flow-stage-grid--2x2",
+        ".doc-modal",
+        ".flow-node--link",
+        ".flow-connector__label",
+        ".flow-node__io-label",
+        ".flow-node__io .flow-badge--out",
     ):
+        assert style_contract in page_css
+
+    # Shared flow primitives still live in the bundled stylesheet.
+    responsive_css = read_static("css/responsive.css")
+    for style_contract in (".flow-board", ".flow-node", ".flow-badge"):
         assert style_contract in responsive_css
 
     assert ".flow-io" not in responsive_css

@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How Spectra Works</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/how-it-works.css">
+</head>
+<body>
+  <!-- ─── Full-width top bar with compact controls ───────────── -->
+  <header class="doc-topbar">
+    <div class="doc-topbar-inner">
+      <div class="doc-brand">
+        <strong>Spectra</strong>
+      </div>
+      <div class="doc-topbar-spacer" aria-hidden="true"></div>
+      <div class="doc-topic-menu">
+        <button type="button" class="doc-icon-btn" id="doc-topic-menu-button" aria-label="Open pages menu" aria-expanded="false" aria-controls="doc-topic-menu-list" data-doc-menu-toggle>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16"></path>
+            <path d="M4 12h16"></path>
+            <path d="M4 17h16"></path>
+          </svg>
+          <span>Pages</span>
+        </button>
+        <nav class="doc-menu" id="doc-topic-menu-list" aria-label="Pipeline topics" hidden>
+          <button type="button" class="doc-menu-btn" data-doc-open="detection">Detection &amp; Tracking</button>
+          <button type="button" class="doc-menu-btn" data-doc-open="depth-motion">Depth &amp; Motion</button>
+          <button type="button" class="doc-menu-btn" data-doc-open="lane">Lane Analysis</button>
+          <button type="button" class="doc-menu-btn" data-doc-open="risk-score">Risk Score &amp; State</button>
+          <button type="button" class="doc-menu-btn" data-doc-open="per-frame">Per-Frame Schedule</button>
+        </nav>
+      </div>
+      <button type="button" class="doc-output-toggle" aria-pressed="false" data-doc-output-toggle>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 6h18"></path>
+          <path d="M7 12h10"></path>
+          <path d="M10 18h4"></path>
+        </svg>
+        <span>Hide outputs</span>
+      </button>
+      <a class="doc-back" href="/">Back to menu</a>
+    </div>
+  </header>
+
+  <div class="doc">
+    <h1 class="doc-h1">How Spectra Works</h1>
+    <p class="doc-lead">
+      Spectra reads a forward-facing driving video frame by frame, builds a picture of the road and the
+      traffic in it, and asks one question for every object: <em>is this on a collision course with my
+      lane?</em> The map below is the full pipeline. Each stage shows the data it produces. Open any stage
+      or the topic menu for the details.
+    </p>
+
+    <!-- ─── MAIN PIPELINE MAP (pipeline only) ─────────────── -->
+    <section class="doc-section--map" aria-label="Pipeline overview">
+      <div class="flow-board flow-board--vertical">
+
+        <div class="flow-stage">
+          <article class="flow-node">
+            <h5>Frame Ingest</h5>
+            <p>Reads each video frame and resizes it into the views the models use.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">PreprocessedFrame</span>
+              <span class="flow-badge">bgr</span>
+              <span class="flow-badge">gray</span>
+              <span class="flow-badge">rgb</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true">
+          <span class="flow-connector__label">PreprocessedFrame</span>
+        </div>
+
+        <div class="flow-stage flow-stage-grid flow-stage-grid--2x2">
+          <button type="button" class="flow-node flow-node--link" data-doc-open="detection">
+            <h5>YOLO Detection</h5>
+            <p>Finds the road users in the frame: cars, people, bikes, buses and trucks.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">Detection[]</span>
+              <span class="flow-badge">bbox</span>
+              <span class="flow-badge">class_name</span>
+              <span class="flow-badge">confidence</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+          <button type="button" class="flow-node flow-node--link" data-doc-open="lane">
+            <h5>Lane (UFLDv2)</h5>
+            <p>Estimates the ego lane corridor and the point where it vanishes.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">LaneFrame</span>
+              <span class="flow-badge">lane_width_at_bottom</span>
+              <span class="flow-badge">lane_center_x_at_bottom</span>
+              <span class="flow-badge">vanishing_point</span>
+              <span class="flow-badge">confidence</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+          <button type="button" class="flow-node flow-node--link" data-doc-open="depth-motion">
+            <h5>Depth + Optical Flow</h5>
+            <p>Measures how far away each part of the frame is and how it is moving.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">depth_m</span>
+              <span class="flow-badge">near_map</span>
+              <span class="flow-badge">FlowResult</span>
+              <span class="flow-badge">magnitude_norm</span>
+              <span class="flow-badge">divergence_norm</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+          <button type="button" class="flow-node flow-node--link" data-doc-open="detection">
+            <h5>IoU Tracker</h5>
+            <p>Gives every object a stable id and follows it across frames so its motion is known.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">Track</span>
+              <span class="flow-badge">track_id</span>
+              <span class="flow-badge">bbox</span>
+              <span class="flow-badge">age</span>
+              <span class="flow-badge">history</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+        </div>
+
+        <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true">
+          <span class="flow-connector__label">Detection[] · LaneFrame · depth_m · FlowResult</span>
+        </div>
+
+        <div class="flow-stage">
+          <button type="button" class="flow-node flow-node--hub flow-node--link" data-doc-open="depth-motion">
+            <h5>TTC Fusion</h5>
+            <p>Estimates time to collision three ways and blends them into one trusted value.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">TtcComponent[]</span>
+              <span class="flow-badge">ttc_sec</span>
+              <span class="flow-badge">ttc_agreement</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+        </div>
+
+        <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true">
+          <span class="flow-connector__label">ttc_sec</span>
+        </div>
+
+        <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+          <button type="button" class="flow-node flow-node--hub flow-node--link" data-doc-open="risk-score">
+            <h5>Risk Assembly</h5>
+            <p>Combines closeness, approach speed, brake light and lane relevance into one risk value.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">near_score</span>
+              <span class="flow-badge">approach</span>
+              <span class="flow-badge">brake_score</span>
+              <span class="flow-badge">crossing_risk</span>
+              <span class="flow-badge flow-badge--out">risk.score</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+          <article class="flow-node flow-node--compact flow-node--advisory">
+            <h5>Traffic Light</h5>
+            <p>Reads the nearest light colour. Advisory only, it never changes the risk decision.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge">trafficLight</span>
+              <span class="flow-badge">state</span>
+              <span class="flow-badge">confidence</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true">
+          <span class="flow-connector__label">risk.score</span>
+        </div>
+
+        <div class="flow-stage">
+          <button type="button" class="flow-node flow-node--link" data-doc-open="risk-score">
+            <h5>State + Output</h5>
+            <p>Turns the risk value into SAFE, CAUTION or DANGER, smooths it, and sends the JSON the UI shows.</p>
+            <div class="flow-node__io">
+              <span class="flow-node__io-label">Outputs</span>
+              <span class="flow-badge flow-badge--out">state_from_score</span>
+              <span class="flow-badge flow-badge--out">SAFE / CAUTION / DANGER</span>
+              <span class="flow-badge">objects[]</span>
+            </div>
+            <span class="flow-jump">Details</span>
+          </button>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <!-- ════════ DETAIL POPUPS (full-screen overlays) ════════ -->
+
+  <!-- Detection & Tracking -->
+  <div class="doc-modal" id="doc-modal-detection" hidden>
+    <div class="doc-modal__backdrop" data-doc-close></div>
+    <div class="doc-modal__panel" role="dialog" aria-modal="true" aria-label="Detection and Tracking">
+      <header class="doc-modal__head">
+        <h2>Detection &amp; Tracking</h2>
+        <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
+      </header>
+      <div class="doc-modal__body">
+        <p class="doc-section-lead">YOLO finds the road users. Traffic lights are split off as an advisory.
+          The rest are filtered to the ego corridor and linked across frames by an IoU tracker so every
+          object keeps a stable id and a short history.</p>
+        <div class="flow-board flow-board--vertical">
+          <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+            <article class="flow-node">
+              <h5>YOLO Detection</h5>
+              <p>Detects the road classes only: car, person, bicycle, motorcycle, bus, truck.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">Detection</span>
+                <span class="flow-badge">bbox</span>
+                <span class="flow-badge">class_name</span>
+                <span class="flow-badge">confidence</span>
+              </div>
+            </article>
+            <article class="flow-node flow-node--compact flow-node--advisory">
+              <h5>Traffic Light Classifier</h5>
+              <p>Reads the colour of the nearest light. Advisory, it is not a tracked object.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">state</span>
+                <span class="flow-badge">confidence</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">Detection[]</span></div>
+          <div class="flow-stage">
+            <article class="flow-node">
+              <h5>Lane-Relevance Filter</h5>
+              <p>Drops objects outside the ego corridor before they reach the tracker.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">relevant Detection[]</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">relevant Detection[]</span></div>
+          <div class="flow-stage">
+            <article class="flow-node">
+              <h5>IoU Tracker</h5>
+              <p>Matches boxes of the same class between frames. New boxes start new tracks, missing ones are
+                dropped. The history feeds expansion rate and lateral velocity.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">Track</span>
+                <span class="flow-badge">track_id</span>
+                <span class="flow-badge">history</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">Track[]</span></div>
+          <div class="flow-stage">
+            <article class="flow-node flow-node--hub">
+              <h5>Primary Object</h5>
+              <p>build_object_events() scores every track and picks the most relevant one for the frame.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">RiskEvent</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Depth & Motion -->
+  <div class="doc-modal" id="doc-modal-depth-motion" hidden>
+    <div class="doc-modal__backdrop" data-doc-close></div>
+    <div class="doc-modal__panel" role="dialog" aria-modal="true" aria-label="Depth and Motion">
+      <header class="doc-modal__head">
+        <h2>Depth &amp; Motion</h2>
+        <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
+      </header>
+      <div class="doc-modal__body">
+        <p class="doc-section-lead">Three separate cues judge whether an object is getting closer, then
+          they are fused. Depth is the physical backbone. A per-track Kalman filter turns the metric
+          distance into a smooth distance and closing speed, so the time to collision survives a constant
+          scale error in the depth.</p>
+        <div class="flow-board flow-board--vertical">
+          <div class="flow-stage flow-stage-grid">
+            <article class="flow-node">
+              <h5>Depth (Metric, Kalman)</h5>
+              <p>Takes the 25th-percentile distance from the box, then a Kalman filter smooths it.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">depth_m</span>
+                <span class="flow-badge">distance_m</span>
+                <span class="flow-badge">closing_mps</span>
+              </div>
+            </article>
+            <article class="flow-node">
+              <h5>Optical Flow (DIS)</h5>
+              <p>Measures outward motion around the vanishing point and ignores noise.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">FlowResult</span>
+                <span class="flow-badge">magnitude_norm</span>
+              </div>
+            </article>
+            <article class="flow-node">
+              <h5>Expansion (bbox)</h5>
+              <p>Tracks how fast the box grows. Small growth counts as jitter.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">expansion_rate</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">TtcComponent (name, value, confidence)</span></div>
+          <div class="flow-stage">
+            <article class="flow-node flow-node--hub">
+              <h5>fuse_ttc</h5>
+              <p>Takes the confidence-weighted median of the three cues plus an agreement score.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">ttc_sec</span>
+                <span class="flow-badge">ttc_agreement</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">ttc_sec</span></div>
+          <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+            <article class="flow-node">
+              <h5>Proximity</h5>
+              <p>How close the object already is, from the filtered distance.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">near_score</span>
+              </div>
+            </article>
+            <article class="flow-node">
+              <h5>Approach</h5>
+              <p>How fast the gap is closing: 50% closing speed, 30% expansion, 20% flow.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">approach</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lane Analysis -->
+  <div class="doc-modal" id="doc-modal-lane" hidden>
+    <div class="doc-modal__backdrop" data-doc-close></div>
+    <div class="doc-modal__panel" role="dialog" aria-modal="true" aria-label="Lane Analysis">
+      <header class="doc-modal__head">
+        <h2>Lane Analysis</h2>
+        <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
+      </header>
+      <div class="doc-modal__body">
+        <p class="doc-section-lead">Object positions are measured against the ego lane, where 0 is the lane
+          center and 1 is the lane edge, so the same thresholds work across camera angles. Crossing risk is
+          the chance an object will be in the ego lane at impact, and it gates the whole risk score.</p>
+        <div class="flow-board flow-board--vertical">
+          <div class="flow-stage">
+            <article class="flow-node">
+              <h5>Lane (UFLDv2)</h5>
+              <p>Finds the ego lane corridor, smoothed by a Kalman filter that coasts on skipped frames.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">LaneFrame</span>
+                <span class="flow-badge">lane_center_x_at_bottom</span>
+                <span class="flow-badge">lane_width_at_bottom</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">LaneFrame</span></div>
+          <div class="flow-stage flow-stage-grid">
+            <article class="flow-node">
+              <h5>Object Normalization</h5>
+              <p>Places each object relative to the lane width at its own row.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">lane_position</span>
+              </div>
+            </article>
+            <article class="flow-node">
+              <h5>Crossing Risk</h5>
+              <p>Combines corridor overlap with a cut-in guess, damped for far objects.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">crossing_risk</span>
+              </div>
+            </article>
+            <article class="flow-node">
+              <h5>Confidence Input</h5>
+              <p>Lane-geometry trust feeds the confidence gate of the risk score.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge">lane_confidence</span>
+              </div>
+            </article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">crossing_risk</span></div>
+          <div class="flow-stage">
+            <article class="flow-node flow-node--hub">
+              <h5>Risk Score</h5>
+              <p>Lane relevance multiplies the whole score.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge flow-badge--out">risk.score</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Risk Score & State -->
+  <div class="doc-modal" id="doc-modal-risk-score" hidden>
+    <div class="doc-modal__backdrop" data-doc-close></div>
+    <div class="doc-modal__panel" role="dialog" aria-modal="true" aria-label="Risk Score and State">
+      <header class="doc-modal__head">
+        <h2>Risk Score &amp; State</h2>
+        <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
+      </header>
+      <div class="doc-modal__body">
+        <p class="doc-section-lead">The score is a single value from 0 to 1. Lane relevance is a multiplier,
+          not an added term, so a close or fast object that is not in our path still scores near zero. The
+          status is just a banding of that score, with one escalation for an imminent collision.</p>
+        <div class="doc-formula">
+          signal&nbsp;&nbsp;&nbsp;&nbsp;= 0.40·<b>eta_pressure</b> + 0.30·proximity + 0.25·approach + 0.05·brake<br>
+          gate&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 0.65 + 0.35·confidence<br>
+          relevance&nbsp;= crossing_risk<br>
+          <b>risk.score</b> = gate · relevance · signal
+        </div>
+        <div class="flow-board flow-board--vertical" style="margin-top:24px;">
+          <div class="flow-stage flow-stage-grid flow-stage-grid--2x2">
+            <article class="flow-node"><h5>ETA Pressure 40%</h5><p>How little time is left: clamp((3 minus ttc) / 3).</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge">eta_pressure</span></div></article>
+            <article class="flow-node"><h5>Proximity 30%</h5><p>How close it already is.</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge">near_score</span></div></article>
+            <article class="flow-node"><h5>Approach 25%</h5><p>How fast the gap is closing.</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge">approach</span></div></article>
+            <article class="flow-node"><h5>Brake 5%</h5><p>A lit lead-vehicle brake pair, an early warning.</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge">brake_score</span></div></article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">signal</span></div>
+          <div class="flow-stage flow-stage-grid flow-stage-grid--two">
+            <article class="flow-node"><h5>Confidence Gate</h5><p>0.65 + 0.35·confidence. Low detection trust shrinks the score.</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge">gate</span></div></article>
+            <article class="flow-node"><h5>Lane Relevance</h5><p>Multiplies the score by the in-path probability.</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge">crossing_risk</span></div></article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">gate · relevance · signal</span></div>
+          <div class="flow-stage">
+            <article class="flow-node flow-node--hub"><h5>score_raw</h5><p>The continuous risk score from 0 to 1.</p><div class="flow-node__io"><span class="flow-node__io-label">Outputs</span><span class="flow-badge flow-badge--out">risk.score</span></div></article>
+          </div>
+          <div class="flow-connector flow-connector--down flow-connector--labeled" aria-hidden="true"><span class="flow-connector__label">state_from_score</span></div>
+          <div class="flow-stage">
+            <article class="flow-node flow-node--hub"><h5>State</h5>
+              <p>0.60 and up is DANGER, 0.25 and up is CAUTION, otherwise SAFE. A confirmed ttc under 1s on an
+                already-CAUTION object jumps to DANGER. Detection confidence under 0.20 forces SAFE.
+                Hysteresis then smooths flicker, 3 frames up and 7 down.</p>
+              <div class="flow-node__io">
+                <span class="flow-node__io-label">Outputs</span>
+                <span class="flow-badge flow-badge--out">SAFE / CAUTION / DANGER</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Per-Frame Schedule -->
+  <div class="doc-modal" id="doc-modal-per-frame" hidden>
+    <div class="doc-modal__backdrop" data-doc-close></div>
+    <div class="doc-modal__panel" role="dialog" aria-modal="true" aria-label="Per-Frame Schedule">
+      <header class="doc-modal__head">
+        <h2>Per-Frame Schedule</h2>
+        <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
+      </header>
+      <div class="doc-modal__body">
+        <p class="doc-section-lead">Not every module runs every frame. Heavy models are sampled on intervals
+          and reused in between, while tracking and risk run on every frame.</p>
+        <div class="frame-plan-table-wrap">
+          <table class="frame-plan-table">
+            <thead><tr><th>Module</th><th>Frequency</th><th>When Skipped</th></tr></thead>
+            <tbody>
+              <tr><td><span class="module-name">Preprocess</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always runs</td></tr>
+              <tr><td><span class="module-name">Optical Flow</span></td><td><span class="freq-badge freq-every">Default: every frame</span></td><td class="skip-cell">DIS flow with ego-motion compensation, downscaled to 320px for the flow pass</td></tr>
+              <tr><td><span class="module-name">YOLO Detection</span></td><td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td><td class="skip-cell">Tracker propagates existing ids</td></tr>
+              <tr><td><span class="module-name">Traffic Light</span></td><td><span class="freq-badge freq-periodic">On YOLO frames</span></td><td class="skip-cell">Advisory reuses the last value, it does not gate the risk score</td></tr>
+              <tr><td><span class="module-name">Detection Filtering</span></td><td><span class="freq-badge freq-periodic">On YOLO frames</span></td><td class="skip-cell">Non-relevant objects ignored</td></tr>
+              <tr><td><span class="module-name">Tracking</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always runs</td></tr>
+              <tr><td><span class="module-name">Lane Detection</span></td><td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td><td class="skip-cell">Last corridor reused and smoothed</td></tr>
+              <tr><td><span class="module-name">Depth Estimation</span></td><td><span class="freq-badge freq-slow">Default: every 10th frame</span></td><td class="skip-cell">Previous metric map retained</td></tr>
+              <tr><td><span class="module-name">Risk Calculation</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Combines eta, proximity, approach, lane relevance, confidence and brake_score</td></tr>
+              <tr><td><span class="module-name">State Stabilization</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always runs</td></tr>
+              <tr><td><span class="module-name">Timeline Row</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always runs</td></tr>
+              <tr><td><span class="module-name">Event Selection</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Top risk events kept</td></tr>
+              <tr><td><span class="module-name">Render Images</span></td><td><span class="freq-badge freq-event">Saved events only</span></td><td class="skip-cell">SAFE boxes hidden from overlays</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="frame-plan-note">
+          <span>Depth also runs on demand when motion risk goes above 15%, regardless of the schedule.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/how-it-works.js"></script>
+</body>
+</html>

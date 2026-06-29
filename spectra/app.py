@@ -195,6 +195,11 @@ def index_head() -> Response:
     return Response(status_code=200, media_type="text/html")
 
 
+@app.get("/how-it-works", include_in_schema=False)
+def how_it_works() -> FileResponse:
+    return FileResponse(STATIC_DIR / "how-it-works.html")
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     return Response(status_code=204)

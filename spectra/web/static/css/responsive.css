@@ -471,38 +471,8 @@
   word-break: normal;
   text-align: center;
 }
-.flow-badge--frame,
-.flow-badge--det,
-.flow-badge--track,
-.flow-badge--depth,
-.flow-badge--flow,
-.flow-badge--exp,
-.flow-badge--ttc {
-  color: var(--text-soft);
-  background: rgba(255,255,255,0.08);
-}
-.flow-badge--lane {
-  color: var(--caution);
-  background: rgba(var(--caution-rgb), 0.12);
-}
-.flow-badge--conf {
-  color: var(--safe);
-  background: rgba(var(--safe-rgb), 0.12);
-}
-.flow-badge--risk,
-.flow-badge--brake {
-  color: var(--red-hi);
-  background: rgba(255, 59, 59, 0.14);
-}
-.flow-badge--state {
-  color: #fff;
-  background: rgba(255, 59, 59, 0.18);
-}
-.flow-badge--advisory {
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px dashed rgba(255,255,255,0.18);
-}
+/* Chip colours are standardized on the /how-it-works page (how-it-works.css):
+   neutral for data, red only for the final risk outputs. */
 
 /* ─── Keyboard shortcuts modal ───────────────────────────── */
 .shortcuts-content { max-width: 480px; }

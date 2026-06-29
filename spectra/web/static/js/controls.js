@@ -2283,53 +2283,8 @@ export function initializeSpectra() {
     setTimeout(() => { if (!settingsDrawer.classList.contains("is-open")) settingsDrawer.hidden = true; }, 400);
   }
 
-  // ─── help modal ──────────────────────────────────────────
-  const HELP_PAGES = {
-    home: "How Spectra Works",
-    overview: "Data Flow",
-    detection: "Detection & Tracking",
-    "depth-motion": "Depth & Motion",
-    lane: "Lane Analysis",
-    "risk-score": "Risk Score",
-    "per-frame": "Per-Frame Processing",
-  };
-
-  function showHelpPage(name = "home") {
-    const pageName = Object.prototype.hasOwnProperty.call(HELP_PAGES, name) ? name : "home";
-    document.querySelectorAll("[data-help-page]").forEach((page) => {
-      page.classList.toggle("is-active", page.dataset.helpPage === pageName);
-    });
-
-    const title = byId("help-title");
-    if (title) title.textContent = HELP_PAGES[pageName];
-
-    const back = byId("help-back");
-    if (back) back.hidden = pageName === "home";
-
-    const body = document.querySelector("#help-modal .help-body");
-    if (body) body.scrollTop = 0;
-  }
-
-  function openHelpModal() {
-    const modal = byId("help-modal");
-    if (!modal) return;
-    showHelpPage("home");
-    modal.hidden = false;
-    void modal.offsetHeight;
-    modal.classList.add("is-open");
-  }
-  function closeHelpModal() {
-    const modal = byId("help-modal");
-    if (!modal) return;
-    modal.classList.remove("is-open");
-    setTimeout(() => {
-      if (!modal.classList.contains("is-open")) {
-        modal.hidden = true;
-        showHelpPage("home");
-      }
-    }, 400);
-  }
-
+  // "How Spectra Works" now lives on the standalone /how-it-works page;
+  // the header's #open-help link navigates there directly (no modal JS).
 
 
   function setupSegmentedControls() {
@@ -2815,7 +2770,6 @@ export function initializeSpectra() {
     removeBtn?.addEventListener("click", clearSelectedSource);
 
     byId("open-settings")?.addEventListener("click", openDrawer);
-    byId("open-help")?.addEventListener("click", openHelpModal);
     byId("open-shortcuts")?.addEventListener("click", openShortcuts);
     byId("reset-advanced-sampling")?.addEventListener("click", resetAdvancedSampling);
     byId("view-json-btn")?.addEventListener("click", openJsonView);
@@ -2866,17 +2820,8 @@ export function initializeSpectra() {
       if (!event.target?.closest?.(".player-settings")) closeSettingsMenu();
     });
 
-    document.querySelectorAll("[data-help-close]").forEach(el => {
-      el.addEventListener("click", closeHelpModal);
-    });
-    document.querySelectorAll("[data-help-goto]").forEach(el => {
-      el.addEventListener("click", () => showHelpPage(el.dataset.helpGoto));
-    });
-    byId("help-back")?.addEventListener("click", () => showHelpPage("home"));
-
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        closeHelpModal();
         closeSettingsMenu();
         closeShortcuts();
       }
