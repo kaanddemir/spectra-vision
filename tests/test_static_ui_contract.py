@@ -128,16 +128,18 @@ def test_how_it_works_is_a_standalone_routed_page():
     assert 'data-doc-menu-toggle' in page
     assert ">Pages<" in page
     assert 'id="doc-topic-menu-list"' in page
-    assert 'data-doc-output-toggle' in page
+    assert 'data-doc-output-toggle' not in page
 
     # Popups open/close via the standalone driver (no inline-section anchors).
     assert "data-doc-close" in page
     assert "openModal" in page_js and "closeModal" in page_js
-    assert "toggleOutputs" in page_js and "doc-hide-outputs" in page_js
+    assert "enhanceModalOutputToggles" in page_js
+    assert "toggleModalOutputs" in page_js and "doc-hide-outputs" in page_js
+    assert "data-doc-modal-output-toggle" in page_js
     assert "enhanceInfoTooltips" in page_js and "flow-info-icon" in page_js
 
-    # Standardized chips: an "Outputs" caption per card, neutral data chips, and
-    # the red accent reserved for the final risk verdict only.
+    # Standardized chips are retained for detail pages, but the main pipeline
+    # map hides them so its cards stay conceptual.
     assert "flow-node__io-label" in page and ">Outputs<" in page
     assert "flow-badge--out" in page
 
@@ -148,9 +150,17 @@ def test_how_it_works_is_a_standalone_routed_page():
         ".doc-menu-btn",
         ".doc-menu-btn.is-active",
         ".doc-output-toggle",
-        "body.doc-hide-outputs .flow-node__io",
+        ".doc-modal.doc-hide-outputs .flow-node__io",
+        ".doc-section--map .flow-node__io",
+        ".doc-modal.doc-hide-outputs .flow-node",
+        ".doc-section--map .flow-node",
+        ".doc-modal__actions",
+        "min-height: 96px",
         ".flow-info-icon",
         ".flow-info-icon::after",
+        "grid-template-rows: auto minmax(58px, auto) auto",
+        "justify-items: center",
+        "min-height: 148px",
         ".flow-stage-grid--2x2",
         ".doc-modal",
         ".flow-node--link",

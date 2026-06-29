@@ -187,11 +187,14 @@
 
 /* ─── Enriched flow-node content (title + desc + var chips) ──── */
 .flow-node {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(58px, auto) auto;
   align-items: center;
-  justify-content: flex-start;
-  gap: 9px;
+  align-content: center;
+  justify-items: center;
+  justify-content: stretch;
+  gap: 12px;
+  min-height: 148px;
   padding: 20px 18px;
   text-align: center;
 }
@@ -201,9 +204,12 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
+  justify-self: center;
+  align-self: end;
+  width: 100%;
 }
 .flow-node > p {
-  display: none;
+  display: none !important;
 }
 .flow-info-icon {
   position: relative;
@@ -265,9 +271,13 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  align-self: center;
   justify-content: center;
+  justify-self: center;
   gap: 5px;
-  margin-top: 2px;
+  width: min(100%, 760px);
+  min-height: 58px;
+  margin: 0;
 }
 /* "OUTPUTS" caption: takes a full row so the chips wrap beneath it. */
 .flow-node__io-label {
@@ -295,11 +305,26 @@
   border-color: var(--red-line);
 }
 body.doc-hide-outputs .flow-node__io,
-body.doc-hide-outputs .flow-connector__label {
-  display: none;
+.doc-modal.doc-hide-outputs .flow-node__io,
+.doc-section--map .flow-node__io,
+.doc-section--map .flow-connector__label {
+  display: none !important;
 }
-body.doc-hide-outputs .flow-connector--labeled {
-  height: 28px;
+.doc-modal.doc-hide-outputs .flow-node,
+.doc-section--map .flow-node {
+  grid-template-rows: auto auto;
+  gap: 14px;
+  min-height: 96px;
+  padding: 18px;
+}
+.doc-modal.doc-hide-outputs .flow-node:not(.flow-node--link),
+.doc-section--map .flow-node:not(.flow-node--link) {
+  min-height: 76px;
+}
+.doc-modal.doc-hide-outputs .flow-connector--labeled,
+.doc-section--map .flow-connector--labeled {
+  height: 22px;
+  margin: 2px 0;
 }
 
 /* Clickable map stage (a <button>) that opens its detail popup. */
@@ -318,7 +343,10 @@ body.doc-hide-outputs .flow-connector--labeled {
   outline-offset: 3px;
 }
 .flow-node--link .flow-jump {
-  margin-top: 2px;
+  justify-self: center;
+  align-self: end;
+  min-height: 18px;
+  margin-top: 0;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -389,6 +417,12 @@ body.doc-modal-open { overflow: hidden; }
   padding: 18px 28px;
   background: rgba(9, 9, 13, 0.92);
   border-bottom: 1px solid var(--border-soft);
+}
+.doc-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
 .doc-modal__head h2 {
   margin: 0;
