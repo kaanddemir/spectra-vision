@@ -1198,6 +1198,12 @@ def analyze_spatial_video(
         "frames": frames,
         "events": saved_events,
         "peak_event": peak_event,
+        # Echo the active score-band edges so the UI's Score chart can draw the
+        # CAUTION/DANGER threshold lines that this analysis actually used.
+        "sensitivity": {
+            "cautionBand": analyzer.sensitivity.caution_band,
+            "dangerBand": analyzer.sensitivity.danger_band,
+        },
         "performance_summary": performance_summary,
         "performance_logs": performance_logs,
     }

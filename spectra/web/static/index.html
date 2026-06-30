@@ -505,7 +505,7 @@
                   <strong class="hero-metric-val" id="alert-ttc">—</strong>
                 </div>
                 <div class="hero-metric hero-metric-score">
-                  <span class="hero-metric-lbl">Risk Score / 100
+                  <span class="hero-metric-lbl">Risk Score
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
                       <div class="tooltip-content">A 0–100 score for the selected object. It combines ETA pressure, proximity, approach and brake cues, then applies lane relevance and confidence.</div>
@@ -664,6 +664,11 @@
             <div class="risk-sub-panel">
               <div class="risk-sub-panel-head">
                 <h3>Risk Timeline</h3>
+                <div class="modern-mode-toggle chart-tabs" id="risk-chart-tabs">
+                  <button type="button" class="mode-btn is-active" data-chart-tab="state">State</button>
+                  <button type="button" class="mode-btn" data-chart-tab="score">Score</button>
+                  <button type="button" class="mode-btn" data-chart-tab="eta">ETA</button>
+                </div>
               </div>
               <div class="chart-container">
                 <div class="chart-y-axis">

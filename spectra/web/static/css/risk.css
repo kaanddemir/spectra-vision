@@ -295,15 +295,20 @@
   gap: 0 12px;
 }
 .chart-y-axis {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-around;
+  position: relative;
   text-align: right;
-  padding: 2px 0;
   font-size: 8.5px;
   color: var(--muted);
   font-weight: 800;
   letter-spacing: 0.04em;
+}
+/* Labels are absolutely positioned (JS sets `top`) so each tick lines up with
+   its in-chart threshold line rather than being evenly distributed. */
+.chart-y-axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
 }
 .chart-stage {
   position: relative;
@@ -565,6 +570,17 @@
   letter-spacing: 0.05em;
 }
 
+/* Chart view tabs (State / Score / ETA) reuse the Live/Peak/Objects toggle
+   look (.modern-mode-toggle + .mode-btn), but compact so this panel head stays
+   the same height as the text-only sub-panel heads (e.g. "Current Risk"). */
+.chart-tabs.modern-mode-toggle {
+  padding: 2px;
+}
+.chart-tabs .mode-btn {
+  padding: 3px 10px;
+  font-size: 10px;
+}
+
 .modern-risk-main {
   display: grid;
   grid-template-columns: 80px 1fr;
@@ -706,6 +722,14 @@
   transform: translateY(0);
 }
 .risk-banner .info-tip::before { display: none; }
+
+/* Risk Score sits in the right hero column, so its tooltip must open toward the
+   panel centre (anchor the right edge) instead of overflowing the right edge
+   where the panel's overflow:hidden would clip it. */
+.hero-metric-score .tooltip-content {
+  left: auto;
+  right: 0;
+}
 
 /* (object) suffix next to the "What builds the Risk Score" title */
 .risk-factors-title {

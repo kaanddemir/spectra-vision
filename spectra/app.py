@@ -150,6 +150,8 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
             "frameWidth": result.get("frame_width"),
             "frameHeight": result.get("frame_height"),
             "elapsedSec": round(elapsed_sec, 3),
+            "sensitivity": result.get("sensitivity")
+            or {"cautionBand": 0.25, "dangerBand": 0.60},
         },
         "frames": result.get("frames") or [],
         "peakEvent": None if peak_event is None else _serialize_event(peak_event, image_ref=peak_ref),

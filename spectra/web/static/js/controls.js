@@ -65,6 +65,8 @@ export function initializeSpectra() {
     frameBudgetPreset: null,
     samplingPreset: "balanced",
     suppressSamplingCustom: false,
+    riskChartTab: "state",
+    riskBands: { cautionBand: 0.25, dangerBand: 0.60 },
   };
 
   const byId = (id) => document.getElementById(id);
@@ -853,6 +855,7 @@ export function initializeSpectra() {
       events,
       timelineRows: frames,
       sourceName: metadata.sourceName || fileInput.files[0]?.name || null,
+      sensitivity: metadata.sensitivity || null,
     };
   }
 
@@ -1506,176 +1509,365 @@ export function initializeSpectra() {
   }
 
   // ─── Risk state timeline from timelineRows ───────────────
+  const CHART_W = 400;
+  const CHART_H = 150;
+  // Numeric tabs (Score / ETA) map value → y across the FULL chart height, so
+  // the axis numbers, threshold lines and zone fills all line up: the top value
+  // sits at the very top edge and the bottom value at the very bottom edge with
+  // no empty band. (The y-axis label for an edge value is nudged a few % inward
+  // by setChartYAxis so it isn't clipped at the border.)
+  const CHART_Y_TOP = 0;
+  const CHART_Y_BOT = CHART_H;
+  const MARKER_COLOR = { danger: "#ff4444", caution: "#ffb020", safe: "#12d492" };
+  const CHART_NS = "http://www.w3.org/2000/svg";
+  const makeSvg = (tag, attrs) => {
+    const el = document.createElementNS(CHART_NS, tag);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+    return el;
+  };
+
+  // Map a value within [vMin, vMax] to a y inside [CHART_Y_TOP, CHART_Y_BOT].
+  // Higher value → higher on the chart (smaller y). Danger sits at the top for
+  // every tab (high score / low TTC), matching the State tab where DANGER is up.
+  const chartY = (v, vMin, vMax) =>
+    CHART_Y_BOT - clamp((v - vMin) / (vMax - vMin), 0, 1) * (CHART_Y_BOT - CHART_Y_TOP);
+
+  // ticks: array of { text, y } where y is the SVG y (0..CHART_H). Each label is
+  // absolutely positioned at that height so it aligns with its threshold line.
+  function setChartYAxis(ticks) {
+    const yAxis = document.querySelector(".chart-y-axis");
+    if (!yAxis) return;
+    yAxis.replaceChildren();
+    ticks.forEach(({ text, y }) => {
+      const label = document.createElement("span");
+      label.textContent = String(text);
+      // Nudge edge labels ~3% inward so the top/bottom values stay fully
+      // visible instead of being clipped at the chart border.
+      label.style.top = `${clamp((y / CHART_H) * 100, 3, 97).toFixed(1)}%`;
+      yAxis.appendChild(label);
+    });
+  }
+
+  // Shadow + main stroke between two plotted points (shared line look).
+  function addChartSegment(lineGroup, prev, point, color) {
+    lineGroup.appendChild(makeSvg("line", {
+      x1: prev.x.toFixed(1), y1: prev.y.toFixed(1),
+      x2: point.x.toFixed(1), y2: point.y.toFixed(1),
+      stroke: color, "stroke-width": 5, "stroke-opacity": 0.13, "stroke-linecap": "round",
+    }));
+    lineGroup.appendChild(makeSvg("line", {
+      x1: prev.x.toFixed(1), y1: prev.y.toFixed(1),
+      x2: point.x.toFixed(1), y2: point.y.toFixed(1),
+      stroke: color, "stroke-width": 2.2, "stroke-linecap": "round",
+    }));
+  }
+
+  // Interactive marker: tooltip + click/Enter seeks the preview to that time.
+  // `dot:false` draws only the invisible hit area + tooltip (no visible circle),
+  // so the smooth numeric tabs keep seek/hover without a dense dot blob.
+  function addChartMarker(lineGroup, { x, y, color, sc, timeSec, tooltip, radius, dot = true }) {
+    const group = makeSvg("g", {
+      class: `chart-event-marker chart-event-${sc}`,
+      "data-time": timeSec.toFixed(2),
+      tabindex: 0,
+      role: "button",
+    });
+    group.style.cursor = "pointer";
+    const seek = () => { seekPreviewVideo(timeSec); applyTimelineStateAt(timeSec); };
+    group.addEventListener("click", seek);
+    group.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      seek();
+    });
+    const title = makeSvg("title", {});
+    title.textContent = tooltip;
+    group.appendChild(title);
+    group.appendChild(makeSvg("rect", {
+      x: (x - 8).toFixed(1), y: (y - 15).toFixed(1), width: 16, height: 30,
+      fill: "rgba(0,0,0,0)", stroke: "none", "pointer-events": "all",
+    }));
+    if (dot) {
+      group.appendChild(makeSvg("circle", {
+        cx: x.toFixed(1), cy: y.toFixed(1), r: radius ?? 4,
+        fill: color, stroke: "rgba(255,255,255,0.92)", "stroke-width": 1.1,
+      }));
+    }
+    lineGroup.appendChild(group);
+  }
+
+  // Group timeline rows into N even time buckets across the analysed window, so
+  // the numeric tabs can draw one aggregated column per bucket instead of a
+  // noisy per-frame line. Empty buckets stay empty (no column).
+  function bucketRows(rows, winStart, winSpan, N) {
+    const buckets = Array.from({ length: N }, () => []);
+    rows.forEach((r) => {
+      if (r.timeSec == null) return;
+      const k = clamp(Math.floor(((r.timeSec - winStart) / winSpan) * N), 0, N - 1);
+      buckets[k].push(r);
+    });
+    return buckets;
+  }
+
+  // Column (bar) renderer for the numeric tabs (Score / ETA). Each bar grows up
+  // from `baselineY` to valueToY(value) → tall bar = danger, in both tabs. Zone
+  // colour matches the background bands; clicking a bar seeks to that moment.
+  // `bars`: [{ x(center), value, sc, timeSec }].
+  function drawBars(group, bars, valueToY, baselineY, barW, tooltipFn) {
+    bars.forEach((bar) => {
+      const yTop = valueToY(bar.value);
+      const h = baselineY - yTop;
+      if (h <= 0.5) return; // safe / empty bucket → nothing to draw
+      const g = makeSvg("g", {
+        class: `chart-event-marker chart-event-${bar.sc}`,
+        "data-time": bar.timeSec.toFixed(2),
+        tabindex: 0,
+        role: "button",
+      });
+      g.style.cursor = "pointer";
+      const seek = () => { seekPreviewVideo(bar.timeSec); applyTimelineStateAt(bar.timeSec); };
+      g.addEventListener("click", seek);
+      g.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        seek();
+      });
+      const title = makeSvg("title", {});
+      title.textContent = tooltipFn(bar);
+      g.appendChild(title);
+      g.appendChild(makeSvg("rect", {
+        x: (bar.x - barW / 2).toFixed(1), y: yTop.toFixed(1),
+        width: barW.toFixed(1), height: h.toFixed(1), rx: 1.5,
+        fill: MARKER_COLOR[bar.sc] || MARKER_COLOR.safe, "fill-opacity": 0.9,
+      }));
+      group.appendChild(g);
+    });
+  }
+
+  // Re-draw the chart for the source currently feeding it (saved result during
+  // summary, live rows during analysis), so a tab switch repaints in place.
+  function rerenderRiskChart() {
+    if (state.currentResult) {
+      renderRiskTimeline(state.currentResult);
+    } else {
+      renderRiskTimeline({ timelineRows: state.liveTimelineRows || [], events: state.liveEvents || [] });
+    }
+  }
+
+  function setupRiskChartTabs() {
+    const tabs = byId("risk-chart-tabs");
+    if (!tabs) return;
+    tabs.querySelectorAll(".mode-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.dataset.chartTab || "state";
+        if (tab === state.riskChartTab) return;
+        state.riskChartTab = tab;
+        tabs.querySelectorAll(".mode-btn").forEach((b) => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+        rerenderRiskChart();
+      });
+    });
+  }
+
+
+  // Dispatcher: prepare shared scaffolding (rows, x-scale, blank groups) then
+  // draw the layer for the active tab. Keeps the original function name so the
+  // result / live / reset call sites stay untouched.
   function renderRiskTimeline(result) {
     const lineGroup = byId("chart-line");
     const areaGroup = byId("chart-area");
     const pointCountEl = byId("stat-risk-points");
     if (!lineGroup || !areaGroup) return;
 
-    const points = normalizeTimelineRowsForChart(result?.timelineRows)
-      .map((row) => {
-        const sc = stateClass(row.riskState);
-        const riskState = sc === "none" ? "SAFE" : sc.toUpperCase();
-        return {
-          timeSec: row.timeSec,
-          sc: sc === "none" ? "safe" : sc,
-          riskState,
-          collisionEta: row.collisionEta,
-          objectType: row.objectType,
-          objectId: row.objectId,
-          displayId: row.displayId,
-          lane: row.lane,
-        };
-      });
-
-    // Scale the chart x-axis to the analyzed window, not the full media, so the
-    // analysis fills the chart instead of being squeezed into a sub-range.
+    const rows = normalizeTimelineRowsForChart(result?.timelineRows);
+    // Scale the x-axis to the analyzed window, not the full media.
     const { start: winStart, span: winSpan } = winBounds();
+    const xForTime = (t) => clamp((t - winStart) / winSpan, 0, 1) * CHART_W;
 
-    const W = 400;
-    const yByState = {
-      danger: 28,
-      caution: 75,
-      safe: 122,
-    };
-    const markerColorByState = {
-      danger: "#ff4444",
-      caution: "#ffb020",
-      safe: "#12d492",
-    };
-
-    const svgNS = "http://www.w3.org/2000/svg";
-    const createSvg = (tag, attrs) => {
-      const el = document.createElementNS(svgNS, tag);
-      Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
-      return el;
-    };
     areaGroup.replaceChildren();
     lineGroup.replaceChildren();
+    if (pointCountEl) pointCountEl.textContent = String(rows.length);
 
-    const yAxis = document.querySelector(".chart-y-axis");
-    if (yAxis) {
-      yAxis.replaceChildren();
-      ["DANGER", "CAUTION", "SAFE"].forEach((tick) => {
-        const label = document.createElement("span");
-        label.textContent = String(tick);
-        yAxis.appendChild(label);
-      });
-    }
-
-    const xForTime = (t) => clamp((t - winStart) / winSpan, 0, 1) * W;
-
-    [
-      { sc: "danger", y: 0, h: 50, color: "rgba(255, 68, 68, 0.07)" },
-      { sc: "caution", y: 50, h: 50, color: "rgba(255, 176, 32, 0.06)" },
-      { sc: "safe", y: 100, h: 50, color: "rgba(18, 212, 146, 0.055)" },
-    ].forEach((band) => {
-      areaGroup.appendChild(createSvg("rect", {
-        x: 0,
-        y: band.y,
-        width: W,
-        height: band.h,
-        fill: band.color,
-      }));
-    });
-    Object.values(yByState).forEach((y) => {
-      areaGroup.appendChild(createSvg("line", {
-        x1: 0,
-        y1: y.toFixed(1),
-        x2: W,
-        y2: y.toFixed(1),
-        stroke: "rgba(255,255,255,0.12)",
-        "stroke-width": 1,
-        "stroke-dasharray": "3 5",
-      }));
-    });
-
-    if (!points.length) {
-      if (pointCountEl) pointCountEl.textContent = "0";
-      updateChartAxisX();
-      return;
-    }
-
-    if (pointCountEl) pointCountEl.textContent = String(points.length);
-
-    const chartPoints = points.map((point) => ({
-      ...point,
-      x: clamp(xForTime(point.timeSec), 0, W),
-      y: yByState[point.sc] ?? yByState.safe,
-    }));
-
-    for (let i = 1; i < chartPoints.length; i++) {
-      const prev = chartPoints[i - 1];
-      const point = chartPoints[i];
-      const color = markerColorByState[point.sc] || markerColorByState.safe;
-      lineGroup.appendChild(createSvg("line", {
-        x1: prev.x.toFixed(1),
-        y1: prev.y.toFixed(1),
-        x2: point.x.toFixed(1),
-        y2: point.y.toFixed(1),
-        stroke: color,
-        "stroke-width": 5,
-        "stroke-opacity": 0.13,
-        "stroke-linecap": "round",
-      }));
-      lineGroup.appendChild(createSvg("line", {
-        x1: prev.x.toFixed(1),
-        y1: prev.y.toFixed(1),
-        x2: point.x.toFixed(1),
-        y2: point.y.toFixed(1),
-        stroke: color,
-        "stroke-width": 2.2,
-        "stroke-linecap": "round",
-      }));
-    }
-
-    chartPoints.forEach((point) => {
-      const color = markerColorByState[point.sc] || markerColorByState.safe;
-      const group = createSvg("g", {
-        class: `chart-event-marker chart-event-${point.sc}`,
-        "data-time": point.timeSec.toFixed(2),
-        tabindex: 0,
-        role: "button",
-      });
-      group.style.cursor = "pointer";
-      group.addEventListener("click", () => {
-        seekPreviewVideo(point.timeSec);
-        applyTimelineStateAt(point.timeSec);
-      });
-      group.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        seekPreviewVideo(point.timeSec);
-        applyTimelineStateAt(point.timeSec);
-      });
-
-      const title = createSvg("title", {});
-      title.textContent = timelinePointTooltip(point);
-      group.appendChild(title);
-
-      group.appendChild(createSvg("rect", {
-        x: (point.x - 8).toFixed(1),
-        y: (point.y - 15).toFixed(1),
-        width: 16,
-        height: 30,
-        fill: "rgba(0,0,0,0)",
-        stroke: "none",
-        "pointer-events": "all",
-      }));
-      group.appendChild(createSvg("circle", {
-        cx: point.x.toFixed(1),
-        cy: point.y.toFixed(1),
-        r: point.sc === "danger" ? 4.6 : 4,
-        fill: color,
-        stroke: "rgba(255,255,255,0.92)",
-        "stroke-width": 1.1,
-      }));
-
-      lineGroup.appendChild(group);
-    });
+    const ctx = { areaGroup, lineGroup, xForTime, W: CHART_W };
+    const tab = state.riskChartTab || "state";
+    if (tab === "score") renderScoreLayer(rows, ctx);
+    else if (tab === "eta") renderEtaLayer(rows, ctx);
+    else renderStateLayer(rows, ctx);
 
     updateChartAxisX();
     setActiveEventIndex(nearestEventIndexAt(previewVideo?.currentTime ?? 0));
+  }
+
+  // State tab: categorical SAFE/CAUTION/DANGER lane chart (original behaviour).
+  function renderStateLayer(rows, { areaGroup, lineGroup, xForTime, W }) {
+    const yByState = { danger: 28, caution: 75, safe: 122 };
+    setChartYAxis([
+      { text: "DANGER", y: yByState.danger },
+      { text: "CAUTION", y: yByState.caution },
+      { text: "SAFE", y: yByState.safe },
+    ]);
+
+    [
+      { y: 0, h: 50, color: "rgba(255, 68, 68, 0.07)" },
+      { y: 50, h: 50, color: "rgba(255, 176, 32, 0.06)" },
+      { y: 100, h: 50, color: "rgba(18, 212, 146, 0.055)" },
+    ].forEach((band) => {
+      areaGroup.appendChild(makeSvg("rect", { x: 0, y: band.y, width: W, height: band.h, fill: band.color }));
+    });
+    Object.values(yByState).forEach((y) => {
+      areaGroup.appendChild(makeSvg("line", {
+        x1: 0, y1: y.toFixed(1), x2: W, y2: y.toFixed(1),
+        stroke: "rgba(255,255,255,0.12)", "stroke-width": 1, "stroke-dasharray": "3 5",
+      }));
+    });
+
+    const points = rows.map((row) => {
+      const sc = stateClass(row.riskState);
+      const cls = sc === "none" ? "safe" : sc;
+      return {
+        timeSec: row.timeSec,
+        sc: cls,
+        riskState: cls.toUpperCase(),
+        collisionEta: row.collisionEta,
+        objectType: row.objectType,
+        objectId: row.objectId,
+        displayId: row.displayId,
+        lane: row.lane,
+        x: clamp(xForTime(row.timeSec), 0, W),
+        y: yByState[cls] ?? yByState.safe,
+      };
+    });
+    if (!points.length) return;
+
+    for (let i = 1; i < points.length; i++) {
+      addChartSegment(lineGroup, points[i - 1], points[i], MARKER_COLOR[points[i].sc] || MARKER_COLOR.safe);
+    }
+    points.forEach((point) => {
+      addChartMarker(lineGroup, {
+        x: point.x, y: point.y, sc: point.sc, timeSec: point.timeSec,
+        color: MARKER_COLOR[point.sc] || MARKER_COLOR.safe,
+        radius: point.sc === "danger" ? 4.6 : 4,
+        tooltip: timelinePointTooltip(point),
+      });
+    });
+  }
+
+  // Score tab: 0–100 risk score as zone-coloured columns (worst-case per time
+  // bucket). Threshold lines/zones drawn at the bands this analysis used.
+  function renderScoreLayer(rows, { areaGroup, lineGroup, W }) {
+    const bands = state.riskBands || { cautionBand: 0.25, dangerBand: 0.60 };
+    const cautionY = chartY(bands.cautionBand, 0, 1);
+    const dangerY = chartY(bands.dangerBand, 0, 1);
+    // Y-axis ticks ARE the band edges, drawn at their exact line positions.
+    setChartYAxis([
+      { text: "100", y: CHART_Y_TOP },
+      { text: String(Math.round(bands.dangerBand * 100)), y: dangerY },
+      { text: String(Math.round(bands.cautionBand * 100)), y: cautionY },
+      { text: "0", y: CHART_Y_BOT },
+    ]);
+
+    // Zone fills bleed to full height (danger top → caution → safe bottom).
+    [
+      { y: 0, h: dangerY, color: "rgba(255, 68, 68, 0.08)" },
+      { y: dangerY, h: cautionY - dangerY, color: "rgba(255, 176, 32, 0.07)" },
+      { y: cautionY, h: CHART_H - cautionY, color: "rgba(18, 212, 146, 0.05)" },
+    ].forEach((band) => {
+      if (band.h <= 0) return;
+      areaGroup.appendChild(makeSvg("rect", { x: 0, y: band.y.toFixed(1), width: W, height: band.h.toFixed(1), fill: band.color }));
+    });
+    [
+      { y: dangerY, stroke: "rgba(255, 68, 68, 0.5)" },
+      { y: cautionY, stroke: "rgba(255, 176, 32, 0.5)" },
+    ].forEach((g) => {
+      areaGroup.appendChild(makeSvg("line", {
+        x1: 0, y1: g.y.toFixed(1), x2: W, y2: g.y.toFixed(1),
+        stroke: g.stroke, "stroke-width": 1, "stroke-dasharray": "4 4",
+      }));
+    });
+
+    // One column per time bucket; each bar = the worst-case (max) score in that
+    // slice, so a brief danger spike isn't averaged away.
+    const zoneOf = (score) =>
+      score >= bands.dangerBand ? "danger" : score >= bands.cautionBand ? "caution" : "safe";
+    const { start: winStart, span: winSpan } = winBounds();
+    const N = clamp(Math.round(W / 12), 8, 40);
+    const barW = (W / N) * 0.8;
+
+    const bars = [];
+    bucketRows(rows, winStart, winSpan, N).forEach((bucket, k) => {
+      if (!bucket.length) return;
+      let best = bucket[0];
+      let bestScore = num(bucket[0].riskScore, 0);
+      bucket.forEach((r) => {
+        const s = num(r.riskScore, 0);
+        if (s > bestScore) { bestScore = s; best = r; }
+      });
+      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc: zoneOf(bestScore), timeSec: best.timeSec });
+    });
+    if (!bars.length) return;
+
+    drawBars(lineGroup, bars, (v) => chartY(v, 0, 1), CHART_H, barW,
+      (b) => `Risk ${Math.round(b.value * 100)}/100 · ${formatSeconds(b.timeSec)}`);
+  }
+
+  // ETA tab: collision TTC in seconds as zone-coloured columns. Low TTC sits at
+  // the top (danger), so the most-urgent measured TTC per bucket = the tallest
+  // bar. Buckets with no closing measurement draw no bar (empty = safe).
+  function renderEtaLayer(rows, { areaGroup, lineGroup, W }) {
+    const CAP = 6; // seconds; the dangerous range (0–6s) gets the full height
+    // Inverted scale: low TTC (danger) at the top, high TTC (safe) at the
+    // bottom — consistent with State/Score where danger is up.
+    const etaY = (s) => CHART_Y_TOP + clamp(s / CAP, 0, 1) * (CHART_Y_BOT - CHART_Y_TOP);
+    const guide1 = etaY(1);
+    const guide3 = etaY(3);
+    // Y-axis ticks ARE the guide seconds, at their exact line positions.
+    setChartYAxis([
+      { text: "0s", y: CHART_Y_TOP },
+      { text: "1s", y: guide1 },
+      { text: "3s", y: guide3 },
+      { text: "6s", y: CHART_Y_BOT },
+    ]);
+
+    [
+      { y: 0, h: guide1, color: "rgba(255, 68, 68, 0.08)" },
+      { y: guide1, h: guide3 - guide1, color: "rgba(255, 176, 32, 0.07)" },
+      { y: guide3, h: CHART_H - guide3, color: "rgba(18, 212, 146, 0.05)" },
+    ].forEach((band) => {
+      if (band.h <= 0) return;
+      areaGroup.appendChild(makeSvg("rect", { x: 0, y: band.y.toFixed(1), width: W, height: band.h.toFixed(1), fill: band.color }));
+    });
+    [
+      { y: guide1, stroke: "rgba(255, 68, 68, 0.5)" },
+      { y: guide3, stroke: "rgba(255, 176, 32, 0.5)" },
+    ].forEach((g) => {
+      areaGroup.appendChild(makeSvg("line", {
+        x1: 0, y1: g.y.toFixed(1), x2: W, y2: g.y.toFixed(1),
+        stroke: g.stroke, "stroke-width": 1, "stroke-dasharray": "4 4",
+      }));
+    });
+
+    // One column per time bucket = the most-urgent (min) measured TTC in that
+    // slice. Buckets with no closing measurement get no bar.
+    const zoneOf = (sec) => (sec < 1 ? "danger" : sec < 3 ? "caution" : "safe");
+    const { start: winStart, span: winSpan } = winBounds();
+    const N = clamp(Math.round(W / 12), 8, 40);
+    const barW = (W / N) * 0.8;
+
+    const bars = [];
+    bucketRows(rows, winStart, winSpan, N).forEach((bucket, k) => {
+      let best = null;
+      let bestSec = Infinity;
+      bucket.forEach((r) => {
+        const s = num(r?.collisionEta?.sec, null);
+        if (s !== null && s < bestSec) { bestSec = s; best = r; }
+      });
+      if (!best) return; // no closing in this bucket → safe, no bar
+      bars.push({ x: ((k + 0.5) / N) * W, value: bestSec, sc: zoneOf(bestSec), timeSec: best.timeSec });
+    });
+    if (!bars.length) return;
+
+    drawBars(lineGroup, bars, (v) => etaY(v), CHART_H, barW,
+      (b) => `TTC ${b.value.toFixed(1)}s · ${formatSeconds(b.timeSec)}`);
   }
 
 
@@ -1925,6 +2117,9 @@ export function initializeSpectra() {
     const result = normalizePayload(payload);
     state.lastResult = { payload: cleanResponsePayload(payload) };
     state.currentResult = result;
+    if (result.sensitivity && Number.isFinite(result.sensitivity.cautionBand)) {
+      state.riskBands = result.sensitivity;
+    }
     state.timelineRows = result.timelineRows || [];
     state.events = result.events || [];
     state.selectedSummaryEvent = null;
@@ -3007,6 +3202,7 @@ export function initializeSpectra() {
 
     setupPreviewControls();
     setupSegmentedControls();
+    setupRiskChartTabs();
     setupFrameBudgetPresets();
     setupSamplingPresets();
     setupAnalysisWindowMode();
