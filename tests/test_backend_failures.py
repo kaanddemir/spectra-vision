@@ -137,12 +137,12 @@ def test_yolo_class_confidence_gate_filters_and_keeps_expected_detections():
     detector = ObjectDetector()
     detector._device = "cpu"
 
-    # Car below the (lowered) 0.35 vehicle floor is filtered out.
+    # Box [4,5,24,25] on a 32px-tall frame is NEAR/LARGE (bottom at 0.78), so it
+    # gets the low 0.35 vehicle floor. Car below it is filtered, at it is kept —
+    # this near/large case used to require >= 0.50.
     detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.34]))
     assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
 
-    # Car at the lowered floor is now kept (recovers close lead vehicles whose
-    # confidence sags) — this used to require >= 0.50.
     detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.36]))
     detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
     assert len(detections) == 1
@@ -154,3 +154,20 @@ def test_yolo_class_confidence_gate_filters_and_keeps_expected_detections():
     assert len(detections) == 1
     assert detections[0].class_name == "truck"
     assert detections[0].confidence == pytest.approx(0.55)
+
+
+def test_far_small_vehicle_box_keeps_stricter_confidence_floor():
+    # A small box high in a 200px frame (bottom 0.275, height 0.075) is FAR/SMALL,
+    # so vehicle classes keep the stricter 0.50 floor — a 0.40 truck is dropped,
+    # preventing low-confidence distant traffic from feeding the tracker.
+    detector = ObjectDetector()
+    detector._device = "cpu"
+    frame = np.zeros((200, 200, 3), dtype=np.uint8)
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[90, 40, 110, 55]], cls=[7], conf=[0.40]))
+    assert detector.detect(frame) == []
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[90, 40, 110, 55]], cls=[7], conf=[0.52]))
+    detections = detector.detect(frame)
+    assert len(detections) == 1
+    assert detections[0].class_name == "truck"

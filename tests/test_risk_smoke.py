@@ -63,6 +63,32 @@ def _track(track_id, bbox, t=1.0, prior_bbox=None, prior_t=0.7):
     return track
 
 
+def test_imminent_escalation_requires_proximity_or_cue_agreement():
+    # A far, single-cue (depth-only, cues disagree) TTC<1s reading — the symptom
+    # of a young depth-Kalman track that accepted a multi-metre jump — must NOT
+    # snap to DANGER; it stays at its score band (CAUTION here).
+    assert (
+        state_from_score(
+            0.41, 0.6, ttc_imminent_streak=3, confidence=0.6, distance_m=21.6, ttc_agreement=0.0
+        )
+        == "CAUTION"
+    )
+    # A genuinely close object escalates on proximity alone.
+    assert (
+        state_from_score(
+            0.41, 0.6, ttc_imminent_streak=3, confidence=0.6, distance_m=5.0, ttc_agreement=0.0
+        )
+        == "DANGER"
+    )
+    # A far approach still escalates when the three TTC cues corroborate it.
+    assert (
+        state_from_score(
+            0.41, 0.6, ttc_imminent_streak=3, confidence=0.6, distance_m=21.6, ttc_agreement=0.8
+        )
+        == "DANGER"
+    )
+
+
 def test_no_tracks_returns_single_safe_event():
     primary, events = build_object_events(
         frame_index=0,
