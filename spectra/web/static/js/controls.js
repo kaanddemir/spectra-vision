@@ -220,6 +220,7 @@ export function initializeSpectra() {
       kinematics: primary?.kinematics ?? null,
       evidence: primary?.evidence ?? null,
       confidence: primary?.confidence ?? null,
+      ttcAgreement: primary?.ttcAgreement ?? null,
       proximityScore: riskFactors.proximity ?? null,
       approachScore: riskFactors.approach ?? null,
       crossingScore: riskFactors.crossing ?? null,
@@ -1013,44 +1014,47 @@ export function initializeSpectra() {
     return pct === null ? MISSING : `${Math.round(clamp(pct, 0, 100))}%`;
   };
 
-  // Detail Mode: a self-contained report of raw inputs and fusion outputs.
+  // Detail Mode mirrors the How It Works pipeline sections for the selected object.
   function renderAdvanced(source, trafficLight) {
     const ev = source?.evidence || null;
     const conf = source?.confidence || {};
     const riskFactors = source?.riskFactors || {};
     const oid = source?.displayId ?? source?.objectId;
-    // Detection + Tracking: detector outputs plus the tracker-assigned object id.
-    setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
-    setText("ev-detector-conf", pctLabel(conf.detection));
-    setText("ev-tracking-id", isReal(oid) ? `#${oid}` : MISSING);
-    // Depth / Kinematics: proximity is a depth-derived measurement.
+    // Decision + Delivery: delivered frame/object decision surfaced first.
+    setText("ev-fusion-state", (() => { const rawState = source?.rawRiskState ?? source?.riskState; return isReal(rawState) ? titleCase(rawState) : MISSING; })());
+    setText("ev-decision-primary", isReal(oid) ? `#${oid}` : MISSING);
+    setText("ev-fusion-score", riskScoreLabel(source?.riskScore));
+    setText("ev-fusion-eta", etaDisplay(source?.collisionEta));
+    // Per-Object Risk Evaluation: score terms and gates.
+    const etaSec = etaSeconds(source?.collisionEta);
+    setText("ev-fusion-eta-pressure", etaSec === null ? MISSING : pctLabel(etaPressure(source?.collisionEta)));
+    setText("ev-depth-proximity", pctLabel(riskFactors.proximity));
+    setText("ev-fusion-approach", pctLabel(riskFactors.approach));
+    setText("ev-risk-lane-relevance", pctLabel(riskFactors.crossing));
+    setText("ev-advisory-brake", pctLabel(riskFactors.brake));
+    setText("ev-fusion-confidence", confidenceLabel(source));
+    setText("ev-fusion-agreement", pctLabel(source?.ttcAgreement));
+    // Motion + Depth: distance, depth confidence and visual motion cues.
     setText("ev-depth-distance", distanceLabel(source?.kinematics?.distanceM));
     setText("ev-depth-closing", closingShort(source?.kinematics?.closingMps));
-    setText("ev-depth-proximity", pctLabel(riskFactors.proximity));
     setText("ev-depth-conf", pctLabel(conf.depth));
-    // Optical flow: bbox expansion plus the radial flow cue.
     const flow = ev?.flow || {};
     setText("ev-expansion-rate", pctLabel(flow.expansionScore));
     setText("ev-flow-radial", pctLabel(flow.radialScore));
     setText("ev-flow-conf", pctLabel(conf.flow));
+    // Lane Pipeline: lane-relative object geometry.
     setText("ev-lane-bucket", isReal(source?.lane) ? titleCase(source.lane) : MISSING);
     const pos = num(source?.lanePosition, null);
     setText("ev-lane-pos", pos === null ? MISSING : pos.toFixed(2));
     setText("ev-lane-crossing", pctLabel(riskFactors.crossing));
     setText("ev-lane-conf", pctLabel(conf.lane));
-    // Advisory: cues that do not gate collision logic.
+    // Detection + Tracking: detector outputs plus the tracker-assigned object id.
+    setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
+    setText("ev-detector-conf", pctLabel(conf.detection));
+    setText("ev-tracking-id", isReal(oid) ? `#${oid}` : MISSING);
+    // Advisory Context: non-object context.
     const tl = trafficLight;
     setText("ev-advisory-traffic", (tl === "red" || tl === "yellow" || tl === "green") ? titleCase(tl) : MISSING);
-    setText("ev-advisory-brake", pctLabel(riskFactors.brake));
-    // Fusion / Risk: fused outputs and the one genuinely-fused contributor (approach).
-    setText("ev-fusion-state", (() => { const rawState = source?.rawRiskState ?? source?.riskState; return isReal(rawState) ? titleCase(rawState) : MISSING; })());
-    setText("ev-fusion-eta", etaDisplay(source?.collisionEta));
-    const etaSec = etaSeconds(source?.collisionEta);
-    setText("ev-fusion-eta-pressure", etaSec === null ? MISSING : pctLabel(etaPressure(source?.collisionEta)));
-    setText("ev-fusion-score", riskScoreLabel(source?.riskScore));
-    setText("ev-fusion-approach", pctLabel(riskFactors.approach));
-    setText("ev-fusion-agreement", pctLabel(source?.ttcAgreement));
-    setText("ev-fusion-confidence", confidenceLabel(source));
   }
 
   const confidenceBreakdown = (conf) => {
@@ -2708,6 +2712,17 @@ export function initializeSpectra() {
     }
   }
 
+  function downloadLogs() {
+    const payload = state.lastResult?.payload;
+    const perfLogs = payload?.performance?.logs;
+    if (!perfLogs || !perfLogs.length) return;
+    const sourceName = payload?.metadata?.sourceName || payload?.sourceName;
+    const baseName = safeFileStem(sourceName);
+    const dateStr = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 16).replace("T", "_");
+    const blob = new Blob([perfLogs.join("\n")], { type: "text/plain;charset=utf-8" });
+    downloadBlob(blob, `${baseName}_performance_logs_${dateStr}.txt`);
+  }
+
   function downloadJson() {
     if (!state.lastResult) return;
     const blob = new Blob([JSON.stringify(telemetryExportPayload(), null, 2)], { type: "application/json" });
@@ -2787,6 +2802,7 @@ export function initializeSpectra() {
     
     byId("view-logs-btn")?.addEventListener("click", openLogsView);
     byId("copy-logs-btn")?.addEventListener("click", copyLogs);
+    byId("download-logs-btn")?.addEventListener("click", downloadLogs);
     
     byId("toggle-mode-live")?.addEventListener("click", () => setUiMode("live", { timeSec: previewVideo?.currentTime ?? 0 }));
     byId("toggle-mode-summary")?.addEventListener("click", () => setUiMode("summary"));

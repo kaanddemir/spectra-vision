@@ -612,46 +612,45 @@
                 <details class="evidence-details" id="evidence-details">
                   <summary>Detail Mode</summary>
                   <div class="evidence-grid">
-                    <div class="evidence-group">
-                      <span class="evidence-group-lbl">Detection &amp; Tracking (IoU)</span>
-                      <div class="evidence-row"><span>Class</span><span id="ev-detector-class">—</span></div>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-detector-conf">—</span></div>
-                      <div class="evidence-row"><span>Object ID</span><span id="ev-tracking-id">—</span></div>
-                    </div>
-                    <div class="evidence-group">
-                      <span class="evidence-group-lbl">Optical Flow (DIS)</span>
-                      <div class="evidence-row"><span>Expansion</span><span id="ev-expansion-rate">—</span></div>
-                      <div class="evidence-row"><span>Radial</span><span id="ev-flow-radial">—</span></div>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-flow-conf">—</span></div>
-                    </div>
-                    <div class="evidence-group">
-                      <span class="evidence-group-lbl">Lane</span>
-                      <div class="evidence-row"><span>Bucket</span><span id="ev-lane-bucket">—</span></div>
-                      <div class="evidence-row"><span>Position</span><span id="ev-lane-pos">—</span></div>
-                      <div class="evidence-row"><span>Lane relevance</span><span id="ev-lane-crossing">—</span></div>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-lane-conf">—</span></div>
-                    </div>
-                    <div class="evidence-group">
-                      <span class="evidence-group-lbl">Depth / Kinematics</span>
-                      <div class="evidence-row"><span>Distance</span><span id="ev-depth-distance">—</span></div>
-                      <div class="evidence-row"><span>Closing speed</span><span id="ev-depth-closing">—</span></div>
-                      <div class="evidence-row"><span>Proximity</span><span id="ev-depth-proximity">—</span></div>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-depth-conf">—</span></div>
-                    </div>
-                    <div class="evidence-group evidence-group--advisory">
-                      <span class="evidence-group-lbl">Advisory</span>
-                      <div class="evidence-row"><span>Traffic light</span><span id="ev-advisory-traffic">—</span></div>
-                      <div class="evidence-row"><span>Brake</span><span id="ev-advisory-brake">—</span></div>
-                    </div>
-                    <div class="evidence-group evidence-group--fusion">
-                      <span class="evidence-group-lbl">Fusion / Risk</span>
-                      <div class="evidence-row evidence-row--wide"><span>State</span><span id="ev-fusion-state">—</span></div>
-                      <div class="evidence-row"><span>Collision ETA</span><span id="ev-fusion-eta">—</span></div>
-                      <div class="evidence-row"><span>ETA pressure</span><span id="ev-fusion-eta-pressure">—</span></div>
+                    <div class="evidence-group evidence-group--decision">
+                      <span class="evidence-group-lbl">Decision + Delivery</span>
+                      <div class="evidence-row"><span>State</span><span id="ev-fusion-state">—</span></div>
+                      <div class="evidence-row"><span>Primary Object</span><span id="ev-decision-primary">—</span></div>
                       <div class="evidence-row"><span>Risk Score</span><span id="ev-fusion-score">—</span></div>
+                      <div class="evidence-row"><span>Collision ETA</span><span id="ev-fusion-eta">—</span></div>
+                    </div>
+                    <div class="evidence-group evidence-group--object-risk">
+                      <span class="evidence-group-lbl">Per-Object Risk Evaluation</span>
+                      <div class="evidence-row"><span>ETA Pressure</span><span id="ev-fusion-eta-pressure">—</span></div>
+                      <div class="evidence-row"><span>Proximity</span><span id="ev-depth-proximity">—</span></div>
                       <div class="evidence-row"><span>Approach</span><span id="ev-fusion-approach">—</span></div>
-                      <div class="evidence-row"><span>TTC agreement</span><span id="ev-fusion-agreement">—</span></div>
-                      <div class="evidence-row"><span>Confidence</span><span id="ev-fusion-confidence">—</span></div>
+                      <div class="evidence-row"><span>Lane Relevance</span><span id="ev-risk-lane-relevance">—</span></div>
+                      <div class="evidence-row"><span>Brake Light Cue</span><span id="ev-advisory-brake">—</span></div>
+                      <div class="evidence-row"><span>Confidence Gate</span><span id="ev-fusion-confidence">—</span></div>
+                      <div class="evidence-row evidence-row--span2"><span>TTC Agreement</span><span id="ev-fusion-agreement">—</span></div>
+                    </div>
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Motion + Depth</span>
+                      <div class="evidence-row"><span>Distance</span><span id="ev-depth-distance">—</span></div>
+                      <div class="evidence-row"><span>Closing Speed</span><span id="ev-depth-closing">—</span></div>
+                      <div class="evidence-row"><span>Depth Confidence</span><span id="ev-depth-conf">—</span></div>
+                      <div class="evidence-row"><span>BBox Expansion</span><span id="ev-expansion-rate">—</span></div>
+                      <div class="evidence-row"><span>Flow TTC</span><span id="ev-flow-radial">—</span></div>
+                      <div class="evidence-row"><span>Flow Confidence</span><span id="ev-flow-conf">—</span></div>
+                    </div>
+                    <div class="evidence-group">
+                      <span class="evidence-group-lbl">Lane Pipeline</span>
+                      <div class="evidence-row"><span>Lane Bucket</span><span id="ev-lane-bucket">—</span></div>
+                      <div class="evidence-row"><span>Lane Position</span><span id="ev-lane-pos">—</span></div>
+                      <div class="evidence-row"><span>Lane Crossing Risk</span><span id="ev-lane-crossing">—</span></div>
+                      <div class="evidence-row"><span>Lane Confidence</span><span id="ev-lane-conf">—</span></div>
+                    </div>
+                    <div class="evidence-group evidence-group--detection">
+                      <span class="evidence-group-lbl">Detection &amp; Tracking</span>
+                      <div class="evidence-row"><span>Class</span><span id="ev-detector-class">—</span></div>
+                      <div class="evidence-row"><span>Detection Confidence</span><span id="ev-detector-conf">—</span></div>
+                      <div class="evidence-row"><span>Object ID</span><span id="ev-tracking-id">—</span></div>
+                      <div class="evidence-row"><span>Traffic Light</span><span id="ev-advisory-traffic">—</span></div>
                     </div>
                   </div>
                 </details>
@@ -749,6 +748,11 @@
           <button class="bar-btn" id="copy-logs-btn" title="Copy to Clipboard">
             <svg style="width: 14px; height: 14px;">
               <use href="#icon-copy"></use>
+            </svg>
+          </button>
+          <button class="bar-btn" id="download-logs-btn" title="Download Logs">
+            <svg style="width: 14px; height: 14px;">
+              <use href="#icon-download"></use>
             </svg>
           </button>
           <button class="drawer-close" type="button" data-logs-close aria-label="Close">
