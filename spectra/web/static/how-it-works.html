@@ -250,7 +250,8 @@
             yolo_conf_min = 0.30; yolo_iou = 0.45<br>
             keep class ∈ road_user_classes ∪ traffic_light<br>
             min_conf(person/bike/moto) = 0.45<br>
-            min_conf(car/bus/truck) = 0.35; train = 0.55<br>
+            min_conf(car/bus/truck) = 0.35 for near/large boxes, 0.50 for
+            far/small ones; train = 0.55<br>
             near-band pass: re-runs YOLO on the lower-center crop when no close
             in-corridor threat is tracked, merged via IoU-NMS (recovers a very
             close lead vehicle the full-frame pass drops)<br>
@@ -527,7 +528,10 @@
             raw_state = DANGER if risk.score ≥ 0.60<br>
             raw_state = CAUTION if risk.score ≥ 0.25<br>
             raw_state = SAFE otherwise<br>
-            escalate → DANGER if ttc_depth &lt; 1.0s in ≥2 recent frames and risk.score ≥ 0.25<br>
+            escalate → DANGER if ttc_depth &lt; 1.0s in ≥2 recent frames and risk.score ≥ 0.25,
+            and the imminent reading is corroborated (distance ≤ 12m, or the three TTC cues
+            agree ≥ 0.5) — blocks a young depth-Kalman track's non-physical closing speed
+            from snapping a distant vehicle to DANGER<br>
             force → SAFE if detection_confidence &lt; 0.20<br>
             raw_state is stabilized later in Decision + Delivery
           </div>

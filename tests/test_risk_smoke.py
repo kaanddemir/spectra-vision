@@ -8,6 +8,7 @@ from spectra.analysis.risk import (
     build_object_events,
     calculate_track_risk,
     score_raw,
+    state_from_score,
     ttc_from_depth_delta,
 )
 from spectra.analysis.tracking import Track, TrackSample

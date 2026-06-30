@@ -93,11 +93,11 @@ The old `timelineRows` contract is not current. Use `payload.frames`, `payload.p
 4. UFLDv2 estimates the ego-lane corridor on the configured `lane_every` interval; cached/smoothed geometry is used between runs.
 5. DIS optical flow runs on the configured `flow_every` interval; skipped frames reuse the latest motion field.
 6. Depth Anything V2 Metric VKITTI refreshes on the configured `depth_every` interval and, when enabled, on motion spikes.
-7. YOLO detects road participants on the configured `detect_every` interval. Vehicle confidence floors are low (car/bus/truck 0.35) and, when no close in-corridor threat is tracked, a second pass on the lower-center crop recovers a very close lead vehicle the full-frame pass drops.
+7. YOLO detects road participants on the configured `detect_every` interval. Vehicle confidence floors are low (car/bus/truck 0.35) **only for near/large boxes** — far/small vehicle boxes keep the stricter 0.50 floor so low-confidence distant traffic does not flood the tracker. When no close in-corridor threat is tracked, a second pass on the lower-center crop recovers a very close lead vehicle the full-frame pass drops.
 8. Traffic-light detections are split out as frame-level advisories and are not collision participants.
 9. Road/lane relevance filtering removes detections that should not enter the risk tracker.
 10. The IoU tracker links detections to active tracks and propagates tracks through skipped detection frames; "hot" threat ids coast longer through a brief miss, and re-id reconnects a fast-approaching lead car to its original id.
-11. Risk scoring fuses metric depth TTC, bbox expansion TTC, radial-flow TTC, lane relationship, proximity, brake-light cues, and confidence.
+11. Risk scoring fuses metric depth TTC, bbox expansion TTC, radial-flow TTC, lane relationship, proximity, brake-light cues, and confidence. The imminent-DANGER escalation (TTC < 1s) only fires when corroborated — the object is genuinely close (≤12m) or the TTC cues agree — so a young depth-Kalman track's non-physical closing speed cannot snap a distant vehicle to DANGER.
 12. State stabilization holds the banner at CAUTION when a near in-corridor threat dropped out within the last ~1s, so a brief detector miss cannot flip the frame to SAFE on a distant object.
 13. Events are deduplicated, ranked, trimmed, serialized, and rendered only when needed.
 

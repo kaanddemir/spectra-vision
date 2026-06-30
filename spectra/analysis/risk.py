@@ -118,13 +118,22 @@ _LON_MEAS_ABS_STD = 0.5             # measurement std floor, metres
 _LON_INIT_VEL_VAR = 15.0 ** 2       # (m/s)^2 initial range-rate variance
 _LON_GATE_SQ = 9.0                  # 3-sigma innovation gate (reject depth jumps)
 _LON_MIN_CLOSING_MPS = 0.30         # below this closing we report no TTC
-_LON_MAX_CLOSING_MPS = 60.0         # physical clamp on the exposed closing speed
+_LON_MAX_CLOSING_MPS = 30.0         # physical clamp on the exposed closing speed
 _LON_MIN_UPDATES_FOR_TTC = 2        # need 2 measurements before trusting velocity
 
 # State thresholds. Tuned for highway/urban dashcam: 1 s gives a driver one
 # reaction-time before impact, 3 s is roughly the recommended following gap.
 _DANGER_TTC_SEC = 1.0
 _CAUTION_TTC_SEC = 3.0
+
+# Imminent-DANGER escalation guard. A young longitudinal Kalman track can accept
+# a single multi-metre depth jump and report a non-physical closing speed, which
+# yields TTC < 1s on an object that is actually far away. The escalation is
+# therefore allowed only when the imminent reading is corroborated: the object
+# is genuinely close, OR the three TTC cues agree (so it is not a depth-only
+# glitch). A mid-range, single-cue "imminent" reading stays at its score band.
+_IMMINENT_MAX_DISTANCE_M = 12.0     # within this, proximity alone justifies escalation
+_IMMINENT_MIN_AGREEMENT = 0.5       # otherwise the TTC cues must corroborate
 
 # Lowest multiplier applied to the trust gate when the TTC cues fully disagree
 # (agreement → 0). Worst case tempers confidence to ×0.7; agreement → 1 leaves
@@ -893,6 +902,8 @@ def state_from_score(
     *,
     ttc_imminent_streak: int = 2,
     confidence: float = 1.0,
+    distance_m: float | None = None,
+    ttc_agreement: float = 1.0,
     sensitivity: RiskSensitivity = BALANCED_SENSITIVITY,
 ) -> str:
     """Derive SAFE/CAUTION/DANGER from the Risk Score band.
@@ -902,6 +913,13 @@ def state_from_score(
     override is imminence: a confirmed TTC < 1s on an already-risky object
     (score at least in the CAUTION band) snaps straight to DANGER rather than
     waiting for the score to climb. Very low detection confidence forces SAFE.
+
+    The imminence escalation is additionally guarded against a non-physical
+    closing speed (a young depth-Kalman track that accepted a multi-metre jump):
+    it fires only when the imminent reading is corroborated — the object is
+    genuinely close (``distance_m`` small) or the TTC cues agree
+    (``ttc_agreement``). A mid-range, single-cue imminent reading stays at its
+    score band instead of snapping a distant vehicle to DANGER.
 
     ``sensitivity`` shifts the CAUTION/DANGER band edges (and therefore the
     imminence escalation's CAUTION floor) so the same score reads more or less
@@ -917,11 +935,15 @@ def state_from_score(
     else:
         base = "SAFE"
 
+    imminent_corroborated = (
+        distance_m is not None and distance_m <= _IMMINENT_MAX_DISTANCE_M
+    ) or ttc_agreement >= _IMMINENT_MIN_AGREEMENT
     if (
         ttc_sec is not None
         and ttc_sec < _DANGER_TTC_SEC
         and ttc_imminent_streak >= 2
         and score >= sensitivity.caution_band
+        and imminent_corroborated
     ):
         return "DANGER"
     return base
@@ -1146,6 +1168,8 @@ def calculate_track_risk(
         physical_ttc,
         ttc_imminent_streak=ttc_imminent_streak,
         confidence=detection_confidence,
+        distance_m=distance_m,
+        ttc_agreement=agreement,
         sensitivity=sensitivity,
     )
 

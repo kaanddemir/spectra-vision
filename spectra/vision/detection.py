@@ -61,6 +61,10 @@ CLASS_RISK_WEIGHT: dict[str, float] = {
 # junk, so a low YOLO floor here mainly recovers in-path boxes rather than
 # flooding the tracker. The detector's predict-time ``conf`` must stay <= the
 # smallest floor below, or these classes are filtered before we ever see them.
+# NOTE: the low vehicle floor applies only to NEAR/LARGE boxes (the close lead
+# vehicle it is meant to recover). Far, small vehicle boxes keep the stricter
+# ``_VEHICLE_FAR_MIN_CONFIDENCE`` so low-confidence distant traffic does not
+# flood the tracker with jittery boxes that produce non-physical depth velocities.
 CLASS_MIN_CONFIDENCE: dict[str, float] = {
     "person": 0.45,
     "bicycle": 0.45,
@@ -71,6 +75,47 @@ CLASS_MIN_CONFIDENCE: dict[str, float] = {
     "truck": 0.35,
     "traffic_light": 0.40,
 }
+
+# Vehicle classes whose low near-floor is gated by box size/position.
+_VEHICLE_CLASSES = frozenset({"car", "bus", "truck"})
+# Stricter floor for far/small vehicle boxes (restores the pre-recovery 0.50).
+_VEHICLE_FAR_MIN_CONFIDENCE = 0.50
+
+
+def _vehicle_box_is_near_or_large(
+    bbox: tuple[int, int, int, int],
+    *,
+    frame_h: int,
+) -> bool:
+    """Whether a vehicle box is close enough to deserve the low confidence floor.
+
+    Mirrors the near/large test in ``road.detection_corridor_score`` so the
+    detector and corridor filter agree on what "close lead vehicle" means.
+    """
+
+    if frame_h <= 0:
+        return False
+    _, y1, _, y2 = bbox
+    bottom_frac = float(y2) / float(frame_h)
+    height_frac = float(y2 - y1) / float(frame_h)
+    return bottom_frac >= 0.76 or height_frac >= 0.20
+
+
+def _class_min_confidence(
+    normalized_class: str,
+    bbox: tuple[int, int, int, int],
+    *,
+    frame_h: int,
+    default: float,
+) -> float:
+    """Per-class acceptance floor, raised for far/small vehicle boxes."""
+
+    floor = CLASS_MIN_CONFIDENCE.get(normalized_class, default)
+    if normalized_class in _VEHICLE_CLASSES and not _vehicle_box_is_near_or_large(
+        bbox, frame_h=frame_h
+    ):
+        floor = max(floor, _VEHICLE_FAR_MIN_CONFIDENCE)
+    return floor
 
 
 _DEFAULT_YOLO_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "yolov8n.pt"
@@ -279,13 +324,19 @@ class ObjectDetector:
             if class_name not in RELEVANT_CLASSES:
                 continue
             normalized_class = RELEVANT_CLASSES[class_name]
-            if float(p) < CLASS_MIN_CONFIDENCE.get(normalized_class, self.confidence):
-                continue
             x1 = max(0, int(round(float(box[0]))) + x_offset)
             y1 = max(0, int(round(float(box[1]))) + y_offset)
             x2 = min(full_w, int(round(float(box[2]))) + x_offset)
             y2 = min(full_h, int(round(float(box[3]))) + y_offset)
             if x2 - x1 < 4 or y2 - y1 < 4:
+                continue
+            # Size-gated floor: far/small vehicle boxes keep the stricter floor;
+            # near/large ones get the low recovery floor. Evaluated on the
+            # full-frame box so the crop pass uses the same geometry.
+            min_conf = _class_min_confidence(
+                normalized_class, (x1, y1, x2, y2), frame_h=full_h, default=self.confidence
+            )
+            if float(p) < min_conf:
                 continue
             detections.append(
                 Detection(
