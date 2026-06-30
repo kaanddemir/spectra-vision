@@ -17,12 +17,14 @@ from .risk import (
     DepthDeltaSmoother,
     ExpansionSmoother,
     RiskEvent,
+    RiskSensitivity,
     SpatialFields,
     StateStabilizer,
     TtcImminenceSmoother,
     build_object_events,
     compute_quick_risk,
     eta_pressure,
+    resolve_sensitivity,
     score_event,
     stabilized_event_state,
 )
@@ -717,6 +719,7 @@ class SpatialFrameAnalyzer:
         detect_every: int = 3,
         lane_every: int = 3,
         flow_every: int = 1,
+        sensitivity: "str | RiskSensitivity" = "balanced",
         lane_reset_after_misses: int = 6,
         lane_drift_reset_px_ratio: float = 0.12,
         fps: float = 0.0,
@@ -729,6 +732,9 @@ class SpatialFrameAnalyzer:
         self.detect_every = detect_every
         self.lane_every = lane_every
         self.flow_every = flow_every
+        # Score-band edges → SAFE/CAUTION/DANGER. Resolved once so a bad preset
+        # name degrades to "balanced" rather than every frame.
+        self.sensitivity = resolve_sensitivity(sensitivity)
         self.lane_reset_after_misses = lane_reset_after_misses
         self.lane_drift_reset_px_ratio = lane_drift_reset_px_ratio
         # Only used for the first frame's flow dt fallback (no previous
@@ -947,6 +953,7 @@ class SpatialFrameAnalyzer:
             depth_smoother=self.depth_smoother,
             ttc_imminence_smoother=self.ttc_imminence_smoother,
             confidence_smoother=self.confidence_smoother,
+            sensitivity=self.sensitivity,
         )
 
         # 4. Smooth State Transitions (Hysteresis)
@@ -997,6 +1004,7 @@ def analyze_spatial_video(
     detect_every: int = 3,
     lane_every: int = 3,
     flow_every: int = 1,
+    sensitivity: "str | RiskSensitivity" = "balanced",
     lane_reset_after_misses: int = 4,
     lane_drift_reset_px_ratio: float = 0.12,
     start_sec: float = 0.0,
@@ -1033,6 +1041,7 @@ def analyze_spatial_video(
         detect_every=detect_every,
         lane_every=lane_every,
         flow_every=flow_every,
+        sensitivity=sensitivity,
         lane_reset_after_misses=lane_reset_after_misses,
         lane_drift_reset_px_ratio=lane_drift_reset_px_ratio,
         fps=loader.fps,

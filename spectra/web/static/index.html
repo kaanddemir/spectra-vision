@@ -153,6 +153,7 @@
     <input type="hidden" name="detect_every" value="3">
     <input type="hidden" name="lane_every" value="3">
     <input type="hidden" name="flow_every" value="1">
+    <input type="hidden" name="sensitivity" value="balanced">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
     <input type="hidden" name="start_frame" value="0">
@@ -837,6 +838,30 @@
               <input id="end-time-input" data-param="end_sec" type="number" min="0" step="0.5" placeholder="" disabled>
             </label>
           </div>
+        </div>
+
+        <div class="drawer-section">
+          <div class="drawer-section-header">
+            <h3>Alarm Sensitivity</h3>
+            <span class="info-tip">
+              <svg>
+                <use href="#icon-info"></use>
+              </svg>
+              <div class="tooltip-content">
+                Shifts the CAUTION/DANGER score thresholds. It changes when an alert fires,
+                not how the risk score is computed.
+              </div>
+            </span>
+          </div>
+          <label class="drawer-row settings-panel settings-panel--wide">
+            <span>Alert Threshold</span>
+            <div class="segmented-control" data-param="sensitivity">
+              <button type="button" class="segmented-btn" data-value="conservative">Conservative</button>
+              <button type="button" class="segmented-btn active" data-value="balanced">Balanced</button>
+              <button type="button" class="segmented-btn" data-value="aggressive">Aggressive</button>
+            </div>
+            <em class="setting-help" data-setting-help="sensitivity">Balanced alert thresholds</em>
+          </label>
         </div>
 
         <div class="drawer-section">

@@ -30,6 +30,7 @@ DETECT_EVERY_OPTIONS = (1, 2, 3, 5, 10)
 LANE_EVERY_OPTIONS = (1, 2, 3, 5, 10)
 FLOW_EVERY_OPTIONS = (1, 2, 3, 5, 10)
 RESIZE_MAX_SIDE_OPTIONS = (128, 256, 384, 512, 768, 1024)
+SENSITIVITY_OPTIONS = ("conservative", "balanced", "aggressive")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "web" / "static"
@@ -262,6 +263,7 @@ async def analyze_endpoint(
     detect_every: int = Form(3),
     lane_every: int = Form(3),
     flow_every: int = Form(1),
+    sensitivity: str = Form("balanced"),
     start_sec: float = Form(0.0),
     end_sec: float = Form(0.0),
     start_frame: int = Form(0),
@@ -322,6 +324,11 @@ async def analyze_endpoint(
                 detect_every=_nearest_allowed(int(detect_every), DETECT_EVERY_OPTIONS),
                 lane_every=_nearest_allowed(int(lane_every), LANE_EVERY_OPTIONS),
                 flow_every=_nearest_allowed(int(flow_every), FLOW_EVERY_OPTIONS),
+                sensitivity=(
+                    sensitivity.strip().lower()
+                    if sensitivity.strip().lower() in SENSITIVITY_OPTIONS
+                    else "balanced"
+                ),
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
                 start_frame=max(0, int(start_frame)),

@@ -838,8 +838,53 @@ def score_event(event: RiskEvent) -> float:
 # Risk Score band edges → discrete status. Round values on the 0–100 scale the
 # UI shows (25 / 60). Tune on footage. The status is purely a banding of the
 # score plus an imminent-TTC escalation; lane relevance lives only in the score.
+# These are the "balanced" defaults; the UI sensitivity control shifts the edges
+# via ``RiskSensitivity`` (see ``SENSITIVITY_PRESETS``).
 _CAUTION_SCORE_BAND = 0.25
 _DANGER_SCORE_BAND = 0.60
+
+
+@dataclass(frozen=True)
+class RiskSensitivity:
+    """Score-band edges that turn the continuous Risk Score into the discrete
+    SAFE/CAUTION/DANGER status.
+
+    Lower edges raise alarms earlier and more often; higher edges are more
+    conservative. The bands are the only knob exposed by the UI sensitivity
+    control — the score itself (and its lane-relevance gate) is unchanged, so
+    this shifts *when* a score crosses into CAUTION/DANGER, not how the score
+    is computed.
+    """
+
+    caution_band: float
+    danger_band: float
+
+
+# Conservative ↑ edges (fewer, later alarms) · Aggressive ↓ edges (earlier,
+# more alarms). Balanced mirrors the module defaults so behaviour is identical
+# to the pre-sensitivity build when nothing is passed.
+SENSITIVITY_PRESETS: dict[str, RiskSensitivity] = {
+    "conservative": RiskSensitivity(caution_band=0.34, danger_band=0.70),
+    "balanced": RiskSensitivity(
+        caution_band=_CAUTION_SCORE_BAND, danger_band=_DANGER_SCORE_BAND
+    ),
+    "aggressive": RiskSensitivity(caution_band=0.16, danger_band=0.48),
+}
+DEFAULT_SENSITIVITY = "balanced"
+BALANCED_SENSITIVITY = SENSITIVITY_PRESETS["balanced"]
+
+
+def resolve_sensitivity(value: "str | RiskSensitivity | None") -> RiskSensitivity:
+    """Coerce a preset name (or an explicit ``RiskSensitivity``) to band edges.
+
+    Unknown / empty values fall back to ``balanced`` so a stale client cannot
+    change the risk behaviour by sending garbage.
+    """
+    if isinstance(value, RiskSensitivity):
+        return value
+    if not value:
+        return BALANCED_SENSITIVITY
+    return SENSITIVITY_PRESETS.get(str(value).strip().lower(), BALANCED_SENSITIVITY)
 
 
 def state_from_score(
@@ -848,6 +893,7 @@ def state_from_score(
     *,
     ttc_imminent_streak: int = 2,
     confidence: float = 1.0,
+    sensitivity: RiskSensitivity = BALANCED_SENSITIVITY,
 ) -> str:
     """Derive SAFE/CAUTION/DANGER from the Risk Score band.
 
@@ -856,13 +902,17 @@ def state_from_score(
     override is imminence: a confirmed TTC < 1s on an already-risky object
     (score at least in the CAUTION band) snaps straight to DANGER rather than
     waiting for the score to climb. Very low detection confidence forces SAFE.
+
+    ``sensitivity`` shifts the CAUTION/DANGER band edges (and therefore the
+    imminence escalation's CAUTION floor) so the same score reads more or less
+    aggressively without touching the score computation.
     """
     if confidence < 0.20:
         return "SAFE"
 
-    if score >= _DANGER_SCORE_BAND:
+    if score >= sensitivity.danger_band:
         base = "DANGER"
-    elif score >= _CAUTION_SCORE_BAND:
+    elif score >= sensitivity.caution_band:
         base = "CAUTION"
     else:
         base = "SAFE"
@@ -871,7 +921,7 @@ def state_from_score(
         ttc_sec is not None
         and ttc_sec < _DANGER_TTC_SEC
         and ttc_imminent_streak >= 2
-        and score >= _CAUTION_SCORE_BAND
+        and score >= sensitivity.caution_band
     ):
         return "DANGER"
     return base
@@ -1000,6 +1050,7 @@ def calculate_track_risk(
     ttc_imminent_streak: int = 2,
     bgr: "np.ndarray | None" = None,
     confidence_smoother: "ConfidenceSmoother | None" = None,
+    sensitivity: RiskSensitivity = BALANCED_SENSITIVITY,
 ) -> RiskEvent:
     """Build a RiskEvent for a single tracked object using fused TTC.
 
@@ -1095,6 +1146,7 @@ def calculate_track_risk(
         physical_ttc,
         ttc_imminent_streak=ttc_imminent_streak,
         confidence=detection_confidence,
+        sensitivity=sensitivity,
     )
 
     reason = _risk_reason(state, risk_time_hint, pos)
@@ -1236,6 +1288,7 @@ def build_object_events(
     depth_smoother: DepthDeltaSmoother,
     ttc_imminence_smoother: TtcImminenceSmoother | None = None,
     confidence_smoother: ConfidenceSmoother | None = None,
+    sensitivity: RiskSensitivity = BALANCED_SENSITIVITY,
 ) -> tuple[RiskEvent, list[RiskEvent]]:
     """Build per-object risk events plus a primary event for the frame."""
 
@@ -1307,6 +1360,7 @@ def build_object_events(
             ttc_imminent_streak=streak,
             bgr=fields.bgr,
             confidence_smoother=confidence_smoother,
+            sensitivity=sensitivity,
         )
         events.append(event)
 

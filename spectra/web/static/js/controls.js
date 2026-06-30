@@ -80,7 +80,7 @@ export function initializeSpectra() {
   const SAMPLING_PRESETS = {
     fast: { label: "Fast", help: "Lower cost, less frequent model refresh.", values: { depth_every: 15, adaptive_depth: 1, detect_every: 5, lane_every: 5, flow_every: 2, resize_max_side: 384 } },
     balanced: { label: "Balanced", help: "Balanced cost and tracking responsiveness.", values: { depth_every: 10, adaptive_depth: 1, detect_every: 3, lane_every: 3, flow_every: 1, resize_max_side: 512 } },
-    accurate: { label: "Accurate", help: "Sharper and more frequent model refresh.", values: { depth_every: 5, adaptive_depth: 1, detect_every: 2, lane_every: 2, flow_every: 1, resize_max_side: 768 } },
+    accurate: { label: "Accurate", help: "Sharper and more frequent model refresh.", values: { depth_every: 5, adaptive_depth: 1, detect_every: 2, lane_every: 3, flow_every: 1, resize_max_side: 768 } },
     custom: { label: "Custom", help: "Manual sampling values are active.", values: null },
   };
   const SAMPLING_PARAMS = new Set(["depth_every", "adaptive_depth", "detect_every", "lane_every", "flow_every", "resize_max_side"]);
@@ -2539,6 +2539,11 @@ export function initializeSpectra() {
     else if (param === "flow_every") el.textContent = Number(value) === 1 ? "Motion every frame" : `Motion every ${value} frames`;
     else if (param === "adaptive_depth") el.textContent = String(value) === "1" ? "Refresh depth on motion spikes" : "Only refresh depth on schedule";
     else if (param === "resize_max_side") el.textContent = `${value}px max side · higher is sharper, slower`;
+    else if (param === "sensitivity") el.textContent = {
+      conservative: "Fewer, later alerts · higher thresholds",
+      balanced: "Balanced alert thresholds",
+      aggressive: "Earlier, more frequent alerts · lower thresholds",
+    }[String(value)] || "Balanced alert thresholds";
   }
 
   function resetAdvancedSampling() {
