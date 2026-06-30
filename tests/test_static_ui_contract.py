@@ -111,14 +111,20 @@ def test_how_it_works_is_a_standalone_routed_page():
         "Preprocess",
         "Lane Pipeline",
         "UFLDv2 Lane Detection",
+        "Lane Frame",
+        "Vanishing Point",
         "Lane Kalman Smoothing / Coasting",
         "Lane Confidence Smoothing",
         "Motion + Depth",
+        "Motion + Depth Models",
+        "OpenCV DIS Optical Flow",
+        "Depth Anything V2 Metric VKITTI",
         "Optical Flow",
         "Quick Motion Risk",
         "Depth Estimation",
+        "Near Map",
         "Adaptive Depth Refresh",
-        "Detection Pipeline",
+        "Detection + Tracking",
         "YOLO Detection",
         "Traffic Light Split",
         "Traffic Light Classification",
@@ -132,6 +138,7 @@ def test_how_it_works_is_a_standalone_routed_page():
         "Flow TTC",
         "Lane Crossing Risk",
         "Brake Light Cue",
+        "Collision ETA",
         "ETA Pressure",
         "Proximity",
         "Approach",
@@ -139,7 +146,7 @@ def test_how_it_works_is_a_standalone_routed_page():
         "Approach Score",
         "Confidence Gate",
         "Lane Relevance",
-        "Object Detection",
+        "Collision Object Set",
         "Road-Class Filter",
         "Lane Line Detection",
         "Lane Corridor Build",
@@ -151,8 +158,6 @@ def test_how_it_works_is_a_standalone_routed_page():
         "Risk Score",
         "Decision + Delivery",
         "Primary Object Selection",
-        "State From Score",
-        "Detection Confidence Floor",
         "State Stabilization",
         "Frame Row",
         "Saved Event Pipeline",
@@ -173,7 +178,6 @@ def test_how_it_works_is_a_standalone_routed_page():
         "lane-pipeline",
         "motion-depth",
         "detection-pipeline",
-        "tracking",
         "per-object-risk",
         "decision-delivery",
         "performance-summary",
@@ -184,23 +188,117 @@ def test_how_it_works_is_a_standalone_routed_page():
     assert 'data-doc-menu-toggle' in page
     assert ">Pages<" in page
     assert 'id="doc-topic-menu-list"' in page
+    assert 'data-doc-info-toggle' in page
+    assert 'id="doc-color-info-panel"' in page
+    assert ">Color key<" in page
+    # The "Card style" legend was removed from the info panel; the per-popup
+    # style keys still document Dashed/Brighter inside the modals.
+    assert ">Card style<" not in page
+    assert ">Dashed<" in page and ">Advisory/context only<" in page
+    assert ">Brighter<" in page and ">Used downstream<" in page
+    assert "Internal lane step" in page
+    assert "doc-modal-info__btn" in page and "Lane card style info" in page
+    assert "Motion card style info" in page
+    assert "Detection card style info" in page
+    assert 'data-info-module="detection"' in page
+    assert "Risk card style info" in page
+    assert 'data-info-module="risk"' in page
+    assert "Internal risk step" in page
+    assert "Decision card style info" in page
+    assert 'data-info-module="decision"' in page
+    assert "Internal decision step" in page
+    assert 'data-doc-open="tracking"' not in page
+    assert 'id="doc-modal-tracking"' not in page
+    # The map's Detection + Tracking group is reduced to the YOLO model card
+    # only (like the other model groups); the internal steps live in the popup.
+    assert 'pipeline-group pipeline-group--single">\n          <h3>Detection + Tracking</h3>' in page
+    assert 'data-doc-open="detection-pipeline" data-module="detection">\n              <h5>YOLO Detection</h5>' in page
+    assert 'data-doc-open="detection-pipeline" data-module="detection">\n              <h5>Traffic Light Split</h5>' not in page
+    assert 'data-doc-open="detection-pipeline" data-module="tracking">\n              <h5>IoU Tracker Update</h5>' not in page
+    # Those steps remain documented inside the detail popup.
+    assert 'flow-node--advisory" data-module="detection" data-route="Feeds Traffic Light Classification only; it does not become a tracked collision object."><h5>Traffic Light Split</h5>' in page
+    assert 'data-route="Feeds stable track_id, object age, history and distance smoothing."><h5>IoU Tracker Update</h5>' in page
+
+    # The map's Per-Object Risk group is reduced to its two headline outputs;
+    # the cues, signal terms and gates live in the popup with risk colouring.
+    assert 'data-doc-open="per-object-risk" data-module="risk">\n              <h5>Collision ETA</h5>' in page
+    assert 'data-doc-open="per-object-risk" data-module="risk">\n              <h5>Risk Score</h5>' in page
+    assert 'data-doc-open="per-object-risk" data-module="risk">\n              <h5>BBox Expansion</h5>' not in page
+    assert 'data-doc-open="per-object-risk" data-module="risk">\n              <h5>TTC Fusion</h5>' not in page
+    # Popup cards are coloured (data-module) and tag internal vs hub, with formulas.
+    assert 'data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and Collision ETA."><h5>Depth / Kalman Distance</h5>' in page
+    assert 'flow-node--hub" data-module="risk" data-route="Feeds ETA Pressure, imminent-TTC escalation and the TTC shown in the UI."><h5>TTC Fusion</h5>' in page
+    # Decision + Delivery is its own section, not duplicated inside the risk popup.
+    assert 'data-module="decision" data-route="Feeds State From Score with' not in page
+    # Formulas are split into separate labelled blocks and use the × sign.
+    assert "doc-formula-set" in page
+    for label in ("Time-to-collision", "Risk score", "State banding"):
+        assert f'<div class="doc-formula__label">{label}</div>' in page
+    assert "<b>eta_pressure</b>(ttc) = clamp((3 − ttc) / 3, 0, 1)" in page
+    assert "<b>risk.score</b> = gate × relevance × signal" in page
+    assert "·" not in page  # multiplication uses × everywhere now
+
+    # The map's Decision + Delivery group is reduced to its two delivered
+    # outputs; the steps and rules live in the popup with decision colouring.
+    assert 'data-doc-open="decision-delivery" data-module="decision">\n              <h5>Frame Row</h5>' in page
+    assert 'data-doc-open="decision-delivery" data-module="decision">\n              <h5>Peak Event</h5>' in page
+    assert 'data-doc-open="decision-delivery" data-module="decision">\n              <h5>Primary Object Selection</h5>' not in page
+    assert 'data-module="decision" data-route="Feeds the Frame Row and risk banner with the stabilized state."><h5>State Stabilization</h5>' in page
+    assert 'flow-node--hub" data-module="decision" data-route="Feeds the summary view as the headline event of the analysis."><h5>Peak Event</h5>' in page
+    for label in ("Primary object", "State stabilization", "Saved events"):
+        assert f'<div class="doc-formula__label">{label}</div>' in page
+
+    assert 'data-route="Feeds Depth / Kalman Distance, BBox Expansion, Flow TTC and Lane Crossing Risk."><h5>Tracked Object Stream</h5>' in page
+    assert 'data-module="input" data-route="Feeds Preprocess with the raw source frame."><h5>Frame Ingest</h5>' in page
+    assert "Input card style info" in page
+    assert 'data-info-module="input"' in page
+    assert "Internal input step" in page
+    assert 'flow-node--hub" data-module="input" data-route="Feeds the Depth Anything V2 metric depth model."><h5>RGB View</h5>' in page
+    assert 'data-module="lane" data-route="Feeds Lane Corridor Build."><h5>Lane Line Detection</h5>' in page
+    assert 'flow-node--hub" data-module="lane" data-route=' in page
+    for downstream_title in (
+        "Lane Frame",
+        "Vanishing Point",
+        "Lane Confidence Smoothing",
+        "Lane Position",
+        "Cut-In Motion",
+        "Lane Crossing Risk",
+        "Lane Relevance",
+    ):
+        assert f"<h5>{downstream_title}</h5>" in page
+    assert 'data-route="Feeds Flow TTC and far-lane reliability checks."' in page
+    assert 'data-route="Feeds Risk Score as the multiplicative lane gate."' in page
+    assert 'data-info-module="motion-depth"' in page
+    assert 'data-route="Feeds Optical Flow and downstream Flow TTC."><h5>OpenCV DIS Optical Flow</h5>' in page
+    assert 'data-route="Feeds Depth Estimation, metric distance and downstream Collision ETA."><h5>Depth Anything V2 Metric VKITTI</h5>' in page
+    assert '<h5>OpenCV DIS Optical Flow</h5>\n              <p>Computes dense optical flow with ego-motion compensation.</p>' in page
+    assert '<h5>Depth Anything V2 Metric VKITTI</h5>\n              <p>Produces metric depth for distance, nearness and collision ETA.</p>' in page
+    assert 'data-module="motion-depth" data-route="Feeds Quick Motion Risk, Flow TTC, Approach Score and flow confidence."><h5>Optical Flow</h5>' in page
+    assert 'data-route="Feeds Lane-Relevance Filter as the near-object map."><h5>Near Map</h5>' in page
+    assert 'flow-node--hub" data-module="motion-depth" data-route="Feeds ETA Pressure, state escalation and the UI collision ETA display."><h5>Collision ETA</h5>' in page
     assert 'data-doc-output-toggle' not in page
     for module in (
         "input",
         "lane",
         "motion-depth",
         "detection",
-        "tracking",
         "risk",
         "decision",
         "performance",
     ):
         assert f'data-module="{module}"' in page
+        assert f'data-legend-module="{module}"' in page
+    # The tracking module folds into the detection colour now.
+    assert 'data-legend-module="tracking"' not in page
+    assert 'data-module="tracking"' not in page
 
     # Popups open/close via the standalone driver (no inline-section anchors).
     assert "data-doc-close" in page
     assert "openModal" in page_js and "closeModal" in page_js
+    assert "setInfoOpen" in page_js and "doc-color-info-panel" in page_js
     assert "enhanceInfoTooltips" in page_js and "flow-info-icon" in page_js
+    assert "flow-route-icon" in page_js and "dataset.route" in page_js
+    assert "closeInfoTooltips" in page_js and "aria-expanded" in page_js
 
     # Output chip lists were removed from the landing and detail pages; this is
     # now a heading-based process map, not a variable/schema view.
@@ -220,28 +318,60 @@ def test_how_it_works_is_a_standalone_routed_page():
     for style_contract in (
         ".doc-topbar",
         ".doc-icon-btn",
+        ".doc-info-btn",
+        ".doc-color-info",
+        ".doc-color-row",
+        ".doc-style-row",
+        ".doc-style-swatch--advisory",
+        ".doc-style-swatch--hub",
+        ".doc-local-note",
+        ".doc-local-note__item",
+        ".doc-local-note .doc-style-swatch--hub",
+        "64, 210, 148",
+        ".doc-modal__actions",
+        ".doc-modal-info__btn",
+        ".doc-modal-info:hover .doc-local-note",
+        '.doc-color-row[data-legend-module="detection"]',
         ".doc-menu-btn",
         ".doc-menu-btn.is-active",
         ".pipeline-group",
         ".pipeline-steps",
+        ".pipeline-group--single .pipeline-steps",
         ".pipeline-group--hub",
         ".doc-modal__body > .pipeline-group",
         ".doc-section--map .flow-node",
         ".doc-section--map .flow-node[data-module]",
+        ".doc-modal .flow-node[data-module]",
         '.doc-section--map .flow-node[data-module="input"]',
+        '.doc-modal .flow-node[data-module="input"]',
         '.doc-section--map .flow-node[data-module="lane"]',
+        '.doc-modal .flow-node[data-module="lane"]',
         '.doc-section--map .flow-node[data-module="motion-depth"]',
+        '.doc-modal .flow-node[data-module="motion-depth"]',
+        '.doc-modal-info[data-info-module="motion-depth"] .doc-local-note .doc-style-swatch--hub',
+        '.doc-modal-info[data-info-module="detection"] .doc-local-note .doc-style-swatch--hub',
         '.doc-section--map .flow-node[data-module="detection"]',
-        '.doc-section--map .flow-node[data-module="tracking"]',
+        '.doc-modal .flow-node[data-module="detection"]',
         '.doc-section--map .flow-node[data-module="risk"]',
         '.doc-section--map .flow-node[data-module="decision"]',
         '.doc-section--map .flow-node[data-module="performance"]',
+        ".doc-section--map .flow-node--hub[data-module]",
+        ".doc-section--map .flow-node--advisory[data-module]",
+        ".doc-modal .flow-node--advisory[data-module]",
+        "border-style: dashed",
+        "border-width: 1.5px",
+        ".doc-section--map .flow-node:has(.flow-info-icon:hover)",
         ".doc-section--map .flow-node--link[data-module]:hover",
         "--module-rgb",
+        "overflow: visible",
         ".doc-modal .flow-node",
         "min-height: 82px",
         ".flow-info-icon",
+        ".flow-route-icon",
+        ".flow-info-icon.is-open",
+        ".flow-route-icon.is-open",
         ".flow-info-icon::after",
+        ".flow-route-icon::after",
         "grid-template-rows: auto minmax(58px, auto) auto",
         "justify-items: center",
         "min-height: 148px",
