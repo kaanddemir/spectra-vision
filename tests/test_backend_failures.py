@@ -1,5 +1,3 @@
-"""Hard-failure contracts for required vision backends."""
-
 import numpy as np
 import pytest
 
@@ -61,7 +59,7 @@ class _FakeYoloModel:
         return [_FakeYoloResult(self.boxes)]
 
 
-def test_get_depth_model_raises_and_caches_load_failure(monkeypatch):
+def test_depth_model_load_failure_is_cached_and_reported(monkeypatch):
     _reset_depth_singleton(monkeypatch)
 
     class BrokenDepthModel:
@@ -77,7 +75,7 @@ def test_get_depth_model_raises_and_caches_load_failure(monkeypatch):
         models.get_depth_model()
 
 
-def test_get_lanenet_model_raises_and_caches_load_failure(monkeypatch):
+def test_lanenet_model_load_failure_is_cached_and_reported(monkeypatch):
     _reset_lanenet_singleton(monkeypatch)
 
     class BrokenLaneModel:
@@ -93,27 +91,15 @@ def test_get_lanenet_model_raises_and_caches_load_failure(monkeypatch):
         lanenet.get_lanenet_model()
 
 
-def test_ensure_required_models_surfaces_depth_load_failure(monkeypatch):
-    monkeypatch.setattr(video, "is_depth_available", lambda: True)
-    monkeypatch.setattr(video, "is_yolo_available", lambda: True)
-    monkeypatch.setattr(video, "is_lanenet_available", lambda: True)
-    monkeypatch.setattr(video, "get_depth_model", lambda: (_ for _ in ()).throw(RuntimeError("depth load failed")))
-    monkeypatch.setattr(video, "get_lanenet_model", lambda: object())
-    monkeypatch.setattr(video, "get_detector", lambda: object())
-
-    with pytest.raises(RuntimeError, match="depth load failed"):
-        video._ensure_required_models()
-
-
-def test_ensure_required_models_surfaces_lanenet_load_failure(monkeypatch):
+def test_required_model_check_surfaces_backend_load_failures(monkeypatch):
     monkeypatch.setattr(video, "is_depth_available", lambda: True)
     monkeypatch.setattr(video, "is_yolo_available", lambda: True)
     monkeypatch.setattr(video, "is_lanenet_available", lambda: True)
     monkeypatch.setattr(video, "get_depth_model", lambda: object())
-    monkeypatch.setattr(video, "get_lanenet_model", lambda: (_ for _ in ()).throw(RuntimeError("lane load failed")))
-    monkeypatch.setattr(video, "get_detector", lambda: object())
+    monkeypatch.setattr(video, "get_lanenet_model", lambda: object())
+    monkeypatch.setattr(video, "get_detector", lambda: (_ for _ in ()).throw(RuntimeError("yolo load failed")))
 
-    with pytest.raises(RuntimeError, match="lane load failed"):
+    with pytest.raises(RuntimeError, match="yolo load failed"):
         video._ensure_required_models()
 
 
@@ -130,6 +116,11 @@ def test_yolo_inference_failure_raises_runtime_error():
         detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
 
 
+def test_yolo_unloaded_detector_raises_runtime_error():
+    with pytest.raises(RuntimeError, match="YOLOv8 detector is not loaded"):
+        ObjectDetector().detect(np.zeros((32, 48, 3), dtype=np.uint8))
+
+
 def test_yolo_empty_results_remain_empty_detections():
     class EmptyModel:
         def predict(self, **kwargs):
@@ -142,42 +133,15 @@ def test_yolo_empty_results_remain_empty_detections():
     assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
 
 
-def test_vehicle_detection_below_class_confidence_gate_is_filtered():
+def test_yolo_class_confidence_gate_filters_and_keeps_expected_detections():
     detector = ObjectDetector()
-    detector._model = _FakeYoloModel(
-        _FakeBoxes(
-            xyxy=[[4, 5, 24, 25]],
-            cls=[2],
-            conf=[0.35],
-        )
-    )
     detector._device = "cpu"
 
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.35]))
+    assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[7], conf=[0.55]))
     detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
-
-    assert detections == []
-
-
-def test_vehicle_detection_above_class_confidence_gate_is_kept():
-    detector = ObjectDetector()
-    detector._model = _FakeYoloModel(
-        _FakeBoxes(
-            xyxy=[[4, 5, 24, 25]],
-            cls=[7],
-            conf=[0.55],
-        )
-    )
-    detector._device = "cpu"
-
-    detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
-
     assert len(detections) == 1
     assert detections[0].class_name == "truck"
     assert detections[0].confidence == pytest.approx(0.55)
-
-
-def test_yolo_unloaded_detector_raises_runtime_error():
-    detector = ObjectDetector()
-
-    with pytest.raises(RuntimeError, match="YOLOv8 detector is not loaded"):
-        detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))

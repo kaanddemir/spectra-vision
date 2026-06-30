@@ -311,8 +311,18 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12.5px;
   line-height: 1.9;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
-.doc-formula b { color: var(--red-hi); font-weight: 800; }
+.doc-formula b,
+.formula-var--shared {
+  color: var(--red-hi);
+  font-weight: 800;
+}
+.formula-var {
+  display: inline;
+  white-space: normal;
+}
 .doc-formula-set {
   display: flex;
   flex-direction: column;

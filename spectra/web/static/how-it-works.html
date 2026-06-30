@@ -190,8 +190,11 @@
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Preprocess</div>
-            resize: long side → resize_max_side (aspect preserved)<br>
-            views: bgr, gray, rgb (no denoise / CLAHE)
+            scale = resize_max_side / max(width, height)<br>
+            <b>frame_resized</b> = resize(frame, scale) when scale &lt; 1<br>
+            <span class="formula-var formula-var--shared">bgr</span> = frame_resized for YOLO + overlay<br>
+            <span class="formula-var formula-var--shared">gray</span> = grayscale(frame_resized) for flow<br>
+            <span class="formula-var formula-var--shared">rgb</span> = RGB(frame_resized) for depth
           </div>
         </div>
         <div class="pipeline-group">
@@ -236,18 +239,27 @@
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Class risk weight</div>
-            person 1.10, bicycle/motorcycle 1.05, car 1.00,<br>
-            bus/truck 0.95, train 0.90, traffic light 0.00
+            <span class="formula-var formula-var--shared">class_weight</span>(person) = 1.10<br>
+            <span class="formula-var formula-var--shared">class_weight</span>(bicycle/motorcycle) = 1.05<br>
+            <span class="formula-var formula-var--shared">class_weight</span>(car) = 1.00<br>
+            <span class="formula-var formula-var--shared">class_weight</span>(bus/truck) = 0.95; train = 0.90<br>
+            traffic_light = 0.00 (advisory only)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Detection gate</div>
-            keep road COCO classes; per-class min confidence:<br>
-            car/bus/truck 0.50, person/bike/moto 0.45, train 0.55
+            yolo_conf_min = 0.45; yolo_iou = 0.45<br>
+            keep class ∈ road_user_classes ∪ traffic_light<br>
+            min_conf(person/bike/moto) = 0.45<br>
+            min_conf(car/bus/truck) = 0.50; train = 0.55<br>
+            <b>detection_confidence</b> = YOLO box confidence after class gate
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">IoU tracking</div>
-            match same class, IoU ≥ 0.25 (coasted ≥ 0.12)<br>
-            confirm after 3 hits, drop after 8 misses
+            accepted if same class and direct_iou ≥ 0.25<br>
+            or predicted_iou ≥ 0.12<br>
+            or center_ratio ≤ threshold with compatible scale<br>
+            match_score = 2 × max_iou + center_score + 0.25 × scale_score − 0.03 × misses<br>
+            <span class="formula-var formula-var--shared">track_id</span> confirms after 3 hits or fast confirm; drops after 8 misses
           </div>
         </div>
         <div class="pipeline-group">
@@ -311,21 +323,27 @@
             <div class="doc-formula__label">Optical flow</div>
             flow on a downscaled pair (long side ≤ 320 px), upscaled back<br>
             ego-motion: RANSAC homography on LK corners, then subtracted<br>
-            motion_signal = 0.65 × magnitude + 0.35 × divergence
+            <span class="formula-var formula-var--shared">flow</span> = DIS(current_gray, previous_gray) − ego_motion<br>
+            magnitude_norm = normalize(|flow|)<br>
+            divergence_norm = normalize(divergence(flow))<br>
+            <b>motion_signal</b> = 0.65 × magnitude_norm + 0.35 × divergence_norm
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Depth</div>
-            depth_m = clamp(model, 0, 80 m)<br>
-            near_map = 1 − depth_m / 80<br>
-            distance = 25th-percentile of the bbox lower-center crop<br>
-            refresh: first frame, every depth_every, or motion_risk &gt; 0.15
+            <span class="formula-var formula-var--shared">depth_m</span> = clamp(depth_model(rgb), 0, 80 m)<br>
+            <span class="formula-var formula-var--shared">near_map</span> = 1 − depth_m / 80<br>
+            crop = bbox lower-center region (x 15%..85%, y 30%..100%)<br>
+            <span class="formula-var formula-var--shared">distance_m</span> = percentile(valid crop, 25)<br>
+            refresh if first frame, frame % depth_every = 0, or quick_motion_risk &gt; 0.15
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Longitudinal Kalman</div>
-            state = (distance, range-rate); closing = −range-rate<br>
-            measurement std = 0.05 × distance<br>
+            state = (distance, range_rate); closing_mps = −range_rate<br>
+            measurement_var = (0.05 × distance_m)² + 0.5²<br>
             reject sample if innovation² &gt; 9 σ² (3σ gate) → coast<br>
-            closing clamped to [0.30, 60] m/s; TTC only after ≥2 measurements
+            <span class="formula-var formula-var--shared">ttc_depth</span> = distance_m / closing_mps<br>
+            valid when updates ≥ 2 and closing_mps ≥ 0.30<br>
+            depth_confidence = speed_term × freshness × velocity_certainty
           </div>
         </div>
         <div class="pipeline-group">
@@ -386,16 +404,20 @@
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Lane position</div>
-            lane_pos = 0 center, ±1 boundary, ±2 one lane away<br>
-            (normalised by the lane width at the object's image row)
+            lane_center_x = midpoint(left_lane, right_lane) at bbox bottom<br>
+            lane_half_width = lane_width_at_bbox_bottom / 2<br>
+            <span class="formula-var formula-var--shared">lane_pos</span> = (bbox_center_x − lane_center_x) / lane_half_width<br>
+            0 = center, ±1 = boundary, ±2 = one lane away
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Crossing risk</div>
+            lateral_v = median Δlane_pos / Δt over recent track history<br>
             predicted_pos = lane_pos + lateral_v × min(fused_ttc, 3)<br>
             margin = max(0, |predicted_pos| − 0.6)<br>
-            predicted = exp(−margin² / 0.25) × lane_trust × far_reliability<br>
             lane_trust = clamp((lane_conf − 0.25) / 0.60, 0, 1)<br>
-            <b>crossing_risk</b> = max(corridor_overlap, predicted)
+            far_reliability = 0.40 + 0.60 × depth_frac<br>
+            predicted = exp(−margin² / 0.25) × lane_trust × far_reliability<br>
+            <b>crossing_risk</b> = clamp(max(corridor_overlap, predicted), 0, 1)
           </div>
         </div>
         <div class="pipeline-group">
@@ -454,33 +476,52 @@
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Time-to-collision</div>
-            ttc_depth = distance / closing_mps<br>
-            ttc_expansion = 1 / expansion_rate<br>
-            ttc_flow = 1 / radial_expansion(flow, p75)<br>
-            fused_ttc = weighted_median(ttc_depth, ttc_flow, ttc_expansion)<br>
-            <b>eta_pressure</b>(ttc) = clamp((3 − ttc) / 3, 0, 1)<br>
-            <b>approach</b> = 0.50 × closing_mps + 0.30 × expansion + 0.20 × flow
+            <span class="formula-var formula-var--shared">ttc_depth</span> = distance_m / closing_mps (physical ETA)<br>
+            <span class="formula-var formula-var--shared">ttc_expansion</span> = 1 / expansion_rate when expansion_rate ≥ 0.01<br>
+            <span class="formula-var formula-var--shared">ttc_flow</span> = distance_from_vp / radial_p75 × flow_dt<br>
+            valid TTC cues are clamped to [0.15s, 15.0s]<br>
+            <span class="formula-var formula-var--shared">fused_ttc</span> = weighted_median(valid cues, cue_confidence)<br>
+            <b>eta_pressure</b>(ttc_depth) = clamp((3 − ttc_depth) / 3, 0, 1)
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Cue agreement</div>
+            values = valid(ttc_depth, ttc_flow, ttc_expansion)<br>
+            spread = (max(values) − min(values)) / median(values)<br>
+            <span class="formula-var formula-var--shared">ttc_agreement</span> = clamp(1 − spread, 0, 1)<br>
+            if fewer than 2 valid cues: ttc_agreement = 1
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Proximity + approach</div>
+            <span class="formula-var formula-var--shared">proximity</span> = 1 if distance_m ≤ 8<br>
+            proximity = 0 if distance_m ≥ 60<br>
+            proximity = clamp((60 − distance_m) / 52, 0, 1) otherwise<br>
+            metric = clamp((closing_mps − 0.30) / (12.0 − 0.30), 0, 1)<br>
+            expansion = clamp(expansion_rate / 0.6, 0, 1)<br>
+            flow = clamp(flow_magnitude_p75, 0, 1)<br>
+            <b>approach</b> = class_weight × (0.50 × metric + 0.30 × expansion + 0.20 × flow)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Confidence (gate input)</div>
-            confidence = clamp(0.70 × detection + 0.30 × lane, 0, 1)<br>
-            confidence ×= 0.70 + 0.30 × ttc_agreement
+            raw_confidence = clamp(0.70 × detection_confidence + 0.30 × lane_confidence, 0, 1)<br>
+            agreement_gate = 0.70 + 0.30 × ttc_agreement<br>
+            <span class="formula-var formula-var--shared">confidence</span> = EMA(raw_confidence × agreement_gate)<br>
+            detection_confidence still controls the low-confidence SAFE override
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Risk score</div>
-            signal = 0.40 × <b>eta_pressure</b> + 0.30 × proximity + 0.25 × approach + 0.05 × brake<br>
-            gate = 0.65 + 0.35 × confidence<br>
-            relevance = crossing_risk<br>
-            <b>risk.score</b> = gate × relevance × signal
+            <span class="formula-var formula-var--shared">signal</span> = 0.40 × eta_pressure + 0.30 × proximity + 0.25 × approach + 0.05 × brake<br>
+            <span class="formula-var formula-var--shared">gate</span> = 0.65 + 0.35 × confidence<br>
+            <span class="formula-var formula-var--shared">relevance</span> = crossing_risk<br>
+            <b>risk.score</b> = round(gate × relevance × signal, 3)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">State banding</div>
-            state = DANGER if risk.score ≥ 0.60<br>
-            state = CAUTION if risk.score ≥ 0.25<br>
-            state = SAFE otherwise<br>
-            escalate → DANGER if fused_ttc &lt; 1.0s (≥2 frames) and state ≥ CAUTION<br>
+            raw_state = DANGER if risk.score ≥ 0.60<br>
+            raw_state = CAUTION if risk.score ≥ 0.25<br>
+            raw_state = SAFE otherwise<br>
+            escalate → DANGER if ttc_depth &lt; 1.0s in ≥2 recent frames and risk.score ≥ 0.25<br>
             force → SAFE if detection_confidence &lt; 0.20<br>
-            stabilize: upgrade after 3 frames, downgrade after 7 frames
+            raw_state is stabilized later in Decision + Delivery
           </div>
         </div>
         <div class="pipeline-group">
@@ -489,7 +530,7 @@
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and Collision ETA."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and closing speed from metric depth (the physical backbone).</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the visual expansion cue and the approach term."><h5>BBox Expansion</h5><p>Measures object scale growth across track history as a visual approach cue.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the optical-flow cue."><h5>Flow TTC</h5><p>Estimates time-to-collision from radial optical flow around the vanishing point.</p></article>
-            <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds ETA Pressure, imminent-TTC escalation and the TTC shown in the UI."><h5>TTC Fusion</h5><p>Blends the depth, flow and expansion cues with a confidence-weighted median and agreement scoring.</p></article>
+            <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds TTC agreement, confidence damping and the lane-crossing prediction horizon."><h5>TTC Fusion</h5><p>Blends the depth, flow and expansion cues with a confidence-weighted median for internal risk timing.</p></article>
             <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds ETA Pressure and the physical collision ETA displayed to the user."><h5>Collision ETA</h5><p>Uses depth distance and closing speed for the physical ETA shown in the UI.</p></article>
           </div>
         </div>
@@ -497,7 +538,7 @@
         <div class="pipeline-group">
           <h3>Signal Terms</h3>
           <div class="pipeline-steps">
-            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.40."><h5>ETA Pressure</h5><p>Scores how little collision time remains from the fused TTC.</p></article>
+            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.40."><h5>ETA Pressure</h5><p>Scores how little physical depth-based collision time remains.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.30."><h5>Proximity</h5><p>Scores how close the object already is from metric depth.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.25."><h5>Approach</h5><p>Scores how strongly distance is closing from closing speed, expansion and flow.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.05."><h5>Brake Light Cue</h5><p>Adds a small early warning from lead-vehicle brake lamps.</p></article>
@@ -540,20 +581,25 @@
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Primary object</div>
-            primary = argmax over tracks of<br>
-            (state_severity, 3 − fused_ttc, closing_mps, crossing_risk)
+            eligible if state ≥ CAUTION, or |lane_pos| ≤ 1<br>
+            SAFE off-corridor eligible only when moving inward and predicted inside lane<br>
+            <span class="formula-var formula-var--shared">primary</span> = argmax eligible objects by<br>
+            (risk.score, state_severity, eta_pressure)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">State stabilization</div>
+            stabilizer_input = max objects by (state_severity, risk.score)<br>
             upgrade after 3 consecutive frames<br>
             downgrade after 7 consecutive frames<br>
-            fused_ttc ≤ 1.0s → DANGER immediately
+            confirmed ttc_depth ≤ 1.0s DANGER bypasses upgrade delay
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Saved events</div>
-            dedup window = 1.0s (stronger score replaces weaker)<br>
-            keep top-N saved events by risk.score<br>
-            render overlays only for retained events
+            event_score = primary_risk_score if present, else risk_score<br>
+            dedup if |timestamp − saved.timestamp| ≤ 1.0s<br>
+            stronger event_score replaces weaker event in the window<br>
+            keep top-N saved events by event_score<br>
+            render overlays only after dedup + top-N retention
           </div>
         </div>
         <div class="pipeline-group">
@@ -648,7 +694,7 @@
               <tr><td><span class="module-name">Lane-Relevance Filter</span></td><td><span class="freq-badge freq-periodic">On YOLO frames</span></td><td class="skip-cell">Existing tracks continue with their latest lane relevance.</td></tr>
               <tr><td><span class="module-name">UFLDv2 Lane Detection</span></td><td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td><td class="skip-cell">Lane Kalman smoothing coasts the corridor forward.</td></tr>
               <tr><td><span class="module-name">Depth Estimation</span></td><td><span class="freq-badge freq-slow">Default: every 10th frame</span></td><td class="skip-cell">The previous metric depth map is reused.</td></tr>
-              <tr><td><span class="module-name">Adaptive Depth Refresh</span></td><td><span class="freq-badge freq-event">Motion triggered</span></td><td class="skip-cell">Fires when quick motion risk &gt; 0.15, subject to a refresh cooldown of depth_every / 2 frames.</td></tr>
+              <tr><td><span class="module-name">Adaptive Depth Refresh</span></td><td><span class="freq-badge freq-event">Motion triggered</span></td><td class="skip-cell">Fires when quick motion risk &gt; 0.15, subject to a refresh cooldown of max(3, depth_every / 2) frames.</td></tr>
               <tr><td><span class="module-name">Tracking</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always updates or propagates tracks.</td></tr>
               <tr><td><span class="module-name">Per-Object Risk Evaluation</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Uses the freshest available detection, lane, depth and flow cues.</td></tr>
               <tr><td><span class="module-name">State Stabilization</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always runs after risk scoring.</td></tr>
@@ -664,7 +710,7 @@
             <path d="M12 9v5"></path>
             <path d="M12 17h.01"></path>
           </svg>
-          <span>Default sampling: lane_every=3, detect_every=3, depth_every=10, flow_every=1. Adaptive depth refreshes early when quick motion risk &gt; 0.15 (cooldown depth_every / 2 frames).</span>
+          <span>Default sampling: lane_every=3, detect_every=3, depth_every=10, flow_every=1. Adaptive depth refreshes early when quick motion risk &gt; 0.15 (cooldown max(3, depth_every / 2) frames).</span>
         </div>
       </div>
     </div>
