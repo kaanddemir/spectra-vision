@@ -2420,7 +2420,7 @@ export function initializeSpectra() {
       btn.disabled = true;
     });
     const help = byId("frame-budget-help");
-    if (help) help.textContent = "Select a video first.";
+    if (help) help.textContent = "";
   }
 
   function setFrameBudgetPreset(preset) {
@@ -2454,7 +2454,7 @@ export function initializeSpectra() {
     if (frames === null) {
       state.frameBudgetPreset = null;
       const help = byId("frame-budget-help");
-      if (help) help.textContent = state.sourceMeta ? "Choose a frame budget." : "Select a video first.";
+      if (help) help.textContent = state.sourceMeta ? "Choose a frame budget." : "";
       return;
     }
     const totalFrames = estimatedSourceFrames();
@@ -2473,7 +2473,7 @@ export function initializeSpectra() {
     });
     const help = byId("frame-budget-help");
     if (help) {
-      if (!totalFrames) help.textContent = "Select a video first.";
+      if (!totalFrames) help.textContent = "";
       else if (match && match[0] === "full") help.textContent = `${match[1].label} · all ~${totalFrames} frames`;
       else if (match) help.textContent = `${match[1].label} · ~${frames} of ${totalFrames} frames`;
       else help.textContent = `Custom · ${frames} of ${totalFrames} frames`;
