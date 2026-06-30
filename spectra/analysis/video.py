@@ -319,6 +319,28 @@ def _risk_score(event: RiskEvent) -> float:
     return score_event(event)
 
 
+# A near, in-corridor object: a close vehicle in (or one lane off) the ego path.
+# Used to (a) gate the detector's near-band recovery pass off while a close lead
+# is healthily tracked, and (b) decide when a CAUTION/DANGER primary is worth
+# remembering as a "strong" threat for the dropout safety net.
+_NEAR_THREAT_DISTANCE_M = 14.0
+_NEAR_THREAT_LANE_POS = 1.3
+# How long the banner is held at its prior band after a near threat drops out of
+# the active set, so a brief detector miss cannot flip the frame to SAFE.
+_STRONG_PRIMARY_HOLD_SEC = 1.0
+
+
+def _is_near_in_corridor(event: RiskEvent) -> bool:
+    """Whether ``event`` is a close vehicle in or beside the ego corridor."""
+
+    if abs(event.lane_position) > _NEAR_THREAT_LANE_POS:
+        return False
+    if event.distance_m is not None:
+        return event.distance_m <= _NEAR_THREAT_DISTANCE_M
+    # No metric depth this frame → trust the normalized nearness instead.
+    return event.near_score >= 0.85
+
+
 def _display_lane_position(lane_position: float) -> float:
     return round(float(np.clip(lane_position, -1.5, 1.5)), 3)
 
@@ -758,6 +780,21 @@ class SpatialFrameAnalyzer:
         # frames and coasted on skipped frames.
         self.last_traffic_light_state: tuple[str, float] = ("none", 0.0)
 
+        # Whether the previous frame had a near, in-corridor threat actively
+        # tracked. When False the detector runs an extra lower-center pass to
+        # recover a close lead vehicle the full-frame pass may have dropped
+        # (Layer 1 near-band gating). True in the healthy case → no extra cost.
+        self._near_threat_tracked = False
+        # Track ids that should coast longer than the default window when a
+        # detection is missed (last primary + previous-frame CAUTION/DANGER ids)
+        # so a genuine threat does not vanish from the active set during a brief
+        # YOLO dropout (Layer 2).
+        self._hot_track_ids: set[int] = set()
+        # Last near in-corridor CAUTION/DANGER primary, used to hold the banner
+        # across a short dropout instead of falling to a distant low-risk object
+        # (Layer 3 safety net). None when no recent near threat.
+        self._last_strong_primary: dict[str, Any] | None = None
+
         # Per-track history / hysteresis.
         self.expansion_smoother = ExpansionSmoother()
         self.depth_smoother = DepthDeltaSmoother()
@@ -897,7 +934,13 @@ class SpatialFrameAnalyzer:
             # initial depth pass completes; the filter falls back to its
             # strict gate in that case.
             depth_near_map = self.last_depth.near_map if self.last_depth is not None else None
-            raw_detections = self.detector.detect(frame.bgr)
+            # Run the lower-center recovery pass only when a near in-corridor
+            # threat is NOT currently tracked — i.e. exactly when a close lead
+            # vehicle may have dropped out — so we don't pay for a second YOLO
+            # pass while the lead car is healthily tracked.
+            raw_detections = self.detector.detect(
+                frame.bgr, near_band=not self._near_threat_tracked
+            )
             # Traffic lights are advisory-only: split them out so they never
             # enter the collision tracker, then classify the nearest one.
             lights = [d for d in raw_detections if d.class_name == "traffic_light"]
@@ -914,9 +957,10 @@ class SpatialFrameAnalyzer:
                 timestamp_sec=timestamp_sec,
                 frame_shape=frame.bgr.shape,
                 frame_bgr=frame.bgr,
+                hot_ids=self._hot_track_ids,
             )
         else:
-            active_tracks = self.tracker.propagate()
+            active_tracks = self.tracker.propagate(hot_ids=self._hot_track_ids)
         t_yolo = time.perf_counter()
 
         _record_stage(self.performance_stats, "preprocess", t_preprocess - t0)
@@ -964,7 +1008,6 @@ class SpatialFrameAnalyzer:
         # ``all_events`` (i.e. the ``objects[]`` row whose
         # ``tracking.trackId`` equals ``primary.trackId``). The frame-level
         # ``state`` carries the hysteresis-smoothed band independently.
-        primary_risk_score = _risk_score(primary_event)
         # Stabilize on the frame's WORST raw-state object, not just the selected
         # primary. After the eligibility fix this is normally the primary, but
         # feeding the worst keeps the banner elevated when primary selection
@@ -978,8 +1021,39 @@ class SpatialFrameAnalyzer:
                 _risk_score(e),
             ),
         )
+
+        # Layer 3 — dropout safety net. If no object reads CAUTION/DANGER this
+        # frame but a near in-corridor threat existed within the last ~1s, the
+        # detector almost certainly just missed the close lead vehicle. Holding
+        # the banner at CAUTION (and pointing the primary back at the remembered
+        # threat) prevents the frame from flipping to a falsely-reassuring SAFE
+        # on a distant low-risk object while the close car is still there.
+        held_primary = primary_event
+        if (
+            stabilizer_event.state == "SAFE"
+            and self._last_strong_primary is not None
+            and 0.0 < timestamp_sec - self._last_strong_primary["timestamp"]
+            <= _STRONG_PRIMARY_HOLD_SEC
+        ):
+            remembered = self._last_strong_primary["event"]
+            held = replace(
+                remembered,
+                state="CAUTION",
+                frame_index=frame_index,
+                timestamp_sec=timestamp_sec,
+            )
+            stabilizer_event = held
+            held_primary = held
+
+        primary_risk_score = _risk_score(held_primary)
         stabilized_state = stabilized_event_state(self.stabilizer, stabilizer_event)
-        primary_event = replace(primary_event, state=stabilized_state)
+        primary_event = replace(held_primary, state=stabilized_state)
+
+        # Refresh cross-frame perception state for the next frame: which close
+        # threat is tracked (Layer 1 gating), which ids should coast longer
+        # (Layer 2), and the last strong primary to hold on a dropout (Layer 3).
+        # Driven by the RAW per-object events, not the stabilized banner.
+        self._update_threat_memory(all_events, timestamp_sec)
 
         self.processed_frames += 1
 
@@ -991,6 +1065,58 @@ class SpatialFrameAnalyzer:
             lane=lane,
             traffic_light_state=self.last_traffic_light_state,
         )
+
+    def _update_threat_memory(
+        self,
+        all_events: list[RiskEvent],
+        timestamp_sec: float,
+    ) -> None:
+        """Refresh near-threat / hot-id / strong-primary state for next frame."""
+
+        # Layer 1 gating: is a close in-corridor object actively in the set? When
+        # not (only far traffic remains), the next detection frame runs the
+        # near-band recovery pass.
+        self._near_threat_tracked = any(_is_near_in_corridor(e) for e in all_events)
+
+        # Layer 2: coast the active threat ids longer. Any CAUTION/DANGER object
+        # plus the remembered strong primary (so it keeps coasting through a
+        # brief miss before the hold window lapses).
+        hot: set[int] = {
+            e.object_id
+            for e in all_events
+            if e.state in ("CAUTION", "DANGER") and e.object_id is not None
+        }
+        strong = self._last_strong_primary
+        if (
+            strong is not None
+            and strong.get("trackId") is not None
+            and (timestamp_sec - strong["timestamp"]) <= _STRONG_PRIMARY_HOLD_SEC
+        ):
+            hot.add(strong["trackId"])
+        self._hot_track_ids = hot
+
+        # Layer 3: remember the strongest near in-corridor CAUTION/DANGER object
+        # as the threat to hold across a dropout. Expire the memory once it is
+        # older than the hold window and nothing renewed it.
+        strong_now = [
+            e
+            for e in all_events
+            if e.state in ("CAUTION", "DANGER") and _is_near_in_corridor(e)
+        ]
+        if strong_now:
+            best = max(strong_now, key=_risk_score)
+            self._last_strong_primary = {
+                "event": best,
+                "timestamp": timestamp_sec,
+                "trackId": best.object_id,
+                "distanceM": best.distance_m,
+            }
+        elif (
+            self._last_strong_primary is not None
+            and (timestamp_sec - self._last_strong_primary["timestamp"])
+            > _STRONG_PRIMARY_HOLD_SEC
+        ):
+            self._last_strong_primary = None
 
 
 def analyze_spatial_video(

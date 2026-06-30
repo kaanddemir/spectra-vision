@@ -52,6 +52,40 @@ def test_tracker_coasts_through_short_detection_miss_and_reconnects():
     assert tracks[0].misses == 0
 
 
+def test_hot_track_coasts_longer_than_a_normal_track():
+    # A normal track goes silent after coast_limit (2) missed detections, while a
+    # "hot" threat id keeps emitting up to hot_coast_limit (6) so a near lead
+    # vehicle the detector briefly drops stays in the active set.
+    tracker = IoUTracker(iou_threshold=0.5, coast_limit=2, hot_coast_limit=6, max_misses=8)
+    for i in range(3):  # confirm the track
+        tracker.update([_det((0, 0, 100, 100))], frame_index=i, timestamp_sec=i * 0.1, frame_shape=(200, 300, 3))
+    track_id = 1
+
+    # 4 missed detections: beyond coast_limit but within hot_coast_limit.
+    for i in range(3, 7):
+        normal = tracker.update([], frame_index=i, timestamp_sec=i * 0.1, frame_shape=(200, 300, 3))
+    assert normal == []  # not hot → silent after 2 misses
+
+    # Same miss streak, but the id is flagged hot → still emitted.
+    hot = tracker.propagate(hot_ids={track_id})
+    assert [t.track_id for t in hot] == [track_id]
+    assert hot[0].misses == 4
+
+
+def test_reid_reconnects_fast_growing_box_to_original_id():
+    # A close vehicle that doubles in size across a short gap must keep its id
+    # (re-id scale tolerance), preserving its depth-Kalman history.
+    tracker = IoUTracker()
+    red = _frame((0, 0, 200))
+    track_id = _confirm_and_lose(tracker, red)
+
+    # Re-detect a much larger box (≈4× area) at a moved-down position.
+    big = _frame((0, 0, 200), region=(96, 56, 200, 124))
+    out = tracker.update([_det((96, 56, 200, 124))], frame_index=13, timestamp_sec=1.3, frame_bgr=big)
+
+    assert out[0].track_id == track_id
+
+
 def test_tracker_does_not_link_across_classes():
     tracker = IoUTracker(iou_threshold=0.2)
     tracker.update([_det((0, 0, 50, 50), cls="car", conf=0.6)], frame_index=0, timestamp_sec=0.0)

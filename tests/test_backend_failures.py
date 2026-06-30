@@ -137,8 +137,17 @@ def test_yolo_class_confidence_gate_filters_and_keeps_expected_detections():
     detector = ObjectDetector()
     detector._device = "cpu"
 
-    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.35]))
+    # Car below the (lowered) 0.35 vehicle floor is filtered out.
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.34]))
     assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
+
+    # Car at the lowered floor is now kept (recovers close lead vehicles whose
+    # confidence sags) — this used to require >= 0.50.
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.36]))
+    detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
+    assert len(detections) == 1
+    assert detections[0].class_name == "car"
+    assert detections[0].confidence == pytest.approx(0.36)
 
     detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[7], conf=[0.55]))
     detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))

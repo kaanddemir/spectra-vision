@@ -247,10 +247,13 @@
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Detection gate</div>
-            yolo_conf_min = 0.45; yolo_iou = 0.45<br>
+            yolo_conf_min = 0.30; yolo_iou = 0.45<br>
             keep class ∈ road_user_classes ∪ traffic_light<br>
             min_conf(person/bike/moto) = 0.45<br>
-            min_conf(car/bus/truck) = 0.50; train = 0.55<br>
+            min_conf(car/bus/truck) = 0.35; train = 0.55<br>
+            near-band pass: re-runs YOLO on the lower-center crop when no close
+            in-corridor threat is tracked, merged via IoU-NMS (recovers a very
+            close lead vehicle the full-frame pass drops)<br>
             <b>detection_confidence</b> = YOLO box confidence after class gate
           </div>
           <div class="doc-formula">
@@ -259,7 +262,12 @@
             or predicted_iou ≥ 0.12<br>
             or center_ratio ≤ threshold with compatible scale<br>
             match_score = 2 × max_iou + center_score + 0.25 × scale_score − 0.03 × misses<br>
-            <span class="formula-var formula-var--shared">track_id</span> confirms after 3 hits or fast confirm; drops after 8 misses
+            <span class="formula-var formula-var--shared">track_id</span> confirms after 3 hits or fast confirm; drops after 8 misses<br>
+            coast after a missed detection: normal tracks 2 frames, "hot" threat
+            ids (last primary + recent CAUTION/DANGER) up to 6 frames, so a near
+            lead vehicle a brief miss drops stays in the active set<br>
+            re-id tolerates larger bbox growth and relaxes the colour gate across
+            short gaps, so a fast-approaching car reconnects to its original id
           </div>
         </div>
         <div class="pipeline-group">
@@ -589,6 +597,10 @@
           <div class="doc-formula">
             <div class="doc-formula__label">State stabilization</div>
             stabilizer_input = max objects by (state_severity, risk.score)<br>
+            dropout safety net: if no object reads CAUTION/DANGER but a near
+            in-corridor threat existed within the last 1.0s, hold the banner at
+            CAUTION (and point the primary back at the remembered threat) so a
+            brief detector miss cannot flip the frame to SAFE on a distant object<br>
             upgrade after 3 consecutive frames<br>
             downgrade after 7 consecutive frames<br>
             confirmed ttc_depth ≤ 1.0s DANGER bypasses upgrade delay

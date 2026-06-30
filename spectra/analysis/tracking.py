@@ -245,6 +245,7 @@ class IoUTracker:
         fast_confirm_confidence: float = 0.70,
         fast_confirm_height_ratio: float = 0.18,
         coast_limit: int = 2,
+        hot_coast_limit: int = 6,
         max_lost_sec: float = 2.5,
         reassoc_gap_gain: float = 0.8,
     ) -> None:
@@ -259,6 +260,13 @@ class IoUTracker:
         # ``coast_limit`` detection frames (using its last bbox) so a one-off
         # YOLO miss does not make a live threat vanish from the active set.
         self.coast_limit = int(coast_limit)
+        # "Hot" tracks (the active threat: last primary + recent CAUTION/DANGER
+        # ids, supplied by the caller) coast for a longer window so a near lead
+        # vehicle that the detector briefly drops stays in the active set —
+        # keeping the banner elevated — instead of vanishing after 2 frames and
+        # letting primary selection fall to a distant low-risk object. Capped
+        # below ``max_misses`` so demotion/re-id timing is unchanged.
+        self.hot_coast_limit = int(hot_coast_limit)
         # Confirmed tracks that exhaust ``max_misses`` are demoted to a lost
         # pool instead of deleted, so a re-appearing detection within
         # ``max_lost_sec`` is re-associated to the original ID rather than
@@ -280,21 +288,28 @@ class IoUTracker:
         height_ratio = max(0.0, float(y2 - y1)) / float(frame_height)
         return det.confidence >= self.fast_confirm_confidence and height_ratio >= self.fast_confirm_height_ratio
 
-    def _emittable(self) -> list[Track]:
+    def _emittable(self, hot_ids: set[int] | None = None) -> list[Track]:
         """Live tracks that should produce risk this frame.
 
         A confirmed track emits while actively detected (misses == 0) and for a
         short coast window after a miss (misses <= coast_limit), using its last
         bbox. Tracks deeper in a miss streak stay live for re-matching but go
-        silent. Applied identically on detection and propagate frames so a
-        threat never flickers between the two.
+        silent. ``hot_ids`` (the active threat) get the longer
+        ``hot_coast_limit`` window so a near lead vehicle the detector briefly
+        drops stays visible instead of vanishing from the active set. Applied
+        identically on detection and propagate frames so a threat never flickers
+        between the two.
         """
 
-        return [
-            track
-            for track in self._tracks.values()
-            if track.confirmed and track.misses <= self.coast_limit
-        ]
+        hot = hot_ids or set()
+        emittable: list[Track] = []
+        for track in self._tracks.values():
+            if not track.confirmed:
+                continue
+            limit = self.hot_coast_limit if track.track_id in hot else self.coast_limit
+            if track.misses <= limit:
+                emittable.append(track)
+        return emittable
 
     def _ensure_display_id(self, track: Track) -> None:
         if track.display_id is not None:
@@ -348,6 +363,7 @@ class IoUTracker:
         timestamp_sec: float,
         frame_shape: tuple[int, int] | tuple[int, int, int] | None = None,
         frame_bgr: np.ndarray | None = None,
+        hot_ids: set[int] | None = None,
     ) -> list[Track]:
         if frame_bgr is not None and frame_shape is None:
             frame_shape = frame_bgr.shape
@@ -520,7 +536,7 @@ class IoUTracker:
         # Emit freshly-updated tracks plus confirmed coasting tracks (missed
         # this frame but recently seen) so a one-frame detection miss does not
         # make a live threat vanish from the active set on a detection frame.
-        return self._emittable()
+        return self._emittable(hot_ids)
 
     def _reassoc_score(
         self,
@@ -540,10 +556,22 @@ class IoUTracker:
         """
 
         predicted = _predict_bbox_full(lost, timestamp_sec)
-        if not _scale_compatible(predicted, det.bbox):
+        gap = max(0.0, timestamp_sec - lost.timestamp_sec)
+        # A vehicle that the detector lost while it was approaching keeps growing
+        # in the image, so by the time it is re-detected its bbox can be much
+        # larger than the last-seen box. Widen the allowed area growth with the
+        # gap length (and floor the shrink side) so re-id can reconnect a fast
+        # close-range cut-in to its original ID instead of minting a new one.
+        # This is the re-id path only; the tight live matcher is unchanged.
+        grow_slack = min(gap, self.max_lost_sec) * 1.6
+        if not _scale_compatible(
+            predicted,
+            det.bbox,
+            min_area_ratio=0.30,
+            max_area_ratio=2.60 + grow_slack,
+        ):
             return None
         center_ratio = _center_distance_ratio(predicted, det.bbox)
-        gap = max(0.0, timestamp_sec - lost.timestamp_sec)
         threshold = self.center_distance_threshold + (
             min(gap, self.max_lost_sec) * self.reassoc_gap_gain
         )
@@ -551,10 +579,14 @@ class IoUTracker:
             return None
         # Appearance gate: when both signatures exist, a clearly different
         # colour profile rejects the match outright (protects the long re-id
-        # window), and a closer match earns a score bonus.
+        # window), and a closer match earns a score bonus. Across a SHORT gap the
+        # same object's colour can shift (a close car fills the frame, lighting
+        # changes), so the min similarity is relaxed for brief gaps where the
+        # geometric prediction is still trustworthy.
+        appearance_min = _REASSOC_APPEARANCE_MIN if gap > 0.7 else 0.18
         similarity = _appearance_similarity(lost.appearance, det_appearance)
         if similarity is not None:
-            if similarity < _REASSOC_APPEARANCE_MIN:
+            if similarity < appearance_min:
                 return None
             return -center_ratio + (0.5 * similarity)
         return -center_ratio
@@ -564,7 +596,7 @@ class IoUTracker:
             if (timestamp_sec - self._lost_tracks[lost_id].timestamp_sec) > self.max_lost_sec:
                 del self._lost_tracks[lost_id]
 
-    def propagate(self) -> list[Track]:
+    def propagate(self, hot_ids: set[int] | None = None) -> list[Track]:
         """Return emittable tracks without consuming a detection frame.
 
         Called on frames where YOLO is intentionally skipped. Miss counters are
@@ -572,7 +604,7 @@ class IoUTracker:
         gate as ``update`` so a track does not flicker between detection and
         propagate frames.
         """
-        return self._emittable()
+        return self._emittable(hot_ids)
 
     def reset(self) -> None:
         self._tracks.clear()
