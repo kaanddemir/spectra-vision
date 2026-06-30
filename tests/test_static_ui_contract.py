@@ -284,10 +284,13 @@ def test_how_it_works_is_a_standalone_routed_page():
         "detection",
         "risk",
         "decision",
-        "performance",
     ):
         assert f'data-module="{module}"' in page
         assert f'data-legend-module="{module}"' in page
+    # Performance is a menu-only detail page: its diagnostics cards are still
+    # coloured, but it is no longer a map module so it has no legend row.
+    assert 'data-module="performance"' in page
+    assert 'data-legend-module="performance"' not in page
     # The tracking module folds into the detection colour now.
     assert 'data-legend-module="tracking"' not in page
     assert 'data-module="tracking"' not in page

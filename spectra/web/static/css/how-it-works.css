@@ -317,7 +317,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin: 8px auto 0;
+  margin: 8px auto 24px;
   max-width: 760px;
 }
 .doc-formula-set .doc-formula { margin: 0; max-width: none; }

@@ -27,7 +27,6 @@
           <div class="doc-color-row" data-legend-module="detection"><span></span><b>Detection + Tracking</b></div>
           <div class="doc-color-row" data-legend-module="risk"><span></span><b>Per-Object Risk</b></div>
           <div class="doc-color-row" data-legend-module="decision"><span></span><b>Decision + Delivery</b></div>
-          <div class="doc-color-row" data-legend-module="performance"><span></span><b>Performance / Events</b></div>
         </div>
       </div>
       <div class="doc-topic-menu">
@@ -188,8 +187,6 @@
         </div>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers how each video frame enters the pipeline before
-          model-specific work begins: frame ingest, resizing, and the colour/grayscale views the models read.</p>
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Preprocess</div>
@@ -197,7 +194,7 @@
             views: bgr, gray, rgb (no denoise / CLAHE)
           </div>
         </div>
-        <div class="pipeline-group" style="margin-top:24px;">
+        <div class="pipeline-group">
           <h3>Ingest</h3>
           <div class="pipeline-steps pipeline-steps--two">
             <article class="flow-node" data-module="input" data-route="Feeds Preprocess with the raw source frame."><h5>Frame Ingest</h5><p>Reads each source frame with its frame index and timestamp.</p></article>
@@ -236,9 +233,23 @@
         </div>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers the YOLO-driven object path: road-user detection,
-          traffic-light advisory separation, ego-lane filtering, IoU tracking, propagation between YOLO frames,
-          and the tracked-object stream handed to risk scoring.</p>
+        <div class="doc-formula-set">
+          <div class="doc-formula">
+            <div class="doc-formula__label">Class risk weight</div>
+            person 1.10, bicycle/motorcycle 1.05, car 1.00,<br>
+            bus/truck 0.95, train 0.90, traffic light 0.00
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Detection gate</div>
+            keep road COCO classes; per-class min confidence:<br>
+            car/bus/truck 0.50, person/bike/moto 0.45, train 0.55
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">IoU tracking</div>
+            match same class, IoU ≥ 0.25 (coasted ≥ 0.12)<br>
+            confirm after 3 hits, drop after 8 misses
+          </div>
+        </div>
         <div class="pipeline-group">
           <h3>Detection Model</h3>
           <div class="pipeline-steps">
@@ -295,8 +306,28 @@
         </div>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers motion evidence, adaptive depth refresh, per-object
-          distance smoothing, and collision-time fusion.</p>
+        <div class="doc-formula-set">
+          <div class="doc-formula">
+            <div class="doc-formula__label">Optical flow</div>
+            flow on a downscaled pair (long side ≤ 320 px), upscaled back<br>
+            ego-motion: RANSAC homography on LK corners, then subtracted<br>
+            motion_signal = 0.65 × magnitude + 0.35 × divergence
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Depth</div>
+            depth_m = clamp(model, 0, 80 m)<br>
+            near_map = 1 − depth_m / 80<br>
+            distance = 25th-percentile of the bbox lower-center crop<br>
+            refresh: first frame, every depth_every, or motion_risk &gt; 0.15
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Longitudinal Kalman</div>
+            state = (distance, range-rate); closing = −range-rate<br>
+            measurement std = 0.05 × distance<br>
+            reject sample if innovation² &gt; 9 σ² (3σ gate) → coast<br>
+            closing clamped to [0.30, 60] m/s; TTC only after ≥2 measurements
+          </div>
+        </div>
         <div class="pipeline-group">
           <h3>Motion + Depth Models</h3>
           <div class="pipeline-steps pipeline-steps--two">
@@ -352,8 +383,21 @@
         </div>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers ego-lane geometry, temporal smoothing, object
-          normalization and the lane-relevance gate used by risk scoring.</p>
+        <div class="doc-formula-set">
+          <div class="doc-formula">
+            <div class="doc-formula__label">Lane position</div>
+            lane_pos = 0 center, ±1 boundary, ±2 one lane away<br>
+            (normalised by the lane width at the object's image row)
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Crossing risk</div>
+            predicted_pos = lane_pos + lateral_v × min(fused_ttc, 3)<br>
+            margin = max(0, |predicted_pos| − 0.6)<br>
+            predicted = exp(−margin² / 0.25) × lane_trust × far_reliability<br>
+            lane_trust = clamp((lane_conf − 0.25) / 0.60, 0, 1)<br>
+            <b>crossing_risk</b> = max(corridor_overlap, predicted)
+          </div>
+        </div>
         <div class="pipeline-group">
           <h3>Lane Pipeline</h3>
           <div class="pipeline-steps pipeline-steps--two">
@@ -407,9 +451,6 @@
         </div>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers the risk decision path: the three TTC cues and their
-          fusion, the four weighted signal terms, the trust and lane gates, the final risk score, and the
-          banding into SAFE / CAUTION / DANGER.</p>
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Time-to-collision</div>
@@ -419,6 +460,11 @@
             fused_ttc = weighted_median(ttc_depth, ttc_flow, ttc_expansion)<br>
             <b>eta_pressure</b>(ttc) = clamp((3 − ttc) / 3, 0, 1)<br>
             <b>approach</b> = 0.50 × closing_mps + 0.30 × expansion + 0.20 × flow
+          </div>
+          <div class="doc-formula">
+            <div class="doc-formula__label">Confidence (gate input)</div>
+            confidence = clamp(0.70 × detection + 0.30 × lane, 0, 1)<br>
+            confidence ×= 0.70 + 0.30 × ttc_agreement
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Risk score</div>
@@ -437,7 +483,7 @@
             stabilize: upgrade after 3 frames, downgrade after 7 frames
           </div>
         </div>
-        <div class="pipeline-group" style="margin-top:24px;">
+        <div class="pipeline-group">
           <h3>TTC Cues</h3>
           <div class="pipeline-steps">
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and Collision ETA."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and closing speed from metric depth (the physical backbone).</p></article>
@@ -491,8 +537,6 @@
         </div>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers how per-object risk becomes the frame decision: primary
-          object selection, hysteresis stabilization, the delivered frame row, and the saved-event summary.</p>
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Primary object</div>
@@ -512,7 +556,7 @@
             render overlays only for retained events
           </div>
         </div>
-        <div class="pipeline-group" style="margin-top:24px;">
+        <div class="pipeline-group">
           <h3>Decision</h3>
           <div class="pipeline-steps pipeline-steps--two">
             <article class="flow-node" data-module="decision" data-route="Feeds State Stabilization with the frame's most relevant object."><h5>Primary Object Selection</h5><p>Selects the object that best represents the frame-level risk.</p></article>
@@ -542,8 +586,6 @@
         <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This page covers what runs every frame, what is sampled, what is reused,
-          and how saved events and performance diagnostics are produced.</p>
         <div class="pipeline-group">
           <h3>Decision + Delivery</h3>
           <div class="pipeline-steps">
@@ -588,8 +630,6 @@
         <button type="button" class="doc-modal__close" data-doc-close aria-label="Close">&times;</button>
       </header>
       <div class="doc-modal__body">
-        <p class="doc-section-lead">This table shows what runs every frame, what runs on a schedule,
-          and what gets reused when a heavier model is skipped.</p>
         <div class="frame-plan-table-wrap">
           <table class="frame-plan-table">
             <thead>
@@ -608,7 +648,7 @@
               <tr><td><span class="module-name">Lane-Relevance Filter</span></td><td><span class="freq-badge freq-periodic">On YOLO frames</span></td><td class="skip-cell">Existing tracks continue with their latest lane relevance.</td></tr>
               <tr><td><span class="module-name">UFLDv2 Lane Detection</span></td><td><span class="freq-badge freq-periodic">Default: every 3rd frame</span></td><td class="skip-cell">Lane Kalman smoothing coasts the corridor forward.</td></tr>
               <tr><td><span class="module-name">Depth Estimation</span></td><td><span class="freq-badge freq-slow">Default: every 10th frame</span></td><td class="skip-cell">The previous metric depth map is reused.</td></tr>
-              <tr><td><span class="module-name">Adaptive Depth Refresh</span></td><td><span class="freq-badge freq-event">Motion triggered</span></td><td class="skip-cell">Depth waits for the next periodic or motion-triggered refresh.</td></tr>
+              <tr><td><span class="module-name">Adaptive Depth Refresh</span></td><td><span class="freq-badge freq-event">Motion triggered</span></td><td class="skip-cell">Fires when quick motion risk &gt; 0.15, subject to a refresh cooldown of depth_every / 2 frames.</td></tr>
               <tr><td><span class="module-name">Tracking</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always updates or propagates tracks.</td></tr>
               <tr><td><span class="module-name">Per-Object Risk Evaluation</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Uses the freshest available detection, lane, depth and flow cues.</td></tr>
               <tr><td><span class="module-name">State Stabilization</span></td><td><span class="freq-badge freq-every">Every frame</span></td><td class="skip-cell">Always runs after risk scoring.</td></tr>
@@ -619,7 +659,12 @@
           </table>
         </div>
         <div class="frame-plan-note">
-          <span>Default sampling: lane_every=3, detect_every=3, depth_every=10, flow_every=1. Adaptive depth can refresh earlier when motion risk rises.</span>
+          <svg class="frame-plan-note__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 2 20h20L12 3z"></path>
+            <path d="M12 9v5"></path>
+            <path d="M12 17h.01"></path>
+          </svg>
+          <span>Default sampling: lane_every=3, detect_every=3, depth_every=10, flow_every=1. Adaptive depth refreshes early when quick motion risk &gt; 0.15 (cooldown depth_every / 2 frames).</span>
         </div>
       </div>
     </div>
