@@ -84,8 +84,16 @@
   padding: 24px 22px;
   overflow-y: auto;
   display: grid;
-  gap: 24px;
+  gap: 18px;
   align-content: start;
+}
+
+.setting-help {
+  display: block;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .drawer-section {
@@ -96,6 +104,29 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
 }
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+[data-window-panel][hidden] {
+  display: none !important;
+}
+
+.settings-panel {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.055);
+  border-radius: 7px;
+  background: rgba(0,0,0,0.10);
+}
+
+.settings-panel--wide {
+  grid-column: span 1;
+}
+
 .drawer-section-header {
   display: flex;
   align-items: center;
@@ -273,6 +304,7 @@
 }
 .segmented-btn {
   flex: 1;
+  min-width: 0;
   height: 32px;
   border: none;
   background: transparent;
@@ -294,6 +326,10 @@
   background: var(--red);
   color: #fff;
   box-shadow: 0 4px 12px rgba(255, 59, 59, 0.30);
+}
+.segmented-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .param-row {

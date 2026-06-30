@@ -31,9 +31,11 @@ def _make_event(frame_index: int, timestamp_sec: float, spec: dict) -> RiskEvent
 
 
 class _FakeLoader:
-    def __init__(self, source, max_frames=None, start_sec=0.0, end_sec=None):
+    def __init__(self, source, max_frames=None, start_sec=0.0, end_sec=None, start_frame=0, end_frame=None):
         self.fps = 10.0
         self.frame_count = len(_SPECS)
+        self.start_frame = start_frame
+        self.end_frame = end_frame
 
     def frames(self):
         for index, spec in enumerate(_SPECS):

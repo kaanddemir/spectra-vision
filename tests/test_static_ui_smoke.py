@@ -19,6 +19,12 @@ def test_index_exposes_analysis_controls_and_static_assets():
         'name="detect_every"',
         'name="lane_every"',
         'name="flow_every"',
+        'name="start_frame"',
+        'name="end_frame"',
+        'data-window-panel="frames"',
+        'data-window-panel="time"',
+        'data-frame-preset="balanced"',
+        'data-sampling-preset="balanced"',
         'src="/static/js/main.js"',
         'href="/static/css/main.css"',
     ):

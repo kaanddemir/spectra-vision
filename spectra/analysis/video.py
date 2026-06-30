@@ -214,11 +214,15 @@ class VideoLoader:
         max_frames: int | None = None,
         start_sec: float = 0.0,
         end_sec: float | None = None,
+        start_frame: int = 0,
+        end_frame: int | None = None,
     ) -> None:
         self.source = str(source)
         self.max_frames = max_frames
         self.start_sec = start_sec
         self.end_sec = end_sec
+        self.requested_start_frame = max(0, int(start_frame or 0))
+        self.requested_end_frame = int(end_frame) if end_frame is not None else None
         self.capture = cv2.VideoCapture(self.source)
         if not self.capture.isOpened():
             raise RuntimeError(f"Failed to open video source: {self.source}")
@@ -228,15 +232,25 @@ class VideoLoader:
         self.width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
         self.height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
 
-        self.start_frame = 0
-        if self.start_sec > 0 and self.fps > 0:
+        self.start_frame = self.requested_start_frame
+        if self.start_frame <= 0 and self.start_sec > 0 and self.fps > 0:
             self.start_frame = int(self.start_sec * self.fps)
+        if self.frame_count > 0:
+            self.start_frame = min(self.start_frame, max(0, self.frame_count - 1))
+        if self.start_frame > 0:
             self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.start_frame)
+        self.end_frame = self.requested_end_frame
+        if self.end_frame is not None:
+            self.end_frame = max(self.start_frame, self.end_frame)
+            if self.frame_count > 0:
+                self.end_frame = min(self.end_frame, max(0, self.frame_count - 1))
 
     def frames(self) -> Iterator[VideoFrame]:
         frame_index = self.start_frame
         try:
             while self.max_frames is None or (frame_index - self.start_frame) < self.max_frames:
+                if self.end_frame is not None and frame_index > self.end_frame:
+                    break
                 if self.end_sec and self.end_sec > 0:
                     current_sec = frame_index / self.fps if self.fps > 0 else frame_index
                     if current_sec > self.end_sec:
@@ -987,6 +1001,8 @@ def analyze_spatial_video(
     lane_drift_reset_px_ratio: float = 0.12,
     start_sec: float = 0.0,
     end_sec: float | None = None,
+    start_frame: int = 0,
+    end_frame: int | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     progress_every: int = 6,
 ) -> dict[str, Any]:
@@ -994,11 +1010,20 @@ def analyze_spatial_video(
 
     _ensure_required_models()
 
-    loader = VideoLoader(video_path, max_frames=None, start_sec=start_sec, end_sec=end_sec)
+    loader = VideoLoader(
+        video_path,
+        max_frames=None,
+        start_sec=start_sec,
+        end_sec=end_sec,
+        start_frame=start_frame,
+        end_frame=end_frame,
+    )
     # Clamp max_processed_frames to the video's actual frame count so short
     # videos are always analyzed in full regardless of the caller's default.
     if loader.frame_count > 0:
-        max_processed_frames = min(max_processed_frames, loader.frame_count)
+        window_end_frame = loader.end_frame if loader.end_frame is not None else loader.frame_count - 1
+        available_frames = max(1, window_end_frame - loader.start_frame + 1)
+        max_processed_frames = min(max_processed_frames, available_frames)
     loader.max_frames = max_processed_frames
 
     analyzer = SpatialFrameAnalyzer(

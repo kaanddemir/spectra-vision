@@ -145,7 +145,7 @@
   <form id="analysis-form" class="hidden-form" autocomplete="off">
     <input id="source-file" name="file" type="file" accept=".mp4,.mov,.avi,.mkv,.m4v">
     <input type="hidden" name="mode" value="video">
-    <input type="hidden" name="max_processed_frames" value="180">
+    <input type="hidden" name="max_processed_frames" value="">
     <input type="hidden" name="max_saved_events" value="20">
     <input type="hidden" name="resize_max_side" value="512">
     <input type="hidden" name="depth_every" value="10">
@@ -155,6 +155,8 @@
     <input type="hidden" name="flow_every" value="1">
     <input type="hidden" name="start_sec" value="0">
     <input type="hidden" name="end_sec" value="0">
+    <input type="hidden" name="start_frame" value="0">
+    <input type="hidden" name="end_frame" value="0">
   </form>
 
   <div class="app-shell">
@@ -783,7 +785,6 @@
       </header>
       <div class="drawer-body">
 
-
         <div class="drawer-section">
           <div class="drawer-section-header">
             <h3>Temporal Window</h3>
@@ -803,26 +804,39 @@
               <button type="button" class="segmented-btn" data-window-mode="time">Time</button>
             </div>
           </label>
-          <label class="drawer-row">
+          <div class="drawer-row" data-window-panel="frames">
             <span>Max Processed Frames</span>
-            <div class="input-with-shortcuts">
-              <input id="max-frames-input" data-param="max_processed_frames" type="number" min="30" step="1"
-                placeholder="Auto" disabled>
-              <div class="input-shortcuts">
-                <button type="button" class="shortcut-btn" id="frames-min" disabled>MIN</button>
-                <button type="button" class="shortcut-btn" id="frames-max" disabled>MAX</button>
-              </div>
+            <div class="segmented-control" id="frame-budget-preset">
+              <button type="button" class="segmented-btn" data-frame-preset="quick">Quick</button>
+              <button type="button" class="segmented-btn" data-frame-preset="balanced">Balanced</button>
+              <button type="button" class="segmented-btn" data-frame-preset="detailed">Detailed</button>
+              <button type="button" class="segmented-btn" data-frame-preset="full">Full</button>
             </div>
-          </label>
-          <label class="drawer-row">
-            <span>Start Time (s)</span>
-            <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" placeholder="0.0"
-              disabled>
-          </label>
-          <label class="drawer-row">
-            <span>End Time (s)</span>
-            <input id="end-time-input" data-param="end_sec" type="number" min="0" step="0.5" placeholder="Max" disabled>
-          </label>
+            <em class="setting-help" id="frame-budget-help">Select a video first.</em>
+            <div class="settings-grid">
+              <label class="drawer-row">
+                <span>Start Frame</span>
+                <input id="start-frame-input" data-param="start_frame" type="number" min="0" step="1" placeholder=""
+                  disabled>
+              </label>
+              <label class="drawer-row">
+                <span>End Frame</span>
+                <input id="end-frame-input" data-param="end_frame" type="number" min="0" step="1" placeholder=""
+                  disabled>
+              </label>
+            </div>
+          </div>
+          <div class="settings-grid" data-window-panel="time" hidden>
+            <label class="drawer-row">
+              <span>Start Time (s)</span>
+              <input id="start-time-input" data-param="start_sec" type="number" min="0" step="0.5" placeholder=""
+                disabled>
+            </label>
+            <label class="drawer-row">
+              <span>End Time (s)</span>
+              <input id="end-time-input" data-param="end_sec" type="number" min="0" step="0.5" placeholder="" disabled>
+            </label>
+          </div>
         </div>
 
         <div class="drawer-section">
@@ -846,69 +860,88 @@
             </div>
           </div>
           <label class="drawer-row">
-            <span>Depth Sampling</span>
-            <div class="segmented-control" data-param="depth_every">
-              <button type="button" class="segmented-btn" data-value="1">1x</button>
-              <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn" data-value="3">3x</button>
-              <button type="button" class="segmented-btn" data-value="5">5x</button>
-              <button type="button" class="segmented-btn active" data-value="10">10x</button>
-              <button type="button" class="segmented-btn" data-value="15">15x</button>
+            <span>Sampling Preset</span>
+            <div class="segmented-control" id="sampling-preset">
+              <button type="button" class="segmented-btn" data-sampling-preset="fast">Fast</button>
+              <button type="button" class="segmented-btn active" data-sampling-preset="balanced">Balanced</button>
+              <button type="button" class="segmented-btn" data-sampling-preset="accurate">Accurate</button>
+              <button type="button" class="segmented-btn" data-sampling-preset="custom">Custom</button>
             </div>
+            <em class="setting-help" id="sampling-preset-help">Balanced cost and tracking responsiveness.</em>
           </label>
-          <label class="drawer-row">
-            <span>Adaptive Depth</span>
-            <div class="segmented-control compact" data-param="adaptive_depth">
-              <button type="button" class="segmented-btn" data-value="0">Off</button>
-              <button type="button" class="segmented-btn active" data-value="1">On</button>
-            </div>
-          </label>
-          <label class="drawer-row">
-            <span>YOLO Detection</span>
-            <div class="segmented-control" data-param="detect_every">
-              <button type="button" class="segmented-btn" data-value="1">1x</button>
-              <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn active" data-value="3">3x</button>
-              <button type="button" class="segmented-btn" data-value="5">5x</button>
-              <button type="button" class="segmented-btn" data-value="10">10x</button>
-            </div>
-          </label>
-          <label class="drawer-row">
-            <span>Lane Detection</span>
-            <div class="segmented-control" data-param="lane_every">
-              <button type="button" class="segmented-btn" data-value="1">1x</button>
-              <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn active" data-value="3">3x</button>
-              <button type="button" class="segmented-btn" data-value="5">5x</button>
-              <button type="button" class="segmented-btn" data-value="10">10x</button>
-            </div>
-          </label>
-          <label class="drawer-row">
-            <span>Optical Flow</span>
-            <div class="segmented-control" data-param="flow_every">
-              <button type="button" class="segmented-btn active" data-value="1">1x</button>
-              <button type="button" class="segmented-btn" data-value="2">2x</button>
-              <button type="button" class="segmented-btn" data-value="3">3x</button>
-              <button type="button" class="segmented-btn" data-value="5">5x</button>
-              <button type="button" class="segmented-btn" data-value="10">10x</button>
-            </div>
-          </label>
-          <label class="drawer-row">
-            <span>Saved Events</span>
-            <input id="max-saved-events-input" data-param="max_saved_events" type="number" min="1" max="50" step="1"
-              value="20">
-          </label>
-          <label class="drawer-row">
-            <span>Analysis Resolution</span>
-            <div class="segmented-control" data-param="resize_max_side">
-              <button type="button" class="segmented-btn" data-value="128">128</button>
-              <button type="button" class="segmented-btn" data-value="256">256</button>
-              <button type="button" class="segmented-btn" data-value="384">384</button>
-              <button type="button" class="segmented-btn active" data-value="512">512</button>
-              <button type="button" class="segmented-btn" data-value="768">768</button>
-              <button type="button" class="segmented-btn" data-value="1024">1024</button>
-            </div>
-          </label>
+          <div class="settings-grid">
+            <label class="drawer-row settings-panel">
+              <span>Depth Sampling</span>
+              <div class="segmented-control" data-param="depth_every">
+                <button type="button" class="segmented-btn" data-value="1">1x</button>
+                <button type="button" class="segmented-btn" data-value="2">2x</button>
+                <button type="button" class="segmented-btn" data-value="3">3x</button>
+                <button type="button" class="segmented-btn" data-value="5">5x</button>
+                <button type="button" class="segmented-btn active" data-value="10">10x</button>
+                <button type="button" class="segmented-btn" data-value="15">15x</button>
+              </div>
+              <em class="setting-help" data-setting-help="depth_every">Depth every 10 frames</em>
+            </label>
+            <label class="drawer-row settings-panel">
+              <span>Adaptive Depth</span>
+              <div class="segmented-control compact" data-param="adaptive_depth">
+                <button type="button" class="segmented-btn" data-value="0">Off</button>
+                <button type="button" class="segmented-btn active" data-value="1">On</button>
+              </div>
+              <em class="setting-help" data-setting-help="adaptive_depth">Refresh depth on motion spikes</em>
+            </label>
+            <label class="drawer-row settings-panel">
+              <span>YOLO Detection</span>
+              <div class="segmented-control" data-param="detect_every">
+                <button type="button" class="segmented-btn" data-value="1">1x</button>
+                <button type="button" class="segmented-btn" data-value="2">2x</button>
+                <button type="button" class="segmented-btn active" data-value="3">3x</button>
+                <button type="button" class="segmented-btn" data-value="5">5x</button>
+                <button type="button" class="segmented-btn" data-value="10">10x</button>
+              </div>
+              <em class="setting-help" data-setting-help="detect_every">Objects every 3 frames</em>
+            </label>
+            <label class="drawer-row settings-panel">
+              <span>Lane Detection</span>
+              <div class="segmented-control" data-param="lane_every">
+                <button type="button" class="segmented-btn" data-value="1">1x</button>
+                <button type="button" class="segmented-btn" data-value="2">2x</button>
+                <button type="button" class="segmented-btn active" data-value="3">3x</button>
+                <button type="button" class="segmented-btn" data-value="5">5x</button>
+                <button type="button" class="segmented-btn" data-value="10">10x</button>
+              </div>
+              <em class="setting-help" data-setting-help="lane_every">Lane geometry every 3 frames</em>
+            </label>
+            <label class="drawer-row settings-panel">
+              <span>Optical Flow</span>
+              <div class="segmented-control" data-param="flow_every">
+                <button type="button" class="segmented-btn active" data-value="1">1x</button>
+                <button type="button" class="segmented-btn" data-value="2">2x</button>
+                <button type="button" class="segmented-btn" data-value="3">3x</button>
+                <button type="button" class="segmented-btn" data-value="5">5x</button>
+                <button type="button" class="segmented-btn" data-value="10">10x</button>
+              </div>
+              <em class="setting-help" data-setting-help="flow_every">Motion every frame</em>
+            </label>
+            <label class="drawer-row settings-panel">
+              <span>Analysis Resolution</span>
+              <div class="segmented-control" data-param="resize_max_side">
+                <button type="button" class="segmented-btn" data-value="128">128</button>
+                <button type="button" class="segmented-btn" data-value="256">256</button>
+                <button type="button" class="segmented-btn" data-value="384">384</button>
+                <button type="button" class="segmented-btn active" data-value="512">512</button>
+                <button type="button" class="segmented-btn" data-value="768">768</button>
+                <button type="button" class="segmented-btn" data-value="1024">1024</button>
+              </div>
+              <em class="setting-help" data-setting-help="resize_max_side">Higher is sharper, slower</em>
+            </label>
+            <label class="drawer-row settings-panel settings-panel--wide">
+              <span>Saved Events</span>
+              <input id="max-saved-events-input" data-param="max_saved_events" type="number" min="1" max="50" step="1"
+                value="20">
+              <em class="setting-help">Keep up to 50 ranked events</em>
+            </label>
+          </div>
         </div>
 
 

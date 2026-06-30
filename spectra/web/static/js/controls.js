@@ -62,10 +62,28 @@ export function initializeSpectra() {
     loopSegment: null,
     timeDisplayMode: "time",
     lastVolume: 1,
+    frameBudgetPreset: null,
+    samplingPreset: "balanced",
+    suppressSamplingCustom: false,
   };
 
   const byId = (id) => document.getElementById(id);
   const formField = (name) => form.elements.namedItem(name);
+  const FULL_VIDEO_FRAME_BUDGET = 1_000_000_000;
+
+  const FRAME_BUDGET_PRESETS = {
+    quick: { label: "Quick", ratio: 0.25, quality: "Fast" },
+    balanced: { label: "Balanced", ratio: 0.5, quality: "Balanced" },
+    detailed: { label: "Detailed", ratio: 0.75, quality: "Detailed" },
+    full: { label: "Full", ratio: 1, quality: "Full" },
+  };
+  const SAMPLING_PRESETS = {
+    fast: { label: "Fast", help: "Lower cost, less frequent model refresh.", values: { depth_every: 15, adaptive_depth: 1, detect_every: 5, lane_every: 5, flow_every: 2, resize_max_side: 384 } },
+    balanced: { label: "Balanced", help: "Balanced cost and tracking responsiveness.", values: { depth_every: 10, adaptive_depth: 1, detect_every: 3, lane_every: 3, flow_every: 1, resize_max_side: 512 } },
+    accurate: { label: "Accurate", help: "Sharper and more frequent model refresh.", values: { depth_every: 5, adaptive_depth: 1, detect_every: 2, lane_every: 2, flow_every: 1, resize_max_side: 768 } },
+    custom: { label: "Custom", help: "Manual sampling values are active.", values: null },
+  };
+  const SAMPLING_PARAMS = new Set(["depth_every", "adaptive_depth", "detect_every", "lane_every", "flow_every", "resize_max_side"]);
 
   // ─── helpers ──────────────────────────────────────────────
   const isReal = (value) => {
@@ -862,38 +880,41 @@ export function initializeSpectra() {
     const dur = formatSeconds(previewVideo.duration);
     const w = previewVideo.videoWidth, h = previewVideo.videoHeight;
     
-    state.sourceMeta = { durationSec: previewVideo.duration, width: w, height: h };
+    const estFrames = Math.max(1, Math.ceil(previewVideo.duration * 30));
+    state.sourceMeta = { durationSec: previewVideo.duration, width: w, height: h, estimatedFrames: estFrames };
     renderTimeReadout(previewVideo.currentTime || 0);
 
-    // Estimate frames assuming 30fps — backend clamps to actual frame count.
-    const estFrames = Math.ceil(previewVideo.duration * 30);
+    // Estimate frames assuming 30fps. The backend clamps to the real frame
+    // count once it opens the uploaded video.
     const meta = byId("selected-meta");
     if (meta) {
       meta.innerHTML = `<div>Duration: ${dur}</div><div>Est. Frames: ${estFrames}</div>`;
       meta.hidden = false;
     }
 
-    // Enable Max Processed Frames shortcuts
-    const framesInput = byId("max-frames-input");
-    if (framesInput) {
-      framesInput.placeholder = String(estFrames);
-      framesInput.max = String(estFrames);
-      framesInput.disabled = false;
-    }
-    byId("frames-min").disabled = false;
-    byId("frames-max").disabled = false;
+    setFrameBudgetPreset(state.frameBudgetPreset || "balanced");
 
     // Update temporal window constraints
     const startInp = byId("start-time-input");
     const endInp = byId("end-time-input");
+    const startFrameInp = byId("start-frame-input");
+    const endFrameInp = byId("end-frame-input");
+    const lastFrame = Math.max(0, estFrames - 1);
     if (startInp) {
       startInp.max = String(previewVideo.duration);
-      startInp.disabled = false;
+      startInp.placeholder = "0";
     }
     if (endInp) {
       endInp.max = String(previewVideo.duration);
       endInp.placeholder = previewVideo.duration.toFixed(1);
-      endInp.disabled = false;
+    }
+    if (startFrameInp) {
+      startFrameInp.max = String(lastFrame);
+      startFrameInp.placeholder = "0";
+    }
+    if (endFrameInp) {
+      endFrameInp.max = String(lastFrame);
+      endFrameInp.placeholder = String(lastFrame);
     }
     applyAnalysisWindowMode();
 
@@ -1951,9 +1972,6 @@ export function initializeSpectra() {
     updateEvidenceControls();
 
     updateChartCursor(0);
-    const fMin = byId("frames-min"), fMax = byId("frames-max");
-    if (fMin) fMin.disabled = true;
-    if (fMax) fMax.disabled = true;
     const fInp = byId("max-frames-input"), sInp = byId("start-time-input"), eInp = byId("end-time-input");
     if (fInp) fInp.disabled = true;
     if (sInp) sInp.disabled = true;
@@ -2124,13 +2142,21 @@ export function initializeSpectra() {
     const fd = new FormData(form);
     fd.set("mode", "video");
     if (state.analysisWindowMode === "time") {
-      fd.set("max_processed_frames", "2000");
+      fd.set("max_processed_frames", String(FULL_VIDEO_FRAME_BUDGET));
       fd.set("start_sec", String(num(fd.get("start_sec"), 0)));
       fd.set("end_sec", String(num(fd.get("end_sec"), 0)));
+      fd.set("start_frame", "0");
+      fd.set("end_frame", "0");
     } else {
-      fd.set("max_processed_frames", String(num(fd.get("max_processed_frames"), 180)));
+      const currentBudget = num(fd.get("max_processed_frames"), null);
+      if (currentBudget === null) {
+        setFrameBudgetPreset("balanced");
+      }
+      fd.set("max_processed_frames", String(num(formField("max_processed_frames")?.value, FULL_VIDEO_FRAME_BUDGET)));
       fd.set("start_sec", "0");
       fd.set("end_sec", "0");
+      fd.set("start_frame", String(num(fd.get("start_frame"), 0)));
+      fd.set("end_frame", String(num(fd.get("end_frame"), 0)));
     }
 
     return fd;
@@ -2242,7 +2268,18 @@ export function initializeSpectra() {
     const file = fileInput.files[0];
     setSelectedFile(file);
 
-    if (!file) { setPreviewMedia(""); state.sourceMeta = null; return; }
+    if (!file) {
+      setPreviewMedia("");
+      state.sourceMeta = null;
+      setFrameBudgetUnavailable();
+      const startInp = byId("start-time-input"), endInp = byId("end-time-input");
+      if (startInp) { startInp.value = ""; startInp.max = ""; startInp.placeholder = ""; }
+      if (endInp) { endInp.value = ""; endInp.max = ""; endInp.placeholder = ""; }
+      const startFrameInp = byId("start-frame-input"), endFrameInp = byId("end-frame-input");
+      if (startFrameInp) { startFrameInp.value = ""; startFrameInp.max = ""; startFrameInp.placeholder = ""; }
+      if (endFrameInp) { endFrameInp.value = ""; endFrameInp.max = ""; endFrameInp.placeholder = ""; }
+      return;
+    }
     state.previewUrl = URL.createObjectURL(file);
     setPreviewMedia(state.previewUrl);
   }
@@ -2255,21 +2292,14 @@ export function initializeSpectra() {
     setPreviewMedia("");
     renderEmptyState();
 
-    // Reset frames input to empty
-    const input = byId("max-frames-input");
-    if (input) {
-      input.value = "";
-      input.max = "";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    const fMin = byId("frames-min"), fMax = byId("frames-max");
-    if (fMin) fMin.disabled = true;
-    if (fMax) fMax.disabled = true;
-
+    setFrameBudgetUnavailable();
     // Reset temporal window inputs
     const startInp = byId("start-time-input"), endInp = byId("end-time-input");
-    if (startInp) { startInp.value = ""; startInp.max = ""; startInp.disabled = true; }
-    if (endInp) { endInp.value = ""; endInp.max = ""; endInp.disabled = true; }
+    if (startInp) { startInp.value = ""; startInp.max = ""; startInp.placeholder = ""; startInp.disabled = true; }
+    if (endInp) { endInp.value = ""; endInp.max = ""; endInp.placeholder = ""; endInp.disabled = true; }
+    const startFrameInp = byId("start-frame-input"), endFrameInp = byId("end-frame-input");
+    if (startFrameInp) { startFrameInp.value = ""; startFrameInp.max = ""; startFrameInp.placeholder = ""; startFrameInp.disabled = true; }
+    if (endFrameInp) { endFrameInp.value = ""; endFrameInp.max = ""; endFrameInp.placeholder = ""; endFrameInp.disabled = true; }
     applyAnalysisWindowMode();
   }
 
@@ -2303,6 +2333,8 @@ export function initializeSpectra() {
           
           ctrl.querySelectorAll(".segmented-btn").forEach(b => b.classList.remove("active"));
           btn.classList.add("active");
+          if (SAMPLING_PARAMS.has(param) && !state.suppressSamplingCustom) markSamplingCustom();
+          updateSettingHelp(param);
         });
       });
     });
@@ -2315,16 +2347,22 @@ export function initializeSpectra() {
     document.querySelectorAll("[data-window-mode]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.windowMode === mode);
     });
+    document.querySelectorAll("[data-window-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.windowPanel !== mode;
+    });
 
     const framesInput = byId("max-frames-input");
     const startInp = byId("start-time-input");
     const endInp = byId("end-time-input");
-    const framesMin = byId("frames-min");
-    const framesMax = byId("frames-max");
+    const startFrameInp = byId("start-frame-input");
+    const endFrameInp = byId("end-frame-input");
 
     if (framesInput) framesInput.disabled = !hasSource || mode !== "frames";
-    if (framesMin) framesMin.disabled = !hasSource || mode !== "frames";
-    if (framesMax) framesMax.disabled = !hasSource || mode !== "frames";
+    document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
+      btn.disabled = !hasSource || mode !== "frames";
+    });
+    if (startFrameInp) startFrameInp.disabled = !hasSource || mode !== "frames";
+    if (endFrameInp) endFrameInp.disabled = !hasSource || mode !== "frames";
     if (startInp) startInp.disabled = !hasSource || mode !== "time";
     if (endInp) endInp.disabled = !hasSource || mode !== "time";
   }
@@ -2351,23 +2389,160 @@ export function initializeSpectra() {
     });
   }
 
-  function setSegmentedValue(param, value) {
-    const control = document.querySelector(`.segmented-control[data-param="${param}"]`);
-    const hidden = formField(param);
-    if (hidden) hidden.value = String(value);
-    if (!control) return;
-    control.querySelectorAll(".segmented-btn").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.value === String(value));
+  function estimatedSourceFrames() {
+    const frames = num(state.sourceMeta?.estimatedFrames, null);
+    return frames !== null && frames > 0 ? Math.round(frames) : null;
+  }
+
+  function frameBudgetForPreset(preset) {
+    const key = Object.prototype.hasOwnProperty.call(FRAME_BUDGET_PRESETS, preset) ? preset : "balanced";
+    const config = FRAME_BUDGET_PRESETS[key];
+    const totalFrames = estimatedSourceFrames();
+    if (!totalFrames) return { key, config, frames: null, totalFrames: null };
+    const frames = key === "full"
+      ? totalFrames
+      : clamp(Math.round(totalFrames * config.ratio), 1, totalFrames);
+    return { key, config, frames, totalFrames };
+  }
+
+  function setFrameBudgetUnavailable() {
+    state.frameBudgetPreset = null;
+    const hidden = formField("max_processed_frames");
+    if (hidden) hidden.value = "";
+    const input = byId("max-frames-input");
+    if (input) {
+      input.value = "";
+      input.placeholder = "";
+      input.max = "";
+    }
+    document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
+      btn.classList.remove("active");
+      btn.disabled = true;
+    });
+    const help = byId("frame-budget-help");
+    if (help) help.textContent = "Select a video first.";
+  }
+
+  function setFrameBudgetPreset(preset) {
+    const { key, config, frames, totalFrames } = frameBudgetForPreset(preset);
+    if (!frames) {
+      setFrameBudgetUnavailable();
+      return;
+    }
+    state.frameBudgetPreset = key;
+    const hidden = formField("max_processed_frames");
+    if (hidden) hidden.value = key === "full" ? String(FULL_VIDEO_FRAME_BUDGET) : String(frames);
+    const input = byId("max-frames-input");
+    if (input) {
+      input.value = String(frames);
+      input.max = String(totalFrames);
+    }
+    document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
+      btn.disabled = false;
+      btn.classList.toggle("active", btn.dataset.framePreset === state.frameBudgetPreset);
+    });
+    const help = byId("frame-budget-help");
+    if (help) {
+      help.textContent = key === "full"
+        ? `${config.label} · all ~${totalFrames} frames`
+        : `${config.label} · ~${frames} of ${totalFrames} frames`;
+    }
+  }
+
+  function syncFrameBudgetPresetFromValue(value) {
+    const frames = num(value, null);
+    if (frames === null) {
+      state.frameBudgetPreset = null;
+      const help = byId("frame-budget-help");
+      if (help) help.textContent = state.sourceMeta ? "Choose a frame budget." : "Select a video first.";
+      return;
+    }
+    const totalFrames = estimatedSourceFrames();
+    const match = totalFrames
+      ? Object.entries(FRAME_BUDGET_PRESETS).find(([key, config]) => {
+        const presetFrames = key === "full"
+          ? totalFrames
+          : clamp(Math.round(totalFrames * config.ratio), 1, totalFrames);
+        return presetFrames === frames;
+      })
+      : null;
+    state.frameBudgetPreset = match ? match[0] : "custom";
+    document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
+      btn.disabled = !totalFrames;
+      btn.classList.toggle("active", btn.dataset.framePreset === state.frameBudgetPreset);
+    });
+    const help = byId("frame-budget-help");
+    if (help) {
+      if (!totalFrames) help.textContent = "Select a video first.";
+      else if (match && match[0] === "full") help.textContent = `${match[1].label} · all ~${totalFrames} frames`;
+      else if (match) help.textContent = `${match[1].label} · ~${frames} of ${totalFrames} frames`;
+      else help.textContent = `Custom · ${frames} of ${totalFrames} frames`;
+    }
+  }
+
+  function setupFrameBudgetPresets() {
+    document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => setFrameBudgetPreset(btn.dataset.framePreset || "balanced"));
     });
   }
 
+  function setSegmentedValue(param, value, { silent = false } = {}) {
+    const control = document.querySelector(`.segmented-control[data-param="${param}"]`);
+    const hidden = formField(param);
+    if (hidden) hidden.value = String(value);
+    if (control) {
+      control.querySelectorAll(".segmented-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.value === String(value));
+      });
+    }
+    updateSettingHelp(param);
+  }
+
+  function markSamplingCustom() {
+    state.samplingPreset = "custom";
+    document.querySelectorAll("[data-sampling-preset]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.samplingPreset === "custom");
+    });
+    const help = byId("sampling-preset-help");
+    if (help) help.textContent = SAMPLING_PRESETS.custom.help;
+  }
+
+  function setSamplingPreset(preset) {
+    const config = SAMPLING_PRESETS[preset] || SAMPLING_PRESETS.balanced;
+    state.samplingPreset = preset in SAMPLING_PRESETS ? preset : "balanced";
+    document.querySelectorAll("[data-sampling-preset]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.samplingPreset === state.samplingPreset);
+    });
+    const help = byId("sampling-preset-help");
+    if (help) help.textContent = config.help;
+    if (!config.values) {
+      return;
+    }
+    state.suppressSamplingCustom = true;
+    Object.entries(config.values).forEach(([param, value]) => setSegmentedValue(param, value, { silent: true }));
+    state.suppressSamplingCustom = false;
+  }
+
+  function setupSamplingPresets() {
+    document.querySelectorAll("[data-sampling-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => setSamplingPreset(btn.dataset.samplingPreset || "balanced"));
+    });
+  }
+
+  function updateSettingHelp(param) {
+    const el = document.querySelector(`[data-setting-help="${param}"]`);
+    if (!el) return;
+    const value = formField(param)?.value;
+    if (param === "depth_every") el.textContent = `Depth every ${value} frames`;
+    else if (param === "detect_every") el.textContent = `Objects every ${value} frames`;
+    else if (param === "lane_every") el.textContent = `Lane geometry every ${value} frames`;
+    else if (param === "flow_every") el.textContent = Number(value) === 1 ? "Motion every frame" : `Motion every ${value} frames`;
+    else if (param === "adaptive_depth") el.textContent = String(value) === "1" ? "Refresh depth on motion spikes" : "Only refresh depth on schedule";
+    else if (param === "resize_max_side") el.textContent = `${value}px max side · higher is sharper, slower`;
+  }
+
   function resetAdvancedSampling() {
-    setSegmentedValue("depth_every", 10);
-    setSegmentedValue("adaptive_depth", 1);
-    setSegmentedValue("detect_every", 3);
-    setSegmentedValue("lane_every", 3);
-    setSegmentedValue("flow_every", 1);
-    setSegmentedValue("resize_max_side", 512);
+    setSamplingPreset("balanced");
 
     const savedEvents = byId("max-saved-events-input");
     if (savedEvents) {
@@ -2766,6 +2941,7 @@ export function initializeSpectra() {
           const key = input.dataset.param;
           const hidden = formField(key);
           if (hidden) hidden.value = String(input.value);
+          if (key === "max_processed_frames") syncFrameBudgetPresetFromValue(input.value);
         });
       } else if (input.type === "checkbox") {
         const key = input.dataset.param;
@@ -2810,25 +2986,6 @@ export function initializeSpectra() {
 
     document.querySelectorAll("[data-telemetry-close]").forEach(el => el.addEventListener("click", closeTelemetryDrawer));
     document.querySelectorAll("[data-logs-close]").forEach(el => el.addEventListener("click", closeLogsDrawer));
-    
-    byId("frames-min")?.addEventListener("click", () => {
-      const input = byId("max-frames-input");
-      if (input) {
-        input.value = "30";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
-    byId("frames-max")?.addEventListener("click", () => {
-      const input = byId("max-frames-input");
-      if (input) {
-        let val = 360;
-        if (state.sourceMeta && state.sourceMeta.durationSec) {
-          val = Math.round(state.sourceMeta.durationSec * 30);
-        }
-        input.value = String(val);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
 
     document.querySelectorAll("[data-drawer-close]").forEach((el) => el.addEventListener("click", closeDrawer));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
@@ -2845,8 +3002,12 @@ export function initializeSpectra() {
 
     setupPreviewControls();
     setupSegmentedControls();
+    setupFrameBudgetPresets();
+    setupSamplingPresets();
     setupAnalysisWindowMode();
     setupMaxSavedEventsClamp();
+    setFrameBudgetUnavailable();
+    setSamplingPreset("balanced");
     updatePlaybackModeButtons();
 
     document.querySelectorAll(".side-bar-btn").forEach((btn) => {

@@ -22,6 +22,7 @@ from spectra.analysis.video import analyze_spatial_video
 _PREVIEW_QUEUES: dict[str, asyncio.Queue] = {}
 _PREVIEW_QUEUE_MAX = 24
 _MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
+DEFAULT_MAX_PROCESSED_FRAMES = 1_000_000_000
 
 VIDEO_TYPES = {"mp4", "mov", "avi", "mkv", "m4v"}
 DEPTH_EVERY_OPTIONS = (1, 2, 3, 5, 10, 15)
@@ -253,7 +254,7 @@ async def preview_websocket(websocket: WebSocket, session_id: str) -> None:
 async def analyze_endpoint(
     file: UploadFile = File(...),
     mode: str = Form("video"),
-    max_processed_frames: int = Form(180),
+    max_processed_frames: int = Form(DEFAULT_MAX_PROCESSED_FRAMES),
     max_saved_events: int = Form(20),
     resize_max_side: int = Form(512),
     depth_every: int = Form(10),
@@ -263,6 +264,8 @@ async def analyze_endpoint(
     flow_every: int = Form(1),
     start_sec: float = Form(0.0),
     end_sec: float = Form(0.0),
+    start_frame: int = Form(0),
+    end_frame: int = Form(0),
     session_id: str = Form(""),
 ) -> dict[str, Any]:
     if mode.strip().lower() != "video":
@@ -311,7 +314,7 @@ async def analyze_endpoint(
             result = await asyncio.to_thread(
                 analyze_spatial_video,
                 video_path=source_path,
-                max_processed_frames=min(2000, max(1, int(max_processed_frames))),
+                max_processed_frames=max(1, int(max_processed_frames)),
                 max_saved_events=min(50, max(1, int(max_saved_events))),
                 resize_max_side=_nearest_allowed(int(resize_max_side), RESIZE_MAX_SIDE_OPTIONS),
                 depth_every=_nearest_allowed(int(depth_every), DEPTH_EVERY_OPTIONS),
@@ -321,6 +324,8 @@ async def analyze_endpoint(
                 flow_every=_nearest_allowed(int(flow_every), FLOW_EVERY_OPTIONS),
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
+                start_frame=max(0, int(start_frame)),
+                end_frame=max(0, int(end_frame)) if int(end_frame) > 0 else None,
                 progress_callback=progress_callback if queue is not None else None,
             )
     except HTTPException:

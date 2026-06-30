@@ -173,12 +173,12 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
 
     monkeypatch.setattr(app_module, "analyze_spatial_video", fake_analyze_spatial_video)
 
-    async def call_endpoint():
+    async def call_endpoint(max_processed_frames=0):
         upload = UploadFile(filename="clip.mp4", file=io.BytesIO(b"fake video bytes"))
         return await app_module.analyze_endpoint(
             file=upload,
             mode="video",
-            max_processed_frames=0,
+            max_processed_frames=max_processed_frames,
             max_saved_events=99,
             resize_max_side=9999,
             depth_every=0,
@@ -188,6 +188,8 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
             flow_every=999,
             start_sec=2.5,
             end_sec=0.0,
+            start_frame=12,
+            end_frame=90,
             session_id="",
         )
 
@@ -204,4 +206,9 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
     assert captured["flow_every"] == 10
     assert captured["start_sec"] == 2.5
     assert captured["end_sec"] is None
+    assert captured["start_frame"] == 12
+    assert captured["end_frame"] == 90
     assert captured["progress_callback"] is None
+
+    asyncio.run(call_endpoint(max_processed_frames=9000))
+    assert captured["max_processed_frames"] == 9000
