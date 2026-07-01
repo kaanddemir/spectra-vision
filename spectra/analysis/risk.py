@@ -135,6 +135,14 @@ _CAUTION_TTC_SEC = 3.0
 _IMMINENT_MAX_DISTANCE_M = 12.0     # within this, proximity alone justifies escalation
 _IMMINENT_MIN_AGREEMENT = 0.5       # otherwise the TTC cues must corroborate
 
+# A vehicle we are *passing* (stopped traffic in an adjacent lane) has a real
+# relative closing speed but no forward-collision course: its lane relevance is
+# near zero. Surfacing its depth TTC as a "collision ETA" is misleading — it
+# reads "0.4s" while the object is correctly SAFE. Below this lane-relevance the
+# collision ETA is withheld (shown as "—"); the risk SCORE and SAFE/DANGER band
+# are unchanged (they still use the physical TTC internally).
+_ETA_SURFACE_MIN_CROSSING = 0.15
+
 # Lowest multiplier applied to the trust gate when the TTC cues fully disagree
 # (agreement → 0). Worst case tempers confidence to ×0.7; agreement → 1 leaves
 # it unchanged so the validated score is backward-compatible.
@@ -1221,31 +1229,50 @@ def is_imminent_danger(event: RiskEvent) -> bool:
     )
 
 
-def stabilized_event_state(stabilizer: "StateStabilizer", event: RiskEvent) -> str:
+def stabilized_event_state(
+    stabilizer: "StateStabilizer",
+    event: RiskEvent,
+    *,
+    fast_clear: bool = False,
+) -> str:
     # Multi-frame TTC confirmation already happens per-track in
     # ``TtcImminenceSmoother`` before ``state_from_score`` returns DANGER, so by
     # the time an imminent event reaches the stabilizer it has already
     # survived the ``ttc<1s for 2 consecutive frames`` filter. The stabilizer
     # still bypasses upgrade hysteresis for those confirmed imminent events
     # so true cut-ins are flagged without an extra frame delay.
+    #
+    # ``fast_clear`` is the symmetric de-escalation hint: when the caller knows
+    # the scene has genuinely cleared (no approaching in-corridor threat), the
+    # banner may fall faster than the anti-flicker downgrade gap so a passed /
+    # receding threat's DANGER does not linger.
     if is_imminent_danger(event):
         stabilizer.current_state = "DANGER"
         stabilizer.pending_state = "DANGER"
         stabilizer.counter = 0
         return "DANGER"
 
-    return stabilizer.process(event.state)
+    return stabilizer.process(event.state, fast_clear=fast_clear)
 
 
 class StateStabilizer:
-    def __init__(self, upgrade_frames: int = 3, downgrade_frames: int = 7):
+    def __init__(
+        self,
+        upgrade_frames: int = 3,
+        downgrade_frames: int = 7,
+        fast_downgrade_frames: int = 3,
+    ):
         self.current_state = "SAFE"
         self.pending_state = "SAFE"
         self.counter = 0
         self.upgrade_frames = upgrade_frames
         self.downgrade_frames = downgrade_frames
+        # Shorter downgrade used only when the caller signals the scene has
+        # cleared (``fast_clear``); still >1 so a single noisy frame can't drop
+        # a real alert.
+        self.fast_downgrade_frames = fast_downgrade_frames
 
-    def process(self, raw_state: str) -> str:
+    def process(self, raw_state: str, *, fast_clear: bool = False) -> str:
         if raw_state == self.current_state:
             self.pending_state = raw_state
             self.counter = 0
@@ -1259,7 +1286,10 @@ class StateStabilizer:
 
         r_curr = self._rank(self.current_state)
         r_pend = self._rank(self.pending_state)
-        required = self.upgrade_frames if r_pend > r_curr else self.downgrade_frames
+        if r_pend > r_curr:
+            required = self.upgrade_frames
+        else:
+            required = self.fast_downgrade_frames if fast_clear else self.downgrade_frames
 
         if self.counter >= required:
             self.current_state = self.pending_state

@@ -282,6 +282,13 @@ def _bbox_median_nearness(
     return float(np.clip(np.median(crop), 0.0, 1.0))
 
 
+# Beyond this lane-position magnitude on the far (oncoming) side, a detection
+# that does not overlap the ego corridor is treated as opposite-lane traffic and
+# dropped. Kept lenient enough (< 1.5 clamp) that an adjacent same-direction lane
+# vehicle only needs to touch the corridor to still be admitted as a cut-in.
+_ONCOMING_SIDE_POS = 1.35
+
+
 def detection_corridor_score(
     detection: Detection,
     lane: LaneFrame,
@@ -328,6 +335,18 @@ def detection_corridor_score(
         lane,
         margin_ratio=0.08 if near_or_large else 0.04,
     )
+
+    # Opposite-lane (oncoming) traffic: a detection firmly on the far side that
+    # does not touch the ego corridor is never an ego-lane collision
+    # participant, so it must not receive a track/overlay box. Reject it up front
+    # — before the confidence/near escapes below — so oncoming vehicles do not
+    # leak in when lane geometry is untrusted (the default corridor) and those
+    # escapes would otherwise admit any confident vehicle. A genuine lead that
+    # merely clamps to ``pos = -1.5`` still overlaps the corridor (overlap_px >
+    # 0) and is kept; only firmly off-corridor opposite-side boxes are dropped.
+    if pos <= -_ONCOMING_SIDE_POS and overlap_px <= 0.0:
+        return 0.0
+
     confidence_score = float(np.clip((detection.confidence - 0.20) / 0.55, 0.0, 1.0))
     lane_trust = float(np.clip((lane.confidence - 0.25) / 0.60, 0.0, 1.0))
     score = (0.58 * center_score) + (0.30 * overlap_score) + (0.12 * confidence_score)

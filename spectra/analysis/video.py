@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from .risk import (
+    _ETA_SURFACE_MIN_CROSSING,
     ConfidenceSmoother,
     DepthDeltaSmoother,
     ExpansionSmoother,
@@ -329,16 +330,67 @@ _NEAR_THREAT_LANE_POS = 1.3
 # the active set, so a brief detector miss cannot flip the frame to SAFE.
 _STRONG_PRIMARY_HOLD_SEC = 1.0
 
+# Geometry escape hatch: a big vehicle filling the lower frame is effectively
+# ahead of us even when its computed ``lane_position`` snaps to the ±1.5 clamp
+# (a tailgated lead car straddling the bottom-center reads far-left/right when
+# the corridor geometry is uncertain). A box this wide and this bottom-anchored
+# is a close lead regardless of lane bucket; a genuine side car is a narrow box
+# near the edge and does not pass the width test.
+_NEAR_THREAT_BOX_BOTTOM_FRAC = 0.90
+_NEAR_THREAT_BOX_WIDTH_FRAC = 0.33
 
-def _is_near_in_corridor(event: RiskEvent) -> bool:
+
+def _box_fills_lower_frame(event: RiskEvent, frame_shape: tuple[int, int] | None) -> bool:
+    """Whether the bbox is wide and bottom-anchored (a big lead filling our path)."""
+
+    if frame_shape is None or event.bbox is None:
+        return False
+    frame_h, frame_w = frame_shape
+    if frame_h <= 0 or frame_w <= 0:
+        return False
+    x1, _y1, x2, y2 = event.bbox
+    bottom_frac = float(y2) / float(frame_h)
+    width_frac = float(x2 - x1) / float(frame_w)
+    return bottom_frac >= _NEAR_THREAT_BOX_BOTTOM_FRAC and width_frac >= _NEAR_THREAT_BOX_WIDTH_FRAC
+
+
+def _is_near_in_corridor(
+    event: RiskEvent, frame_shape: tuple[int, int] | None = None
+) -> bool:
     """Whether ``event`` is a close vehicle in or beside the ego corridor."""
 
-    if abs(event.lane_position) > _NEAR_THREAT_LANE_POS:
+    close = (
+        event.distance_m <= _NEAR_THREAT_DISTANCE_M
+        if event.distance_m is not None
+        # No metric depth this frame → trust the normalized nearness instead.
+        else event.near_score >= 0.85
+    )
+    if not close:
         return False
-    if event.distance_m is not None:
-        return event.distance_m <= _NEAR_THREAT_DISTANCE_M
-    # No metric depth this frame → trust the normalized nearness instead.
-    return event.near_score >= 0.85
+    if abs(event.lane_position) <= _NEAR_THREAT_LANE_POS:
+        return True
+    # Off-corridor by lane_position, but a wide bottom-anchored box is a close
+    # lead straddling our path whose position estimate snapped to the clamp.
+    return _box_fills_lower_frame(event, frame_shape)
+
+
+# A small closing-speed deadband separates "approaching" from "receding" so
+# depth jitter around zero doesn't flip the classification frame to frame.
+_APPROACH_CLOSING_MPS = 0.3
+
+
+def _is_approaching(event: RiskEvent) -> bool:
+    """Whether ``event`` is closing on the ego vehicle (has a real collision ETA)."""
+
+    if event.closing_mps is not None and event.closing_mps > _APPROACH_CLOSING_MPS:
+        return True
+    return event.ttc_sec is not None
+
+
+def _is_receding(event: RiskEvent) -> bool:
+    """Whether ``event`` is pulling away — no longer a forward collision threat."""
+
+    return event.closing_mps is not None and event.closing_mps < -_APPROACH_CLOSING_MPS
 
 
 def _display_lane_position(lane_position: float) -> float:
@@ -367,7 +419,13 @@ def _eta_metric(event: RiskEvent) -> dict[str, Any]:
     display = "—"
     sec: float | None = None
 
-    if distance_m is None or closing_mps is None:
+    if event.crossing_risk < _ETA_SURFACE_MIN_CROSSING:
+        # Off-corridor object we are passing (not approaching): its depth TTC is
+        # a real relative closing time but not a forward-collision ETA. Withhold
+        # it so a correctly-SAFE passing vehicle does not show "0.4s". The risk
+        # score/state are unaffected (computed upstream from the physical TTC).
+        display = "—"
+    elif distance_m is None or closing_mps is None:
         display = "—"
     elif float(closing_mps) <= _MIN_CLOSING_FOR_DISPLAY_MPS:
         display = "—"
@@ -425,10 +483,18 @@ def _unit_score(value: float | int | None) -> float:
 
 
 def _risk_metric(event: RiskEvent) -> dict[str, Any]:
+    # A passing (off-corridor) object's TTC is not a collision course, so its
+    # ETA-pressure bar is withheld too — matching the suppressed collision ETA —
+    # rather than showing a scary 85% next to a SAFE verdict.
+    eta_pressure_surfaced = (
+        0.0
+        if event.crossing_risk < _ETA_SURFACE_MIN_CROSSING
+        else eta_pressure(event.ttc_sec)
+    )
     return {
         "score": _risk_score(event),
         "factors": {
-            "etaPressure": _unit_score(eta_pressure(event.ttc_sec)),
+            "etaPressure": _unit_score(eta_pressure_surfaced),
             "proximity": _unit_score(event.near_score),
             "approach": _unit_score(event.closing_speed),
             "crossing": _unit_score(event.crossing_risk),
@@ -742,7 +808,7 @@ class SpatialFrameAnalyzer:
         lane_every: int = 3,
         flow_every: int = 1,
         sensitivity: "str | RiskSensitivity" = "balanced",
-        lane_reset_after_misses: int = 6,
+        lane_reset_after_misses: int = 10,
         lane_drift_reset_px_ratio: float = 0.12,
         fps: float = 0.0,
     ) -> None:
@@ -1008,13 +1074,11 @@ class SpatialFrameAnalyzer:
         # ``all_events`` (i.e. the ``objects[]`` row whose
         # ``tracking.trackId`` equals ``primary.trackId``). The frame-level
         # ``state`` carries the hysteresis-smoothed band independently.
-        # Stabilize on the frame's WORST raw-state object, not just the selected
-        # primary. After the eligibility fix this is normally the primary, but
-        # feeding the worst keeps the banner elevated when primary selection
-        # flips between objects or a threat briefly drops out of the active set
-        # for a frame — both of which otherwise let the stabilizer downgrade
-        # prematurely while a real danger is still present.
-        stabilizer_event = max(
+        # Frame banner state. The stabilizer is fed a single "banner intent"
+        # derived from the RAW per-object states; the shown primary event/score
+        # always stay on the real current object, never a frozen or dead-track
+        # value. ``worst_raw`` is the frame's most severe object.
+        worst_raw = max(
             all_events,
             key=lambda e: (
                 {"SAFE": 0, "CAUTION": 1, "DANGER": 2}.get(e.state, 0),
@@ -1022,38 +1086,53 @@ class SpatialFrameAnalyzer:
             ),
         )
 
-        # Layer 3 — dropout safety net. If no object reads CAUTION/DANGER this
-        # frame but a near in-corridor threat existed within the last ~1s, the
-        # detector almost certainly just missed the close lead vehicle. Holding
-        # the banner at CAUTION (and pointing the primary back at the remembered
-        # threat) prevents the frame from flipping to a falsely-reassuring SAFE
-        # on a distant low-risk object while the close car is still there.
-        held_primary = primary_event
-        if (
-            stabilizer_event.state == "SAFE"
-            and self._last_strong_primary is not None
-            and 0.0 < timestamp_sec - self._last_strong_primary["timestamp"]
+        # A threat worth keeping the banner elevated: a near in-corridor
+        # CAUTION/DANGER object that is not already receding (a car that has
+        # passed or is pulling away is no longer a forward collision threat).
+        frame_shape = frame.bgr.shape[:2]
+        active_threat = any(
+            e.state in ("CAUTION", "DANGER")
+            and _is_near_in_corridor(e, frame_shape)
+            and not _is_receding(e)
+            for e in all_events
+        )
+        # Dropout hold (Layer 3): an approaching near threat was the primary
+        # within the last ~1s but is momentarily absent from the active set.
+        # Hold only the BANNER BAND at CAUTION — never the primary pointer — so
+        # a brief miss cannot flash SAFE while the panel keeps showing the real
+        # current object.
+        hold = (
+            self._last_strong_primary is not None
+            and 0.0
+            < timestamp_sec - self._last_strong_primary["timestamp"]
             <= _STRONG_PRIMARY_HOLD_SEC
-        ):
-            remembered = self._last_strong_primary["event"]
-            held = replace(
-                remembered,
-                state="CAUTION",
-                frame_index=frame_index,
-                timestamp_sec=timestamp_sec,
-            )
-            stabilizer_event = held
-            held_primary = held
+        )
 
-        primary_risk_score = _risk_score(held_primary)
-        stabilized_state = stabilized_event_state(self.stabilizer, stabilizer_event)
-        primary_event = replace(held_primary, state=stabilized_state)
+        if active_threat:
+            banner_event = worst_raw
+            fast_clear = False
+        elif hold:
+            banner_event = replace(worst_raw, state="CAUTION", ttc_sec=None)
+            fast_clear = False
+        else:
+            # Scene cleared: nothing is approaching. Feed SAFE monotonically so a
+            # raw state oscillating at a band edge cannot keep resetting the
+            # downgrade counter, and let an elevated banner fall faster than the
+            # anti-flicker gap so a passed threat's DANGER does not linger.
+            banner_event = replace(worst_raw, state="SAFE", ttc_sec=None)
+            fast_clear = True
+
+        primary_risk_score = _risk_score(primary_event)
+        stabilized_state = stabilized_event_state(
+            self.stabilizer, banner_event, fast_clear=fast_clear
+        )
+        primary_event = replace(primary_event, state=stabilized_state)
 
         # Refresh cross-frame perception state for the next frame: which close
         # threat is tracked (Layer 1 gating), which ids should coast longer
-        # (Layer 2), and the last strong primary to hold on a dropout (Layer 3).
-        # Driven by the RAW per-object events, not the stabilized banner.
-        self._update_threat_memory(all_events, timestamp_sec)
+        # (Layer 2), and the last approaching strong primary to hold on a
+        # dropout (Layer 3). Driven by the RAW per-object events.
+        self._update_threat_memory(all_events, timestamp_sec, frame_shape)
 
         self.processed_frames += 1
 
@@ -1070,13 +1149,16 @@ class SpatialFrameAnalyzer:
         self,
         all_events: list[RiskEvent],
         timestamp_sec: float,
+        frame_shape: tuple[int, int] | None = None,
     ) -> None:
         """Refresh near-threat / hot-id / strong-primary state for next frame."""
 
         # Layer 1 gating: is a close in-corridor object actively in the set? When
         # not (only far traffic remains), the next detection frame runs the
         # near-band recovery pass.
-        self._near_threat_tracked = any(_is_near_in_corridor(e) for e in all_events)
+        self._near_threat_tracked = any(
+            _is_near_in_corridor(e, frame_shape) for e in all_events
+        )
 
         # Layer 2: coast the active threat ids longer. Any CAUTION/DANGER object
         # plus the remembered strong primary (so it keeps coasting through a
@@ -1096,26 +1178,42 @@ class SpatialFrameAnalyzer:
         self._hot_track_ids = hot
 
         # Layer 3: remember the strongest near in-corridor CAUTION/DANGER object
-        # as the threat to hold across a dropout. Expire the memory once it is
-        # older than the hold window and nothing renewed it.
+        # that is actually APPROACHING, as the threat to hold across a brief
+        # dropout. A receding / passed object is never stored (so the banner is
+        # not held on a car that has already pulled away).
         strong_now = [
             e
             for e in all_events
-            if e.state in ("CAUTION", "DANGER") and _is_near_in_corridor(e)
+            if e.state in ("CAUTION", "DANGER")
+            and _is_near_in_corridor(e, frame_shape)
+            and _is_approaching(e)
         ]
         if strong_now:
             best = max(strong_now, key=_risk_score)
             self._last_strong_primary = {
-                "event": best,
                 "timestamp": timestamp_sec,
                 "trackId": best.object_id,
                 "distanceM": best.distance_m,
             }
-        elif (
-            self._last_strong_primary is not None
-            and (timestamp_sec - self._last_strong_primary["timestamp"])
-            > _STRONG_PRIMARY_HOLD_SEC
-        ):
+            return
+
+        # No approaching threat this frame. Drop the memory when it has aged out
+        # of the hold window, OR when its track is still visible but has gone
+        # non-threatening (receding / no longer approaching) — so a threat that
+        # dissipated in view does not keep the banner elevated.
+        mem = self._last_strong_primary
+        if mem is None:
+            return
+        tid = mem.get("trackId")
+        seen_now = any(e.object_id == tid for e in all_events)
+        still_strong = any(
+            e.object_id == tid
+            and e.state in ("CAUTION", "DANGER")
+            and _is_approaching(e)
+            for e in all_events
+        )
+        aged = (timestamp_sec - mem["timestamp"]) > _STRONG_PRIMARY_HOLD_SEC
+        if aged or (seen_now and not still_strong):
             self._last_strong_primary = None
 
 

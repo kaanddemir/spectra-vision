@@ -119,3 +119,90 @@ def test_saved_events_get_deferred_rgb_payloads(monkeypatch):
     saved = result["events"][0]
     assert isinstance(saved["original_rgb"], np.ndarray)
     assert isinstance(saved["overlay_rgb"], np.ndarray)
+
+
+def _corridor_event(*, lane_position, distance_m, bbox):
+    # Minimal RiskEvent for exercising _is_near_in_corridor's geometry escape.
+    return RiskEvent(
+        frame_index=0,
+        timestamp_sec=0.0,
+        state="CAUTION",
+        ttc_sec=1.8,
+        direction="left",
+        lane="left",
+        object_type="car",
+        confidence=0.9,
+        near_score=1.0,
+        velocity_magnitude=0.1,
+        closing_speed=3.1,
+        bbox=bbox,
+        reason="",
+        object_id=1,
+        lane_position=lane_position,
+        distance_m=distance_m,
+        closing_mps=3.1,
+    )
+
+
+def test_wide_bottom_box_counts_as_near_in_corridor_despite_off_center_position():
+    # A close, wide, bottom-anchored lead whose lane_position snapped to the
+    # -1.5 clamp still counts as an in-corridor threat via the geometry escape.
+    frame_shape = (100, 100)  # H, W
+    lead = _corridor_event(lane_position=-1.5, distance_m=6.5, bbox=(0, 73, 41, 99))
+    assert video._is_near_in_corridor(lead, frame_shape)
+    # Without frame geometry, the clamp position alone still reads off-corridor.
+    assert not video._is_near_in_corridor(lead)
+
+
+def test_narrow_edge_box_stays_off_corridor():
+    # A close but narrow side car near the frame edge is NOT promoted — the
+    # width test rejects it, so genuine side traffic does not over-alarm.
+    frame_shape = (100, 100)
+    side = _corridor_event(lane_position=1.5, distance_m=7.1, bbox=(90, 71, 100, 99))
+    assert not video._is_near_in_corridor(side, frame_shape)
+
+
+def _passing_event(*, crossing_risk):
+    # A close, strongly-closing object (like a vehicle being passed in an
+    # adjacent stopped lane) with a real depth TTC.
+    from spectra.analysis.risk import TtcComponent
+
+    return RiskEvent(
+        frame_index=0,
+        timestamp_sec=0.0,
+        state="SAFE",
+        ttc_sec=0.4,
+        direction="left",
+        lane="left",
+        object_type="truck",
+        confidence=0.6,
+        near_score=1.0,
+        velocity_magnitude=0.1,
+        closing_speed=0.5,
+        bbox=(1, 1, 3, 3),
+        reason="",
+        object_id=4,
+        crossing_risk=crossing_risk,
+        distance_m=7.2,
+        closing_mps=16.4,
+        ttc_components=(TtcComponent("depth", 0.4, 0.9),),
+    )
+
+
+def test_off_corridor_object_withholds_collision_eta_and_pressure():
+    # A passing (off-corridor, low crossing) vehicle must not surface a collision
+    # ETA or ETA-pressure — it reads SAFE, so "0.4s / 85%" would be contradictory.
+    passing = _passing_event(crossing_risk=0.05)
+    eta = video._eta_metric(passing)
+    assert eta["display"] == "—"
+    assert eta["collisionSec"] is None
+    assert video._risk_metric(passing)["factors"]["etaPressure"] == 0.0
+
+
+def test_in_corridor_object_still_surfaces_collision_eta():
+    # A genuine in-path closing object keeps its collision ETA and pressure.
+    approaching = _passing_event(crossing_risk=0.7)
+    eta = video._eta_metric(approaching)
+    assert eta["display"] == "0.4s"
+    assert eta["collisionSec"] == 0.4
+    assert video._risk_metric(approaching)["factors"]["etaPressure"] > 0.0

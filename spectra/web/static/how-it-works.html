@@ -600,13 +600,21 @@
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">State stabilization</div>
-            stabilizer_input = max objects by (state_severity, risk.score)<br>
-            dropout safety net: if no object reads CAUTION/DANGER but a near
-            in-corridor threat existed within the last 1.0s, hold the banner at
-            CAUTION (and point the primary back at the remembered threat) so a
-            brief detector miss cannot flip the frame to SAFE on a distant object<br>
+            banner is stabilized from the raw per-object states; the shown
+            primary object/score always stay on the real current object (never a
+            frozen or dropped-out value)<br>
+            dropout hold: if an <em>approaching</em> near in-corridor threat was the
+            primary within the last 1.0s but is momentarily absent, hold only the
+            banner BAND at CAUTION so a brief miss cannot flash SAFE — released as
+            soon as that threat is seen receding<br>
+            near in-corridor test: close + within one lane of the ego path, with a
+            geometry escape — a wide, bottom-anchored box counts as a lead in our
+            path even when its lane_position snaps to the ±1.5 clamp, so a
+            tailgated lead reading far-left/right is not mistaken for side traffic<br>
             upgrade after 3 consecutive frames<br>
-            downgrade after 7 consecutive frames<br>
+            downgrade after 7 consecutive frames, or 3 when the scene has cleared
+            (no approaching in-corridor threat) so a passed threat's DANGER does
+            not linger<br>
             confirmed ttc_depth ≤ 1.0s DANGER bypasses upgrade delay
           </div>
           <div class="doc-formula">

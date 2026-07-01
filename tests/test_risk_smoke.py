@@ -5,6 +5,7 @@ from spectra.analysis.risk import (
     DepthDeltaSmoother,
     ExpansionSmoother,
     SpatialFields,
+    StateStabilizer,
     build_object_events,
     calculate_track_risk,
     score_raw,
@@ -61,6 +62,22 @@ def _track(track_id, bbox, t=1.0, prior_bbox=None, prior_t=0.7):
             TrackSample(frame_index=int(prior_t * 30), timestamp_sec=float(prior_t), bbox=prior_bbox)
         )
     return track
+
+
+def test_stabilizer_fast_clear_downgrades_in_fewer_frames():
+    # Normal downgrade needs the full anti-flicker window; a receding/cleared
+    # scene (fast_clear) lets an elevated banner fall in fewer frames so a
+    # passed threat's DANGER does not linger.
+    slow = StateStabilizer(downgrade_frames=7, fast_downgrade_frames=3)
+    slow.current_state = slow.pending_state = "DANGER"
+    for _ in range(3):
+        assert slow.process("SAFE") == "DANGER"  # 3 SAFE frames, still DANGER
+
+    fast = StateStabilizer(downgrade_frames=7, fast_downgrade_frames=3)
+    fast.current_state = fast.pending_state = "DANGER"
+    assert fast.process("SAFE", fast_clear=True) == "DANGER"
+    assert fast.process("SAFE", fast_clear=True) == "DANGER"
+    assert fast.process("SAFE", fast_clear=True) == "SAFE"  # cleared after 3
 
 
 def test_imminent_escalation_requires_proximity_or_cue_agreement():

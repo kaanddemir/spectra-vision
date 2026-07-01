@@ -556,15 +556,22 @@ export function initializeSpectra() {
       overlayCtx.setLineDash([]);
     }
 
-    // Per-object boxes — skip SAFE to match the baked overlay.
+    // Per-object boxes. CAUTION/DANGER draw automatically (matching the baked
+    // overlay); a SAFE object is drawn only when the user has selected it, so
+    // clicking any object in the list marks where it is on the frame — the
+    // selected box is always highlighted regardless of its state.
+    const selId = state.selectedObjectId;
     const objects = Array.isArray(row.objects) ? row.objects : [];
     objects.forEach((obj) => {
+      if (!obj?.bbox) return;
       const st = obj?.rawRiskState ?? obj?.riskState;
-      if (!obj?.bbox || st === "SAFE" || !st) return;
+      const isSelected = selId !== null && selId !== undefined && obj.objectId === selId;
+      if ((st === "SAFE" || !st) && !isSelected) return;
       const [x1, y1, x2, y2] = obj.bbox;
       const bx = px(x1), by = py(y1), bw = px(x2) - px(x1), bh = py(y2) - py(y1);
-      const color = RISK_COLORS[st] || "#8aa0b4";
-      overlayCtx.lineWidth = st === "DANGER" ? 2.5 : 1.5;
+      const stateColor = RISK_COLORS[st] || "#8aa0b4";
+      const color = isSelected ? "#e8f0ff" : stateColor;
+      overlayCtx.lineWidth = isSelected ? 3 : st === "DANGER" ? 2.5 : 1.5;
       overlayCtx.strokeStyle = color;
       overlayCtx.strokeRect(bx, by, bw, bh);
 
@@ -575,6 +582,9 @@ export function initializeSpectra() {
       const eta = num(obj.collisionEta?.sec, null);
       if (eta !== null) parts.push(`ETA ${eta.toFixed(1)}s`);
       if (num(obj.riskFactors?.brake, 0) >= 0.5) parts.push("BRAKE");
+      // A selected SAFE object has no ETA/state cue in its label; show its band
+      // so the marked box is still self-explanatory.
+      if (isSelected && eta === null && st) parts.push(String(st));
       const label = parts.join(" ");
       if (label) {
         overlayCtx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
@@ -1174,6 +1184,10 @@ export function initializeSpectra() {
             state.objectsMenuCollapsed = true;
             focusSummaryFrame(source);
             renderRiskPanel();
+            // Mark the clicked object's box on the frame immediately (works even
+            // while the video is paused, and for SAFE objects the auto-overlay
+            // skips).
+            redrawOverlayAtCurrentTime();
           };
           button.innerHTML = `
             <span class="status-dot is-${sClass}"></span>
