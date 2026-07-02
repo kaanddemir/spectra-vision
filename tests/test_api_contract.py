@@ -12,37 +12,36 @@ from spectra.app import _serialize_result
 
 def _client_object(**overrides):
     obj = {
-        "id": 7,
-        "label": "Car",
-        "class": "car",
-        "state": "CAUTION",
+        "display_id": 7,
+        "object_type": "car",
+        "raw_state": "CAUTION",
         "risk": {
-            "score": 0.42,
+            "risk_score": 0.42,
             "factors": {
-                "etaPressure": 0.2,
-                "proximity": 0.4,
-                "approach": 0.3,
-                "crossing": 0.2,
-                "brake": 0.0,
+                "ttc_score": 0.2,
+                "proximity_score": 0.4,
+                "approach_score": 0.3,
+                "corridor_score": 0.2,
+                "brake_score": 0.0,
             },
         },
         "eta": {
-            "collisionSec": 2.2,
+            "collision_ttc_sec": 2.2,
             "display": "2.2s",
-            "agreement": 0.9,
-            "sources": {"depth": {"etaSec": 2.2, "confidence": 0.64}},
+            "ttc_agreement": 0.9,
+            "sources": {"depth": {"ttc_sec": 2.2, "confidence": 0.64}},
         },
-        "motion": {"distanceM": 18.5, "closingSpeedMps": 8.4},
-        "lane": {"bucket": "center", "position": 0.0, "crossing": 0.2},
+        "motion": {"distance_m": 18.5, "closing_mps": 8.4},
+        "lane": {"lane": "center", "lane_position": 0.0, "corridor_score": 0.2},
         "confidence": {
-            "overall": 0.67,
-            "detection": 0.72,
-            "lane": 0.8,
-            "depth": 0.64,
-            "flow": 0.5,
-            "expansion": 0.55,
+            "risk_confidence": 0.67,
+            "detection_confidence": 0.72,
+            "lane_confidence": 0.8,
+            "depth_confidence": 0.64,
+            "flow_confidence": 0.5,
+            "expansion_confidence": 0.55,
         },
-        "tracking": {"trackId": 7},
+        "object_id": 7,
         "bbox": [0.1, 0.1, 0.5, 0.5],
     }
     obj.update(overrides)
@@ -56,11 +55,12 @@ def _result_with_event(event):
         "processed_frames": 3,
         "frames": [
             {
-                "frameIndex": event["frameIndex"],
-                "timestampSec": event["timestampSec"],
-                "state": event["state"],
+                "frame_index": event["frame_index"],
+                "timestamp_sec": event["timestamp_sec"],
+                "stabilized_state": event["stabilized_state"],
                 "primary": event["primary"],
-                "trafficLight": event["trafficLight"],
+                "traffic_light": event["traffic_light"],
+                "lane_geometry": event["lane_geometry"],
                 "objects": event["objects"],
             }
         ],
@@ -71,67 +71,96 @@ def _result_with_event(event):
     }
 
 
-def test_serialize_result_keeps_v5_shape_and_strips_internal_fields():
+def _assert_keys_absent(value, forbidden: set[str]) -> None:
+    if isinstance(value, dict):
+        assert not (set(value) & forbidden)
+        for child in value.values():
+            _assert_keys_absent(child, forbidden)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_keys_absent(child, forbidden)
+
+
+def test_serialize_result_keeps_v6_shape_and_strips_internal_fields():
     event = {
         "frame_index": 1,
         "timestamp_sec": 0.1,
-        "frameIndex": 1,
-        "timestampSec": 0.1,
-        "state": "CAUTION",
-        "primary": {"trackId": 7, "score": 0.42, "lane": "center"},
-        "trafficLight": {"state": "red", "confidence": 0.8},
-        "laneGeometry": {"detected": False, "confidence": 0.25, "corridor": []},
+        "raw_primary_score": 0.42,
+        "risk_score": 0.41,
+        "stabilized_state": "CAUTION",
+        "primary": {"object_id": 7, "raw_primary_score": 0.42, "lane": "center"},
+        "traffic_light": {"state": "red", "confidence": 0.8},
+        "lane_geometry": {"detected": False, "confidence": 0.25, "corridor": []},
         "objects": [_client_object()],
     }
 
     payload = _serialize_result(_result_with_event(event), elapsed_sec=0.01, source_name="sample.mp4")["payload"]
 
-    assert payload["schemaVersion"] == 5
-    assert set(payload) >= {"frames", "events", "peakEvent", "images", "performance"}
+    assert payload["schema_version"] == 6
+    assert set(payload) >= {"frames", "events", "peak_event", "images", "performance"}
+    assert set(payload["metadata"]) >= {
+        "source_name",
+        "frame_count",
+        "processed_frames",
+        "frame_width",
+        "frame_height",
+        "elapsed_sec",
+    }
     assert payload["performance"]["summary"] == {"processed_frames": 3}
-    assert payload["frames"][0]["primary"] == {"trackId": 7, "score": 0.42, "lane": "center"}
-    assert payload["peakEvent"]["objects"][0]["tracking"]["trackId"] == 7
+    assert payload["frames"][0]["primary"] == {"object_id": 7, "raw_primary_score": 0.42, "lane": "center"}
+    assert payload["peak_event"]["objects"][0]["object_id"] == 7
+    assert payload["peak_event"]["primary"]["raw_primary_score"] == payload["peak_event"]["objects"][0]["risk"]["risk_score"]
+    assert payload["peak_event"]["objects"][0]["eta"]["collision_ttc_sec"] == 2.2
+    assert payload["peak_event"]["objects"][0]["risk"]["factors"]["ttc_score"] == 0.2
     assert "timelineRows" not in payload
-    assert "frame_index" not in payload["peakEvent"]
-    assert "timestamp_sec" not in payload["peakEvent"]
+    assert "raw_primary_score" not in payload["peak_event"]
+    assert "risk_score" not in payload["peak_event"]
+    assert "frameIndex" not in payload
+    assert "timestampSec" not in payload["peak_event"]
+    assert "peakEvent" not in payload
+    assert "collisionSec" not in payload["peak_event"]["objects"][0]["eta"]
+    assert "etaPressure" not in payload["peak_event"]["objects"][0]["risk"]["factors"]
+    assert "trackId" not in payload["peak_event"]["primary"]
+    _assert_keys_absent(
+        payload,
+        {"frameIndex", "timestampSec", "peakEvent", "collisionSec", "etaPressure", "trackId"},
+    )
 
 
-def test_serialize_result_extracts_images_to_top_level_imageref():
+def test_serialize_result_extracts_images_to_top_level_image_ref():
     event = {
         "frame_index": 42,
         "timestamp_sec": 1.4,
-        "frameIndex": 42,
-        "timestampSec": 1.4,
-        "state": "DANGER",
-        "primary": {"trackId": 1, "score": 0.9, "lane": "center"},
-        "trafficLight": {"state": "none", "confidence": 0.0},
-        "laneGeometry": {"detected": False, "confidence": 0.25, "corridor": []},
-        "objects": [_client_object(id=1, tracking={"trackId": 1}, state="DANGER")],
+        "stabilized_state": "DANGER",
+        "primary": {"object_id": 1, "raw_primary_score": 0.9, "lane": "center"},
+        "traffic_light": {"state": "none", "confidence": 0.0},
+        "lane_geometry": {"detected": False, "confidence": 0.25, "corridor": []},
+        "objects": [_client_object(display_id=1, object_id=1, raw_state="DANGER")],
         "original_rgb": np.zeros((4, 4, 3), dtype=np.uint8),
         "overlay_rgb": np.zeros((4, 4, 3), dtype=np.uint8),
     }
 
     payload = _serialize_result(_result_with_event(event), elapsed_sec=0.0, source_name="x.mp4")["payload"]
 
-    assert payload["peakEvent"]["imageRef"] == "f42"
+    assert payload["peak_event"]["image_ref"] == "f42"
     assert set(payload["images"]["f42"]) == {"original", "blend"}
-    assert "original_rgb" not in payload["peakEvent"]
-    assert "overlay_rgb" not in payload["peakEvent"]
+    assert "original_rgb" not in payload["peak_event"]
+    assert "overlay_rgb" not in payload["peak_event"]
 
 
 def test_object_metric_exposes_stable_client_fields():
     event = RiskEvent(
         frame_index=3,
         timestamp_sec=0.1,
-        state="DANGER",
-        ttc_sec=1.2,
+        raw_state="DANGER",
+        collision_ttc_sec=1.2,
         direction="center",
         lane="center",
         object_type="car",
-        confidence=0.9,
-        near_score=0.5,
-        velocity_magnitude=0.3,
-        closing_speed=0.4,
+        risk_confidence=0.9,
+        proximity_score=0.5,
+        radial_flow_score=0.3,
+        approach_score=0.4,
         bbox=(100, 50, 300, 250),
         reason="",
         object_id=7,
@@ -142,11 +171,18 @@ def test_object_metric_exposes_stable_client_fields():
 
     metric = _object_metric(event, 400, 200)
 
-    assert metric["tracking"]["trackId"] == 7
+    assert metric["object_id"] == 7
     assert metric["bbox"] == [0.25, 0.25, 0.75, 1.25]
-    assert set(metric["confidence"]) == {"overall", "detection", "lane", "depth", "flow", "expansion"}
-    assert metric["confidence"]["lane"] == 0.7
-    assert metric["eta"]["agreement"] == 0.85
+    assert set(metric["confidence"]) == {
+        "risk_confidence",
+        "detection_confidence",
+        "lane_confidence",
+        "depth_confidence",
+        "flow_confidence",
+        "expansion_confidence",
+    }
+    assert metric["confidence"]["lane_confidence"] == 0.7
+    assert metric["eta"]["ttc_agreement"] == 0.85
 
 
 def test_lane_metric_default_corridor_is_normalized():
@@ -195,7 +231,7 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
 
     response = asyncio.run(call_endpoint())
 
-    assert response["payload"]["schemaVersion"] == 5
+    assert response["payload"]["schema_version"] == 6
     assert captured["max_processed_frames"] == 1
     assert captured["max_saved_events"] == 50
     assert captured["resize_max_side"] == 1024

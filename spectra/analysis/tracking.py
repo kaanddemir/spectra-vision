@@ -27,7 +27,7 @@ class TrackSample:
 class Track:
     track_id: int
     class_name: str
-    confidence: float
+    detection_confidence: float
     bbox: tuple[int, int, int, int]
     frame_index: int
     timestamp_sec: float
@@ -54,7 +54,7 @@ class Track:
 
 
 _APPEARANCE_EMA_ALPHA = 0.3
-_REASSOC_APPEARANCE_MIN = 0.30
+_REID_APPEARANCE_MIN = 0.30
 
 
 def _appearance_descriptor(
@@ -247,7 +247,7 @@ class IoUTracker:
         coast_limit: int = 2,
         hot_coast_limit: int = 6,
         max_lost_sec: float = 2.5,
-        reassoc_gap_gain: float = 0.8,
+        reid_gap_gain: float = 0.8,
     ) -> None:
         self.iou_threshold = float(iou_threshold)
         self.predicted_iou_threshold = float(predicted_iou_threshold)
@@ -275,7 +275,7 @@ class IoUTracker:
         # colour-mismatched detection cannot hijack a stale ID even if its
         # predicted position happens to line up.
         self.max_lost_sec = float(max_lost_sec)
-        self.reassoc_gap_gain = float(reassoc_gap_gain)
+        self.reid_gap_gain = float(reid_gap_gain)
         self._next_id = 1
         self._next_display_id_by_class: dict[str, int] = {}
         self._tracks: dict[int, Track] = {}
@@ -378,25 +378,27 @@ class IoUTracker:
         matched_track_ids: set[int] = set()
 
         # Build all candidate (track, det) pairs and pick greedily by the
-        # strongest multi-signal score. IoU remains the primary signal, while
-        # predicted IoU and center/scale compatibility keep IDs stable across
-        # sparse YOLO frames and box jitter.
-        candidates: list[tuple[float, int, int]] = []
+        # strongest multi-signal association score. IoU remains the primary
+        # signal, while predicted IoU and center/scale compatibility keep IDs
+        # stable across sparse YOLO frames and box jitter.
+        association_candidates: list[tuple[float, int, int]] = []
         for det_idx, det in enumerate(detections):
             for track in active_tracks:
                 if track.class_name != det.class_name:
                     continue
-                score = self._match_score(
+                association_score = self._match_score(
                     track,
                     det,
                     timestamp_sec=timestamp_sec,
                 )
-                if score is not None:
-                    candidates.append((score, det_idx, track.track_id))
-        candidates.sort(reverse=True)
+                if association_score is not None:
+                    association_candidates.append(
+                        (association_score, det_idx, track.track_id)
+                    )
+        association_candidates.sort(reverse=True)
 
         used_dets: set[int] = set()
-        for _, det_idx, track_id in candidates:
+        for _, det_idx, track_id in association_candidates:
             if det_idx in used_dets or track_id in matched_track_ids:
                 continue
             track = self._tracks[track_id]
@@ -409,7 +411,7 @@ class IoUTracker:
                 )
             )
             track.bbox = det.bbox
-            track.confidence = det.confidence
+            track.detection_confidence = det.confidence
             track.frame_index = frame_index
             track.timestamp_sec = timestamp_sec
             track.age += 1
@@ -427,7 +429,7 @@ class IoUTracker:
         # relabel the same physical object (e.g. #1 -> #7).
         self._expire_lost_tracks(timestamp_sec)
         revived_ids: set[int] = set()
-        reassoc_updated_ids: set[int] = set()
+        reid_updated_ids: set[int] = set()
         if unmatched_dets:
             # Loose second pass over leftover detections, before minting new IDs.
             # The pool is confirmed tracks that did NOT match this frame —
@@ -446,25 +448,25 @@ class IoUTracker:
 
             if pool:
                 is_lost_by_id = {tid: is_lost for tid, _t, is_lost in pool}
-                reassoc_candidates: list[tuple[float, int, int]] = []
+                reid_candidates: list[tuple[float, int, int]] = []
                 for det_idx in unmatched_dets:
                     det = detections[det_idx]
                     for tid, track, _is_lost in pool:
                         if track.class_name != det.class_name:
                             continue
-                        score = self._reassoc_score(
+                        reid_score = self._reid_score(
                             track,
                             det,
                             timestamp_sec=timestamp_sec,
                             det_appearance=det_descriptors[det_idx],
                         )
-                        if score is not None:
-                            reassoc_candidates.append((score, det_idx, tid))
-                reassoc_candidates.sort(reverse=True)
-                used_reassoc_dets: set[int] = set()
+                        if reid_score is not None:
+                            reid_candidates.append((reid_score, det_idx, tid))
+                reid_candidates.sort(reverse=True)
+                used_reid_dets: set[int] = set()
                 assigned_ids: set[int] = set()
-                for _, det_idx, tid in reassoc_candidates:
-                    if det_idx in used_reassoc_dets or tid in assigned_ids:
+                for _, det_idx, tid in reid_candidates:
+                    if det_idx in used_reid_dets or tid in assigned_ids:
                         continue
                     if is_lost_by_id[tid]:
                         track = self._lost_tracks.pop(tid, None)
@@ -476,7 +478,7 @@ class IoUTracker:
                         track = self._tracks.get(tid)
                         if track is None:
                             continue
-                        reassoc_updated_ids.add(tid)
+                        reid_updated_ids.add(tid)
                     det = detections[det_idx]
                     track.history.append(
                         TrackSample(
@@ -486,7 +488,7 @@ class IoUTracker:
                         )
                     )
                     track.bbox = det.bbox
-                    track.confidence = det.confidence
+                    track.detection_confidence = det.confidence
                     track.frame_index = frame_index
                     track.timestamp_sec = timestamp_sec
                     track.age += 1
@@ -495,8 +497,8 @@ class IoUTracker:
                     track.confirmed = True  # only confirmed tracks enter the pool
                     _blend_appearance(track, det_descriptors[det_idx])
                     assigned_ids.add(tid)
-                    used_reassoc_dets.add(det_idx)
-                unmatched_dets = [i for i in unmatched_dets if i not in used_reassoc_dets]
+                    used_reid_dets.add(det_idx)
+                unmatched_dets = [i for i in unmatched_dets if i not in used_reid_dets]
 
         new_track_ids: set[int] = set()
         for det_idx in unmatched_dets:
@@ -506,7 +508,7 @@ class IoUTracker:
             track = Track(
                 track_id=track_id,
                 class_name=det.class_name,
-                confidence=det.confidence,
+                detection_confidence=det.confidence,
                 bbox=det.bbox,
                 frame_index=frame_index,
                 timestamp_sec=timestamp_sec,
@@ -523,7 +525,7 @@ class IoUTracker:
         # Age out tracks that were not updated this frame. Confirmed tracks that
         # exhaust ``max_misses`` are demoted to the lost pool (for re-id) rather
         # than deleted; unconfirmed tracks are dropped outright.
-        updated_ids = matched_track_ids | new_track_ids | revived_ids | reassoc_updated_ids
+        updated_ids = matched_track_ids | new_track_ids | revived_ids | reid_updated_ids
         for track_id, track in list(self._tracks.items()):
             if track_id in updated_ids:
                 continue
@@ -538,7 +540,7 @@ class IoUTracker:
         # make a live threat vanish from the active set on a detection frame.
         return self._emittable(hot_ids)
 
-    def _reassoc_score(
+    def _reid_score(
         self,
         lost: Track,
         det: Detection,
@@ -573,7 +575,7 @@ class IoUTracker:
             return None
         center_ratio = _center_distance_ratio(predicted, det.bbox)
         threshold = self.center_distance_threshold + (
-            min(gap, self.max_lost_sec) * self.reassoc_gap_gain
+            min(gap, self.max_lost_sec) * self.reid_gap_gain
         )
         if center_ratio > threshold:
             return None
@@ -583,7 +585,7 @@ class IoUTracker:
         # same object's colour can shift (a close car fills the frame, lighting
         # changes), so the min similarity is relaxed for brief gaps where the
         # geometric prediction is still trustworthy.
-        appearance_min = _REASSOC_APPEARANCE_MIN if gap > 0.7 else 0.18
+        appearance_min = _REID_APPEARANCE_MIN if gap > 0.7 else 0.18
         similarity = _appearance_similarity(lost.appearance, det_appearance)
         if similarity is not None:
             if similarity < appearance_min:

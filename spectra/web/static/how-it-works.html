@@ -106,7 +106,7 @@
             </button>
             <button type="button" class="flow-node flow-node--link" data-doc-open="motion-depth" data-module="motion-depth">
               <h5>Depth Anything V2 Metric VKITTI</h5>
-              <p>Produces metric depth for distance, nearness and collision ETA.</p>
+              <p>Produces metric depth for distance_m, proximity_score and collision_ttc_sec.</p>
               <span class="flow-jump">Details</span>
             </button>
           </div>
@@ -131,13 +131,13 @@
           <h3>Per-Object Risk Evaluation</h3>
           <div class="pipeline-steps">
             <button type="button" class="flow-node flow-node--hub flow-node--link" data-doc-open="per-object-risk" data-module="risk">
-              <h5>Collision ETA</h5>
-              <p>Uses depth distance and closing speed to produce the physical ETA shown in the UI.</p>
+              <h5>Collision TTC</h5>
+              <p>Uses depth distance and closing speed to produce the physical collision_ttc_sec shown in the UI.</p>
               <span class="flow-jump">Details</span>
             </button>
             <button type="button" class="flow-node flow-node--hub flow-node--link" data-doc-open="per-object-risk" data-module="risk">
               <h5>Risk Score</h5>
-              <p>Combines ETA pressure, proximity, approach, lane relevance and brake cue.</p>
+              <p>Combines ttc_score, proximity_score, approach_score, corridor_score and brake_score.</p>
               <span class="flow-jump">Details</span>
             </button>
           </div>
@@ -300,7 +300,7 @@
         <div class="pipeline-group pipeline-group--single">
           <h3>Risk Handoff</h3>
           <div class="pipeline-steps">
-            <article class="flow-node flow-node--hub" data-module="detection" data-route="Feeds Depth / Kalman Distance, BBox Expansion, Flow TTC and Lane Crossing Risk."><h5>Tracked Object Stream</h5><p>Stable per-object tracks move forward into per-object risk scoring.</p></article>
+            <article class="flow-node flow-node--hub" data-module="detection" data-route="Feeds Depth / Kalman Distance, BBox Expansion, Flow TTC and Corridor Score."><h5>Tracked Object Stream</h5><p>Stable per-object tracks move forward into per-object risk scoring.</p></article>
           </div>
         </div>
       </div>
@@ -359,7 +359,7 @@
           <h3>Motion + Depth Models</h3>
           <div class="pipeline-steps pipeline-steps--two">
             <article class="flow-node" data-module="motion-depth" data-route="Feeds Optical Flow and downstream Flow TTC."><h5>OpenCV DIS Optical Flow</h5><p>Computes dense optical flow classically on grayscale frames with ego-motion compensation.</p></article>
-            <article class="flow-node" data-module="motion-depth" data-route="Feeds Depth Estimation, metric distance and downstream Collision ETA."><h5>Depth Anything V2 Metric VKITTI</h5><p>Runs the required ONNX metric depth model and produces depth in meters.</p></article>
+            <article class="flow-node" data-module="motion-depth" data-route="Feeds Depth Estimation, metric distance and downstream collision_ttc_sec."><h5>Depth Anything V2 Metric VKITTI</h5><p>Runs the required ONNX metric depth model and produces depth in meters.</p></article>
           </div>
         </div>
         <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
@@ -369,7 +369,7 @@
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Quick Motion Risk, Flow TTC, Approach Score and flow confidence."><h5>Optical Flow</h5><p>Computes frame-to-frame motion with DIS flow and ego-motion compensation.</p></article>
             <article class="flow-node" data-module="motion-depth" data-route="Feeds Adaptive Depth Refresh scheduling."><h5>Quick Motion Risk</h5><p>Uses inexpensive flow evidence to decide whether depth should run early.</p></article>
             <article class="flow-node" data-module="motion-depth" data-route="Feeds Depth Estimation timing."><h5>Adaptive Depth Refresh</h5><p>Runs depth initially, periodically, and when motion risk crosses the refresh threshold.</p></article>
-            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Depth / Kalman Distance, Collision ETA, Proximity Score and depth confidence."><h5>Depth Estimation</h5><p>Builds metric scene depth for object distance and closing-speed estimates.</p></article>
+            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Depth / Kalman Distance, collision_ttc_sec, proximity_score and depth_confidence."><h5>Depth Estimation</h5><p>Builds metric scene depth for object distance and closing-speed estimates.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Lane-Relevance Filter as the near-object map."><h5>Near Map</h5><p>Converts metric depth into a normalized nearness map for filtering nearby objects.</p></article>
           </div>
         </div>
@@ -377,11 +377,11 @@
         <div class="pipeline-group pipeline-group--hub">
           <h3>Per-Object Risk Evaluation</h3>
           <div class="pipeline-steps">
-            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Collision ETA, Proximity Score, Approach Score and depth TTC."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and range rate per track.</p></article>
+            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds collision_ttc_sec, proximity_score, approach_score and depth TTC."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and range rate per track.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds TTC Fusion as the expansion TTC cue."><h5>BBox Expansion</h5><p>Measures object scale growth and smooths it across track history.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds TTC Fusion as the optical-flow TTC cue."><h5>Flow TTC</h5><p>Estimates collision time from radial motion around the vanishing point.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds TTC agreement, confidence and lane crossing horizon."><h5>TTC Fusion</h5><p>Combines depth, flow and expansion cues with confidence and agreement scoring.</p></article>
-            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds ETA Pressure, state escalation and the UI collision ETA display."><h5>Collision ETA</h5><p>Uses depth distance and closing speed as the physical ETA displayed to the user.</p></article>
+            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds ttc_score, state escalation and the UI collision_ttc_sec display."><h5>Collision TTC</h5><p>Uses depth distance and closing speed as the physical TTC displayed to the user.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Risk Score proximity."><h5>Proximity Score</h5><p>Scores proximity as part of the final risk decision.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Risk Score approach."><h5>Approach Score</h5><p>Scores approach as part of the final risk decision.</p></article>
           </div>
@@ -419,14 +419,14 @@
             0 = center, ±1 = boundary, ±2 = one lane away
           </div>
           <div class="doc-formula">
-            <div class="doc-formula__label">Crossing risk</div>
+            <div class="doc-formula__label">Corridor score</div>
             lateral_v = median Δlane_pos / Δt over recent track history<br>
             predicted_pos = lane_pos + lateral_v × min(fused_ttc, 3)<br>
             margin = max(0, |predicted_pos| − 0.6)<br>
             lane_trust = clamp((lane_conf − 0.25) / 0.60, 0, 1)<br>
             far_reliability = 0.40 + 0.60 × depth_frac<br>
             predicted = exp(−margin² / 0.25) × lane_trust × far_reliability<br>
-            <b>crossing_risk</b> = clamp(max(corridor_overlap, predicted), 0, 1)
+            <b>corridor_score</b> = clamp(max(corridor_overlap, predicted), 0, 1)
           </div>
         </div>
         <div class="pipeline-group">
@@ -451,10 +451,10 @@
         <div class="pipeline-group pipeline-group--hub">
           <h3>Per-Object Risk Evaluation</h3>
           <div class="pipeline-steps">
-            <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds lane evidence, cut-in motion and lane crossing risk."><h5>Lane Position</h5><p>Places each object relative to ego-lane center and width at its own image row.</p></article>
-            <article class="flow-node" data-module="lane" data-route="Feeds Lane Crossing Risk as an in-corridor floor."><h5>Corridor Overlap</h5><p>Measures whether the object footprint overlaps the ego corridor.</p></article>
-            <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds Lane Crossing Risk and object direction."><h5>Cut-In Motion</h5><p>Uses track history to estimate whether the object is moving into the lane.</p></article>
-            <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds Lane Relevance and the Risk Score crossing factor."><h5>Lane Crossing Risk</h5><p>Predicts whether the object will be in the ego lane at impact time.</p></article>
+            <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds lane evidence, cut-in motion and corridor_score."><h5>Lane Position</h5><p>Places each object relative to ego-lane center and width at its own image row.</p></article>
+            <article class="flow-node" data-module="lane" data-route="Feeds corridor_score as an in-corridor floor."><h5>Corridor Overlap</h5><p>Measures whether the object footprint overlaps the ego corridor.</p></article>
+            <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds corridor_score and object direction."><h5>Cut-In Motion</h5><p>Uses track history to estimate whether the object is moving into the lane.</p></article>
+            <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds Lane Relevance and the Risk Score corridor factor."><h5>Corridor Score</h5><p>Predicts whether the object will be in the ego lane at impact time.</p></article>
             <article class="flow-node flow-node--hub" data-module="lane" data-route="Feeds Risk Score as the multiplicative lane gate."><h5>Lane Relevance</h5><p>Multiplies the risk score by the in-path probability instead of adding it as a separate cue.</p></article>
           </div>
         </div>
@@ -490,7 +490,7 @@
             <span class="formula-var formula-var--shared">ttc_flow</span> = distance_from_vp / radial_p75 × flow_dt<br>
             valid TTC cues are clamped to [0.15s, 15.0s]<br>
             <span class="formula-var formula-var--shared">fused_ttc</span> = weighted_median(valid cues, cue_confidence)<br>
-            <b>eta_pressure</b>(ttc_depth) = clamp((3 − ttc_depth) / 3, 0, 1)
+            <b>ttc_score</b>(ttc_depth) = clamp((3 − ttc_depth) / 3, 0, 1)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Cue agreement</div>
@@ -501,34 +501,34 @@
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Proximity + approach</div>
-            <span class="formula-var formula-var--shared">proximity</span> = 1 if distance_m ≤ 8<br>
-            proximity = 0 if distance_m ≥ 60<br>
-            proximity = clamp((60 − distance_m) / 52, 0, 1) otherwise<br>
+            <span class="formula-var formula-var--shared">proximity_score</span> = 1 if distance_m ≤ 8<br>
+            proximity_score = 0 if distance_m ≥ 60<br>
+            proximity_score = clamp((60 − distance_m) / 52, 0, 1) otherwise<br>
             metric = clamp((closing_mps − 0.30) / (12.0 − 0.30), 0, 1)<br>
             expansion = clamp(expansion_rate / 0.6, 0, 1)<br>
             flow = clamp(flow_magnitude_p75, 0, 1)<br>
-            <b>approach</b> = class_weight × (0.50 × metric + 0.30 × expansion + 0.20 × flow)
+            <b>approach_score</b> = class_weight × (0.50 × metric + 0.30 × expansion + 0.20 × flow)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Confidence (gate input)</div>
             raw_confidence = clamp(0.70 × detection_confidence + 0.30 × lane_confidence, 0, 1)<br>
             agreement_gate = 0.70 + 0.30 × ttc_agreement<br>
-            <span class="formula-var formula-var--shared">confidence</span> = EMA(raw_confidence × agreement_gate)<br>
+            <span class="formula-var formula-var--shared">risk_confidence</span> = EMA(raw_confidence × agreement_gate)<br>
             detection_confidence still controls the low-confidence SAFE override
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Risk score</div>
-            <span class="formula-var formula-var--shared">signal</span> = 0.40 × eta_pressure + 0.30 × proximity + 0.25 × approach + 0.05 × brake<br>
-            <span class="formula-var formula-var--shared">gate</span> = 0.65 + 0.35 × confidence<br>
-            <span class="formula-var formula-var--shared">relevance</span> = crossing_risk<br>
-            <b>risk.score</b> = round(gate × relevance × signal, 3)
+            <span class="formula-var formula-var--shared">signal</span> = 0.40 × ttc_score + 0.30 × proximity_score + 0.25 × approach_score + 0.05 × brake_score<br>
+            <span class="formula-var formula-var--shared">gate</span> = 0.65 + 0.35 × risk_confidence<br>
+            <span class="formula-var formula-var--shared">relevance</span> = corridor_score<br>
+            <b>risk.risk_score</b> = round(gate × relevance × signal, 3)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">State banding</div>
-            raw_state = DANGER if risk.score ≥ 0.60<br>
-            raw_state = CAUTION if risk.score ≥ 0.25<br>
+            raw_state = DANGER if risk.risk_score ≥ 0.60<br>
+            raw_state = CAUTION if risk.risk_score ≥ 0.25<br>
             raw_state = SAFE otherwise<br>
-            escalate → DANGER if ttc_depth &lt; 1.0s in ≥2 recent frames and risk.score ≥ 0.25,
+            escalate → DANGER if ttc_depth &lt; 1.0s in ≥2 recent frames and risk.risk_score ≥ 0.25,
             and the imminent reading is corroborated (distance ≤ 12m, or the three TTC cues
             agree ≥ 0.5) — blocks a young depth-Kalman track's non-physical closing speed
             from snapping a distant vehicle to DANGER<br>
@@ -539,20 +539,20 @@
         <div class="pipeline-group">
           <h3>TTC Cues</h3>
           <div class="pipeline-steps">
-            <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and Collision ETA."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and closing speed from metric depth (the physical backbone).</p></article>
+            <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and collision_ttc_sec."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and closing speed from metric depth (the physical backbone).</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the visual expansion cue and the approach term."><h5>BBox Expansion</h5><p>Measures object scale growth across track history as a visual approach cue.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the optical-flow cue."><h5>Flow TTC</h5><p>Estimates time-to-collision from radial optical flow around the vanishing point.</p></article>
             <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds TTC agreement, confidence damping and the lane-crossing prediction horizon."><h5>TTC Fusion</h5><p>Blends the depth, flow and expansion cues with a confidence-weighted median for internal risk timing.</p></article>
-            <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds ETA Pressure and the physical collision ETA displayed to the user."><h5>Collision ETA</h5><p>Uses depth distance and closing speed for the physical ETA shown in the UI.</p></article>
+            <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds ttc_score and the physical collision_ttc_sec displayed to the user."><h5>Collision TTC</h5><p>Uses depth distance and closing speed for the physical TTC shown in the UI.</p></article>
           </div>
         </div>
         <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
         <div class="pipeline-group">
           <h3>Signal Terms</h3>
           <div class="pipeline-steps">
-            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.40."><h5>ETA Pressure</h5><p>Scores how little physical depth-based collision time remains.</p></article>
-            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.30."><h5>Proximity</h5><p>Scores how close the object already is from metric depth.</p></article>
-            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.25."><h5>Approach</h5><p>Scores how strongly distance is closing from closing speed, expansion and flow.</p></article>
+            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.40."><h5>TTC Score</h5><p>Scores how little physical depth-based collision time remains.</p></article>
+            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.30."><h5>Proximity Score</h5><p>Scores how close the object already is from metric depth.</p></article>
+            <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.25."><h5>Approach Score</h5><p>Scores how strongly distance is closing from closing speed, expansion and flow.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds the signal sum at weight 0.05."><h5>Brake Light Cue</h5><p>Adds a small early warning from lead-vehicle brake lamps.</p></article>
           </div>
         </div>
@@ -561,8 +561,8 @@
           <h3>Gates + Score</h3>
           <div class="pipeline-steps">
             <article class="flow-node" data-module="risk" data-route="Feeds the confidence gate (0.65 + 0.35 × confidence)."><h5>Confidence Smoothing</h5><p>Stabilizes per-track confidence used by the trust gate and display.</p></article>
-            <article class="flow-node" data-module="risk" data-route="Multiplies the whole score by detection and lane-geometry reliability."><h5>Confidence Gate</h5><p>Scales the score so low-trust detections cannot dominate the result.</p></article>
-            <article class="flow-node flow-node--hub" data-module="risk" data-route="Multiplies the whole score by in-path probability (crossing risk)."><h5>Lane Relevance</h5><p>Gates the entire score by the probability the object is in the ego lane at impact.</p></article>
+            <article class="flow-node" data-module="risk" data-route="Multiplies the whole score by detection and lane-geometry reliability."><h5>Risk Confidence Gate</h5><p>Scales the score so low-trust detections cannot dominate the result.</p></article>
+            <article class="flow-node flow-node--hub" data-module="risk" data-route="Multiplies the whole score by in-path probability (corridor_score)."><h5>Lane Relevance</h5><p>Gates the entire score by the probability the object is in the ego lane at impact.</p></article>
             <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds State From Score and the saved-event ranking, then the Decision + Delivery stage."><h5>Risk Score</h5><p>Produces the continuous object risk score from 0 to 1.</p></article>
           </div>
         </div>
@@ -596,7 +596,7 @@
             eligible if state ≥ CAUTION, or |lane_pos| ≤ 1<br>
             SAFE off-corridor eligible only when moving inward and predicted inside lane<br>
             <span class="formula-var formula-var--shared">primary</span> = argmax eligible objects by<br>
-            (risk.score, state_severity, eta_pressure)
+            (risk.risk_score, state_severity, ttc_score)
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">State stabilization</div>
@@ -619,7 +619,7 @@
           </div>
           <div class="doc-formula">
             <div class="doc-formula__label">Saved events</div>
-            event_score = primary_risk_score if present, else risk_score<br>
+            event_score = raw_primary_score if present, else risk_score<br>
             dedup if |timestamp − saved.timestamp| ≤ 1.0s<br>
             stronger event_score replaces weaker event in the window<br>
             keep top-N saved events by event_score<br>

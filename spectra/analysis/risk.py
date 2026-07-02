@@ -1,8 +1,8 @@
-"""Object-centric collision ETA and risk evaluation.
+"""Object-centric collision TTC and risk evaluation.
 
 Spectra keeps two outputs separate:
 
-    1. Collision ETA — physical time-to-collision from depth + longitudinal
+    1. Collision TTC — physical time-to-collision from depth + longitudinal
        Kalman only.
     2. Risk evaluation — proximity, approach, lane crossing, detector
        confidence, brake lights and visual motion cues.
@@ -38,31 +38,30 @@ class TtcComponent:
 class RiskEvent:
     frame_index: int
     timestamp_sec: float
-    state: str
-    # Physical collision ETA from depth + Kalman only. Visual TTC hints may
+    raw_state: str
+    # Physical collision TTC from depth + Kalman only. Visual TTC hints may
     # still be used internally for risk classification, but they must not be
     # surfaced through this field.
-    ttc_sec: float | None
+    collision_ttc_sec: float | None
     direction: str
     lane: str
     object_type: str | None
-    confidence: float
-    near_score: float
-    velocity_magnitude: float
-    closing_speed: float
+    risk_confidence: float
+    proximity_score: float
+    radial_flow_score: float
+    approach_score: float
     bbox: tuple[int, int, int, int] | None
     reason: str
     object_id: int | None = None
     display_id: int | None = None
     expansion_rate: float = 0.0
     lateral_velocity_norm: float = 0.0
-    crossing_risk: float = 0.0
+    corridor_score: float = 0.0
     lane_position: float = 0.0
     ttc_components: tuple[TtcComponent, ...] = ()
     brake_score: float = 0.0
     distance_m: float | None = None
     closing_mps: float | None = None
-    depth_ttc_sec: float | None = None
     detection_confidence: float = 0.0
     depth_confidence: float = 0.0
     # Reliability transparency: already-computed cue confidences that previously
@@ -137,9 +136,9 @@ _IMMINENT_MIN_AGREEMENT = 0.5       # otherwise the TTC cues must corroborate
 
 # A vehicle we are *passing* (stopped traffic in an adjacent lane) has a real
 # relative closing speed but no forward-collision course: its lane relevance is
-# near zero. Surfacing its depth TTC as a "collision ETA" is misleading — it
+# near zero. Surfacing its depth TTC as a "collision_ttc_sec" is misleading — it
 # reads "0.4s" while the object is correctly SAFE. Below this lane-relevance the
-# collision ETA is withheld (shown as "—"); the risk SCORE and SAFE/DANGER band
+# collision_ttc_sec is withheld (shown as "—"); the risk SCORE and SAFE/DANGER band
 # are unchanged (they still use the physical TTC internally).
 _ETA_SURFACE_MIN_CROSSING = 0.15
 
@@ -620,7 +619,7 @@ def lane_lateral_velocity(
     return float(np.clip(median_v, -_LATERAL_MAX_LANE_PER_SEC, _LATERAL_MAX_LANE_PER_SEC))
 
 
-def lane_crossing_risk(
+def lane_corridor_score(
     track: Track,
     lane: LaneFrame,
     fused_ttc: Optional[float],
@@ -693,11 +692,11 @@ class ExpansionSmoother:
 
 
 class ConfidenceSmoother:
-    """Per-track EMA of the displayed fused confidence.
+    """Per-track EMA of fused risk confidence.
 
-    Smooths the confidence value shown in the UI / telemetry so it doesn't jump
-    frame-to-frame with raw YOLO confidence. Purely cosmetic — the raw
-    detection confidence still drives ``state_from_score``.
+    Smooths the value used by ``score_raw`` and surfaced as
+    ``confidence.risk_confidence``. Raw detection confidence still drives the
+    low-confidence SAFE gate in ``state_from_score``.
     """
 
     def __init__(self) -> None:
@@ -802,7 +801,7 @@ def _unit_interval(value: float | int | None) -> float:
     return float(np.clip(0.0 if value is None else float(value), 0.0, 1.0))
 
 
-def eta_pressure(ttc_sec: float | None) -> float:
+def ttc_score(ttc_sec: float | None) -> float:
     if ttc_sec is None:
         return 0.0
     return _unit_interval((_CAUTION_TTC_SEC - float(ttc_sec)) / _CAUTION_TTC_SEC)
@@ -810,15 +809,15 @@ def eta_pressure(ttc_sec: float | None) -> float:
 
 def score_raw(
     ttc_sec: float | None,
-    near_score: float,
-    closing_speed: float,
-    crossing_risk: float = 0.0,
-    brake: float = 0.0,
-    confidence: float = 1.0,
+    proximity_score: float,
+    approach_score: float,
+    corridor_score: float = 0.0,
+    brake_score: float = 0.0,
+    risk_confidence: float = 1.0,
 ) -> float:
     """Single canonical Risk Score in [0, 1].
 
-    Lane relevance (``crossing_risk``) is a *multiplicative gate*, not an
+    Lane relevance (``corridor_score``) is a *multiplicative gate*, not an
     additive term: an object that is not in our path (relevance ~0) scores ~0
     no matter how close or fast it is. This is what keeps a near/fast off-path
     vehicle from reading DANGER. The score is independent of the discrete state
@@ -826,29 +825,29 @@ def score_raw(
     there is no state floor and no circular dependency.
 
         signal    = 0.40·eta + 0.30·proximity + 0.25·approach + 0.05·brake
-        gate      = 0.65 + 0.35·confidence
-        relevance = crossing_risk            (probability in ego lane at impact)
+        gate      = 0.65 + 0.35·risk_confidence
+        relevance = corridor_score           (probability in ego lane at impact)
         score     = gate · relevance · signal
     """
     signal = (
-        (0.40 * eta_pressure(ttc_sec))
-        + (0.30 * _unit_interval(near_score))
-        + (0.25 * _unit_interval(closing_speed))
-        + (0.05 * _unit_interval(brake))
+        (0.40 * ttc_score(ttc_sec))
+        + (0.30 * _unit_interval(proximity_score))
+        + (0.25 * _unit_interval(approach_score))
+        + (0.05 * _unit_interval(brake_score))
     )
-    confidence_gate = 0.65 + (0.35 * _unit_interval(confidence))
-    relevance = _unit_interval(crossing_risk)
+    confidence_gate = 0.65 + (0.35 * _unit_interval(risk_confidence))
+    relevance = _unit_interval(corridor_score)
     return round(float(confidence_gate * relevance * signal), 3)
 
 
 def score_event(event: RiskEvent) -> float:
     return score_raw(
-        event.ttc_sec,
-        event.near_score,
-        event.closing_speed,
-        crossing_risk=event.crossing_risk,
-        brake=event.brake_score,
-        confidence=event.confidence,
+        event.collision_ttc_sec,
+        event.proximity_score,
+        event.approach_score,
+        corridor_score=event.corridor_score,
+        brake_score=event.brake_score,
+        risk_confidence=event.risk_confidence,
     )
 
 
@@ -916,7 +915,7 @@ def state_from_score(
 ) -> str:
     """Derive SAFE/CAUTION/DANGER from the Risk Score band.
 
-    The score already folds in ETA pressure, proximity, approach, brake and the
+    The score already folds in ttc_score, proximity, approach, brake and the
     lane-relevance gate, so the status needs no extra spatial inputs. The only
     override is imminence: a confirmed TTC < 1s on an already-risky object
     (score at least in the CAUTION band) snaps straight to DANGER rather than
@@ -1067,7 +1066,6 @@ def calculate_track_risk(
     *,
     track: Track,
     depth_m: np.ndarray,
-    near_map: np.ndarray,
     flow: np.ndarray,
     magnitude_norm: np.ndarray,
     lane: LaneFrame,
@@ -1120,7 +1118,7 @@ def calculate_track_risk(
 
     risk_time_hint, components = fuse_ttc([expansion_component, flow_component, depth_component])
     physical_ttc = depth_component.value
-    crossing = lane_crossing_risk(track, lane, risk_time_hint)
+    corridor_score = lane_corridor_score(track, lane, risk_time_hint)
     lateral_v = lane_lateral_velocity(track, lane)
 
     class_weight = CLASS_RISK_WEIGHT.get(track.class_name, 1.0)
@@ -1134,7 +1132,7 @@ def calculate_track_risk(
         class_weight=class_weight,
     )
 
-    detection_confidence = float(np.clip(track.confidence, 0.0, 1.0))
+    detection_confidence = float(np.clip(track.detection_confidence, 0.0, 1.0))
     # Confidence = "how trustworthy is this measurement": YOLO detection
     # confidence weighted by lane geometry trust. Crossing/expansion are
     # risk-relevance signals, not trust signals, so they no longer feed in.
@@ -1167,9 +1165,9 @@ def calculate_track_risk(
         physical_ttc,
         near_score,
         closing_speed,
-        crossing_risk=crossing,
-        brake=brake,
-        confidence=fused_confidence,
+        corridor_score=corridor_score,
+        brake_score=brake,
+        risk_confidence=fused_confidence,
     )
     state = state_from_score(
         score,
@@ -1188,22 +1186,22 @@ def calculate_track_risk(
     return RiskEvent(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
-        state=state,
-        ttc_sec=physical_ttc,
+        raw_state=state,
+        collision_ttc_sec=physical_ttc,
         direction=direction_from_lateral(lateral_v),
         lane=lane_bucket_from_position(pos),
         object_type=track.class_name,
-        confidence=round(fused_confidence, 3),
-        near_score=round(near_score, 3),
-        velocity_magnitude=round(velocity_magnitude, 3),
-        closing_speed=round(closing_speed, 3),
+        risk_confidence=round(fused_confidence, 3),
+        proximity_score=round(near_score, 3),
+        radial_flow_score=round(velocity_magnitude, 3),
+        approach_score=round(closing_speed, 3),
         bbox=bbox,
         reason=reason,
         object_id=track.track_id,
         display_id=track.display_id if track.display_id is not None else track.track_id,
         expansion_rate=round(float(expansion_rate), 3),
         lateral_velocity_norm=round(float(lateral_v), 3),
-        crossing_risk=round(float(crossing), 3),
+        corridor_score=round(float(corridor_score), 3),
         lane_position=round(float(pos), 3),
         ttc_components=tuple(components),
         brake_score=round(float(brake), 3),
@@ -1214,7 +1212,6 @@ def calculate_track_risk(
         lane_confidence=round(float(np.clip(lane.confidence, 0.0, 1.0)), 3),
         flow_confidence=round(float(np.clip(flow_component.confidence, 0.0, 1.0)), 3),
         ttc_agreement=round(float(agreement), 3),
-        depth_ttc_sec=depth_component.value,
     )
 
 
@@ -1223,9 +1220,9 @@ def calculate_track_risk(
 
 def is_imminent_danger(event: RiskEvent) -> bool:
     return (
-        event.state == "DANGER"
-        and event.ttc_sec is not None
-        and event.ttc_sec <= _DANGER_TTC_SEC
+        event.raw_state == "DANGER"
+        and event.collision_ttc_sec is not None
+        and event.collision_ttc_sec <= _DANGER_TTC_SEC
     )
 
 
@@ -1252,7 +1249,7 @@ def stabilized_event_state(
         stabilizer.counter = 0
         return "DANGER"
 
-    return stabilizer.process(event.state, fast_clear=fast_clear)
+    return stabilizer.process(event.raw_state, fast_clear=fast_clear)
 
 
 class StateStabilizer:
@@ -1308,22 +1305,22 @@ def make_safe_event(
     return RiskEvent(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
-        state="SAFE",
-        ttc_sec=None,
+        raw_state="SAFE",
+        collision_ttc_sec=None,
         direction="center",
         lane="center",
         object_type=None,
-        confidence=0.0,
-        near_score=0.0,
-        velocity_magnitude=0.0,
-        closing_speed=0.0,
+        risk_confidence=0.0,
+        proximity_score=0.0,
+        radial_flow_score=0.0,
+        approach_score=0.0,
         bbox=None,
         reason="no objects detected",
         object_id=None,
     )
 
 
-def compute_quick_risk(flow: FlowResult, width: int, height: int) -> float:
+def compute_quick_risk(flow: FlowResult) -> float:
     """Frame-level motion risk used to decide when to recompute depth."""
 
     motion_signal = (0.65 * flow.magnitude_norm) + (0.35 * flow.divergence_norm)
@@ -1383,7 +1380,7 @@ def build_object_events(
                 fields.lane.vanishing_point,
                 fields.flow_dt_sec,
             )
-            depth_component, _distance_m, _closing_mps = ttc_from_depth_delta(
+            depth_component, _, _ = ttc_from_depth_delta(
                 track.track_id,
                 track.bbox,
                 fields.depth.depth_m,
@@ -1401,7 +1398,6 @@ def build_object_events(
         event = calculate_track_risk(
             track=track,
             depth_m=fields.depth.depth_m,
-            near_map=fields.depth.near_map,
             flow=fields.flow.flow,
             magnitude_norm=fields.flow.magnitude_norm,
             lane=fields.lane,
@@ -1443,8 +1439,8 @@ def build_object_events(
         eligible,
         key=lambda e: (
             score_event(e),
-            {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(e.state, 0.0),
-            eta_pressure(e.ttc_sec),
+            {"SAFE": 0.0, "CAUTION": 1.0, "DANGER": 2.0}.get(e.raw_state, 0.0),
+            ttc_score(e.collision_ttc_sec),
         ),
     )
     return primary, events
@@ -1460,7 +1456,7 @@ def _primary_eligible(event: RiskEvent) -> bool:
     # front at low TTC is dangerous regardless of where it lands laterally; the
     # intent gate below is only meant to keep *calm* (SAFE) off-corridor traffic
     # from winning primary selection, never to suppress a real threat.
-    if event.state in ("CAUTION", "DANGER"):
+    if event.raw_state in ("CAUTION", "DANGER"):
         return True
     pos = float(event.lane_position)
     if abs(pos) <= 1.0:

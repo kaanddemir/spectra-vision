@@ -146,7 +146,7 @@
     <input id="source-file" name="file" type="file" accept=".mp4,.mov,.avi,.mkv,.m4v">
     <input type="hidden" name="mode" value="video">
     <input type="hidden" name="max_processed_frames" value="">
-    <input type="hidden" name="max_saved_events" value="20">
+    <input type="hidden" name="max_saved_events" value="25">
     <input type="hidden" name="resize_max_side" value="512">
     <input type="hidden" name="depth_every" value="10">
     <input type="hidden" name="adaptive_depth" value="1">
@@ -496,7 +496,7 @@
 
               <div class="hero-metrics">
                 <div class="hero-metric">
-                  <span class="hero-metric-lbl">Collision ETA
+                  <span class="hero-metric-lbl">Collision TTC
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
                       <div class="tooltip-content">Physical time to collision from metric depth: distance divided by closing speed. It appears only when the object is closing with enough depth confidence.</div>
@@ -508,17 +508,17 @@
                   <span class="hero-metric-lbl">Risk Score
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">A 0–100 score for the selected object. It combines ETA pressure, proximity, approach and brake cues, then applies lane relevance and confidence.</div>
+                      <div class="tooltip-content">A 0–100 score for the selected object. It combines TTC score, proximity_score, approach_score and brake_score cues, then applies corridor_score and risk_confidence.</div>
                     </span>
                   </span>
                   <strong class="hero-metric-val" id="risk-score-main">—</strong>
                 </div>
               </div>
 
-              <h3 class="risk-factors-title builds-title">What builds the Collision ETA
+              <h3 class="risk-factors-title builds-title">What builds collision_ttc_sec
                 <span class="info-tip">
                   <svg><use href="#icon-info"></use></svg>
-                  <div class="tooltip-content">Collision ETA uses only longitudinal motion from depth: distance and closing speed. Lane position affects the Risk Score, not the ETA calculation.</div>
+                  <div class="tooltip-content">collision_ttc_sec uses only longitudinal motion from depth: distance_m and closing_mps. lane_position affects risk_score, not the TTC calculation.</div>
                 </span>
               </h3>
               <div class="eta-builder signal-bars">
@@ -554,10 +554,10 @@
                 </h3>
                 <div class="signal-bars">
                   <div class="signal-row" data-signal="eta">
-                    <span class="signal-label">ETA pressure <span class="signal-weight">40%</span></span>
+                    <span class="signal-label">TTC Score <span class="signal-weight">40%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">How close the Collision ETA is to the 3s caution horizon. Shorter ETA creates more pressure; no closing motion produces no ETA pressure.</div>
+                      <div class="tooltip-content">How close collision_ttc_sec is to the 3s caution horizon. Shorter TTC creates more pressure; no closing motion produces no TTC score.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-eta" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-eta-value">—</span>
@@ -605,7 +605,7 @@
                     <span class="signal-label">Confidence</span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content" id="confidence-breakdown">Overall confidence scales the final Risk Score using detection, tracking and depth reliability.</div>
+                      <div class="tooltip-content" id="confidence-breakdown">Overall confidence scales the final Risk Score using detection confidence, lane trust and TTC cue agreement.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-confidence" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-confidence-value">—</span>
@@ -620,11 +620,11 @@
                       <div class="evidence-row"><span>State</span><span id="ev-fusion-state">—</span></div>
                       <div class="evidence-row"><span>Primary Object</span><span id="ev-decision-primary">—</span></div>
                       <div class="evidence-row"><span>Risk Score</span><span id="ev-fusion-score">—</span></div>
-                      <div class="evidence-row"><span>Collision ETA</span><span id="ev-fusion-eta">—</span></div>
+                      <div class="evidence-row"><span>Collision TTC</span><span id="ev-fusion-eta">—</span></div>
                     </div>
                     <div class="evidence-group evidence-group--object-risk">
                       <span class="evidence-group-lbl">Per-Object Risk Evaluation</span>
-                      <div class="evidence-row"><span>ETA Pressure</span><span id="ev-fusion-eta-pressure">—</span></div>
+                      <div class="evidence-row"><span>TTC Score</span><span id="ev-fusion-eta-pressure">—</span></div>
                       <div class="evidence-row"><span>Proximity</span><span id="ev-depth-proximity">—</span></div>
                       <div class="evidence-row"><span>Approach</span><span id="ev-fusion-approach">—</span></div>
                       <div class="evidence-row"><span>Lane Relevance</span><span id="ev-risk-lane-relevance">—</span></div>
@@ -645,7 +645,7 @@
                       <span class="evidence-group-lbl">Lane Pipeline</span>
                       <div class="evidence-row"><span>Lane Bucket</span><span id="ev-lane-bucket">—</span></div>
                       <div class="evidence-row"><span>Lane Position</span><span id="ev-lane-pos">—</span></div>
-                      <div class="evidence-row"><span>Lane Crossing Risk</span><span id="ev-lane-crossing">—</span></div>
+                      <div class="evidence-row"><span>Corridor Score</span><span id="ev-lane-crossing">—</span></div>
                       <div class="evidence-row"><span>Lane Confidence</span><span id="ev-lane-conf">—</span></div>
                     </div>
                     <div class="evidence-group evidence-group--detection">
@@ -953,22 +953,10 @@
               </div>
               <em class="setting-help" data-setting-help="flow_every">Motion every frame</em>
             </label>
-            <label class="drawer-row settings-panel">
-              <span>Analysis Resolution</span>
-              <div class="segmented-control" data-param="resize_max_side">
-                <button type="button" class="segmented-btn" data-value="128">128</button>
-                <button type="button" class="segmented-btn" data-value="256">256</button>
-                <button type="button" class="segmented-btn" data-value="384">384</button>
-                <button type="button" class="segmented-btn active" data-value="512">512</button>
-                <button type="button" class="segmented-btn" data-value="768">768</button>
-                <button type="button" class="segmented-btn" data-value="1024">1024</button>
-              </div>
-              <em class="setting-help" data-setting-help="resize_max_side">Higher is sharper, slower</em>
-            </label>
             <label class="drawer-row settings-panel settings-panel--wide">
               <span>Saved Events</span>
               <input id="max-saved-events-input" data-param="max_saved_events" type="number" min="1" max="50" step="1"
-                value="20">
+                value="25">
               <em class="setting-help">Keep up to 50 ranked events</em>
             </label>
           </div>

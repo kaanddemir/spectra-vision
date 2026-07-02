@@ -652,7 +652,7 @@
   box-shadow: none;
 }
 
-/* Twin hero: Collision ETA + Risk Score in one bordered card */
+/* Twin hero: Collision TTC + Risk Score in one bordered card */
 .hero-metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;

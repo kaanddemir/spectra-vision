@@ -52,7 +52,7 @@ def _track(track_id, bbox, t=1.0, prior_bbox=None, prior_t=0.7):
     track = Track(
         track_id=track_id,
         class_name="car",
-        confidence=0.9,
+        detection_confidence=0.9,
         bbox=bbox,
         frame_index=int(t * 30),
         timestamp_sec=float(t),
@@ -116,14 +116,14 @@ def test_no_tracks_returns_single_safe_event():
         depth_smoother=DepthDeltaSmoother(),
     )
 
-    assert primary.state == "SAFE"
+    assert primary.raw_state == "SAFE"
     assert primary.bbox is None
     assert events == [primary]
 
 
 def test_lane_relevance_gate_keeps_off_path_score_low():
-    in_path = score_raw(None, near_score=0.8, closing_speed=0.8, crossing_risk=0.9, confidence=0.9)
-    off_path = score_raw(None, near_score=0.8, closing_speed=0.8, crossing_risk=0.02, confidence=0.9)
+    in_path = score_raw(None, proximity_score=0.8, approach_score=0.8, corridor_score=0.9, risk_confidence=0.9)
+    off_path = score_raw(None, proximity_score=0.8, approach_score=0.8, corridor_score=0.02, risk_confidence=0.9)
 
     assert in_path > off_path
     assert off_path < 0.05
@@ -133,7 +133,6 @@ def test_static_side_lane_object_stays_safe():
     event = calculate_track_risk(
         track=_track(1, (270, 130, 298, 190)),
         depth_m=_depth(distance=50.0, near=0.2).depth_m,
-        near_map=_depth(distance=50.0, near=0.2).near_map,
         flow=_flow().flow,
         magnitude_norm=_flow().magnitude_norm,
         lane=_lane(),
@@ -145,7 +144,7 @@ def test_static_side_lane_object_stays_safe():
         timestamp_sec=1.0,
     )
 
-    assert event.state == "SAFE"
+    assert event.raw_state == "SAFE"
     assert abs(event.lane_position) > 1.0
 
 
@@ -184,4 +183,4 @@ def test_build_object_events_selects_in_path_risk_over_static_side_object():
 
     assert len(events) == 2
     assert primary.object_id == 1
-    assert primary.state in {"CAUTION", "DANGER"}
+    assert primary.raw_state in {"CAUTION", "DANGER"}

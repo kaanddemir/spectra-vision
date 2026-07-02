@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import spectra.analysis.video as video
-from spectra.analysis.risk import RiskEvent
+from spectra.analysis.risk import RiskEvent, score_event
 
 
 _SPECS: list[dict] = []
@@ -13,19 +13,19 @@ def _make_event(frame_index: int, timestamp_sec: float, spec: dict) -> RiskEvent
     return RiskEvent(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
-        state=spec["state"],
-        ttc_sec=spec.get("ttc"),
+        raw_state=spec["state"],
+        collision_ttc_sec=spec.get("ttc"),
         direction="center",
         lane="center",
         object_type="car",
-        confidence=spec.get("confidence", 0.9),
-        near_score=spec.get("near", 0.4),
-        velocity_magnitude=0.1,
-        closing_speed=spec.get("closing", 0.3),
+        risk_confidence=spec.get("confidence", 0.9),
+        proximity_score=spec.get("near", 0.4),
+        radial_flow_score=0.1,
+        approach_score=spec.get("closing", 0.3),
         bbox=(1, 1, 3, 3),
         reason="",
         object_id=1,
-        crossing_risk=spec.get("crossing", 0.7),
+        corridor_score=spec.get("crossing", 0.7),
         brake_score=spec.get("brake", 0.0),
     )
 
@@ -52,6 +52,7 @@ class _FakeLoader:
 class _FakeAnalyzer:
     def __init__(self, **kwargs):
         self.processed_frames = 0
+        self.sensitivity = video.resolve_sensitivity(kwargs.get("sensitivity", "balanced"))
         self.performance_stats = video._empty_performance_stats()
         self.performance_sample_logs = []
         self.depth_refresh = {
@@ -69,7 +70,7 @@ class _FakeAnalyzer:
         return video.FrameAnalysis(
             primary_event=event,
             all_events=[event],
-            primary_risk_score=video._risk_score(event),
+            raw_primary_score=score_event(event),
             frame_bgr=frame_bgr,
             lane=SimpleNamespace(width=4, height=4),
         )
@@ -94,7 +95,14 @@ def test_analyze_spatial_video_returns_client_ready_shape(monkeypatch):
     assert set(result) >= {"fps", "frame_count", "processed_frames", "frames", "events", "peak_event", "performance_summary"}
     assert result["processed_frames"] == 2
     assert len(result["frames"]) == 2
-    assert set(result["frames"][0]) >= {"frameIndex", "timestampSec", "state", "primary", "trafficLight", "objects"}
+    assert set(result["frames"][0]) >= {
+        "frame_index",
+        "timestamp_sec",
+        "stabilized_state",
+        "primary",
+        "traffic_light",
+        "objects",
+    }
 
 
 def test_saved_events_are_deduped_per_second_by_risk_score(monkeypatch):
@@ -126,15 +134,15 @@ def _corridor_event(*, lane_position, distance_m, bbox):
     return RiskEvent(
         frame_index=0,
         timestamp_sec=0.0,
-        state="CAUTION",
-        ttc_sec=1.8,
+        raw_state="CAUTION",
+        collision_ttc_sec=1.8,
         direction="left",
         lane="left",
         object_type="car",
-        confidence=0.9,
-        near_score=1.0,
-        velocity_magnitude=0.1,
-        closing_speed=3.1,
+        risk_confidence=0.9,
+        proximity_score=1.0,
+        radial_flow_score=0.1,
+        approach_score=3.1,
         bbox=bbox,
         reason="",
         object_id=1,
@@ -162,7 +170,7 @@ def test_narrow_edge_box_stays_off_corridor():
     assert not video._is_near_in_corridor(side, frame_shape)
 
 
-def _passing_event(*, crossing_risk):
+def _passing_event(*, corridor_score):
     # A close, strongly-closing object (like a vehicle being passed in an
     # adjacent stopped lane) with a real depth TTC.
     from spectra.analysis.risk import TtcComponent
@@ -170,19 +178,19 @@ def _passing_event(*, crossing_risk):
     return RiskEvent(
         frame_index=0,
         timestamp_sec=0.0,
-        state="SAFE",
-        ttc_sec=0.4,
+        raw_state="SAFE",
+        collision_ttc_sec=0.4,
         direction="left",
         lane="left",
         object_type="truck",
-        confidence=0.6,
-        near_score=1.0,
-        velocity_magnitude=0.1,
-        closing_speed=0.5,
+        risk_confidence=0.6,
+        proximity_score=1.0,
+        radial_flow_score=0.1,
+        approach_score=0.5,
         bbox=(1, 1, 3, 3),
         reason="",
         object_id=4,
-        crossing_risk=crossing_risk,
+        corridor_score=corridor_score,
         distance_m=7.2,
         closing_mps=16.4,
         ttc_components=(TtcComponent("depth", 0.4, 0.9),),
@@ -192,17 +200,17 @@ def _passing_event(*, crossing_risk):
 def test_off_corridor_object_withholds_collision_eta_and_pressure():
     # A passing (off-corridor, low crossing) vehicle must not surface a collision
     # ETA or ETA-pressure — it reads SAFE, so "0.4s / 85%" would be contradictory.
-    passing = _passing_event(crossing_risk=0.05)
+    passing = _passing_event(corridor_score=0.05)
     eta = video._eta_metric(passing)
     assert eta["display"] == "—"
-    assert eta["collisionSec"] is None
-    assert video._risk_metric(passing)["factors"]["etaPressure"] == 0.0
+    assert eta["collision_ttc_sec"] is None
+    assert video._risk_metric(passing)["factors"]["ttc_score"] == 0.0
 
 
 def test_in_corridor_object_still_surfaces_collision_eta():
-    # A genuine in-path closing object keeps its collision ETA and pressure.
-    approaching = _passing_event(crossing_risk=0.7)
+    # A genuine in-path closing object keeps its collision TTC and score.
+    approaching = _passing_event(corridor_score=0.7)
     eta = video._eta_metric(approaching)
     assert eta["display"] == "0.4s"
-    assert eta["collisionSec"] == 0.4
-    assert video._risk_metric(approaching)["factors"]["etaPressure"] > 0.0
+    assert eta["collision_ttc_sec"] == 0.4
+    assert video._risk_metric(approaching)["factors"]["ttc_score"] > 0.0

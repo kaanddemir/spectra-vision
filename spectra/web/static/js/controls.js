@@ -53,6 +53,11 @@ export function initializeSpectra() {
     currentTimelineRow: null,
     suppressVideoSyncCount: 0,
     selectedObjectId: null,
+    // A transient overlay marker: clicking an object boxes it on the frame for
+    // OVERLAY_HIGHLIGHT_MS, then it fades — independent of the panel selection,
+    // which persists.
+    overlayHighlightId: null,
+    overlayHighlightTimer: null,
     objectsMenuCollapsed: false,
     playbackMode: "normal",
     pauseRiskLastKey: null,
@@ -66,7 +71,7 @@ export function initializeSpectra() {
     samplingPreset: "balanced",
     suppressSamplingCustom: false,
     riskChartTab: "state",
-    riskBands: { cautionBand: 0.25, dangerBand: 0.60 },
+    riskBands: { caution_band: 0.25, danger_band: 0.60 },
   };
 
   const byId = (id) => document.getElementById(id);
@@ -128,15 +133,15 @@ export function initializeSpectra() {
     if (!display) return MISSING;
     return ["Estimating", "No closing", "Low confidence"].includes(display) ? MISSING : display;
   };
-  const etaSeconds = (eta) => num(eta?.sec, null);
-  // ETA pressure mirrors the backend: (3 - ttc)/3 clamped, 0 when not closing.
-  const etaPressure = (eta) => {
-    const sec = etaSeconds(eta);
+  const collision_ttc_seconds = (eta) => num(eta?.collision_ttc_sec, null);
+  // TTC score mirrors the backend: (3 - ttc)/3 clamped, 0 when not closing.
+  const ttc_score = (eta) => {
+    const sec = collision_ttc_seconds(eta);
     return sec === null ? 0 : clamp((3 - sec) / 3, 0, 1);
   };
-  const laneWithPosition = (lane, lanePosition) => {
+  const laneWithPosition = (lane, lane_position) => {
     const laneText = lane ? shortLane(lane) : MISSING;
-    const pos = num(lanePosition, null);
+    const pos = num(lane_position, null);
     return pos === null ? laneText : `${laneText} (${pos.toFixed(1)})`;
   };
 
@@ -151,9 +156,9 @@ export function initializeSpectra() {
     return t === null ? null : Math.round(t * 100) / 100;
   };
   const timelineKey = (row) => {
-    const fi = num(row?.frameIndex, null);
+    const fi = num(row?.frame_index, null);
     if (fi !== null) return `f${fi}`;
-    const t = roundedTimelineTime(row?.timeSec);
+    const t = roundedTimelineTime(row?.time_sec);
     return t === null ? "" : t.toFixed(2);
   };
 
@@ -161,15 +166,13 @@ export function initializeSpectra() {
   // consumers can read the selected object's ETA/risk data directly.
   const getPrimaryObject = (row) => {
     if (!row || !Array.isArray(row.objects)) return null;
-    const id = row.primaryObjectId;
+    const id = row.primary_object_id;
     if (id === null || id === undefined) return null;
-    return row.objects.find((o) => o && o.objectId === id) || null;
+    return row.objects.find((o) => o && o.object_id === id) || null;
   };
 
-  // Translate one v5 object-centric metric into the flat field names the panels,
-  // chart, banner, overlay and exports consume. This is the single migration
-  // seam: the backend speaks v5 (``risk``/``eta``/``motion``/``lane``/
-  // ``tracking`` groups), everything downstream keeps reading the flat keys.
+  // Translate one v6 object-centric metric into the flat field names the panels,
+  // chart, banner, overlay and exports consume.
   const flattenObject = (obj) => {
     if (!obj) return obj;
     const risk = obj.risk || {};
@@ -177,36 +180,35 @@ export function initializeSpectra() {
     const motion = obj.motion || {};
     const laneInfo = obj.lane || {};
     const conf = obj.confidence || {};
-    const overall = num(conf.overall, null);
+    const risk_confidence = num(conf.risk_confidence, null);
     return {
       ...obj,
       // Identity + state
-      objectId: obj.tracking?.trackId ?? null,
-      displayId: obj.id ?? null,
-      objectType: obj.class ?? null,
-      riskState: obj.state ?? null,
-      rawRiskState: obj.state ?? null,
-      riskScore: num(risk.score, null),
+      object_id: obj.object_id ?? null,
+      display_id: obj.display_id ?? null,
+      object_type: obj.object_type ?? null,
+      raw_state: obj.raw_state ?? null,
+      risk_score: num(risk.risk_score, null),
       // Flat signal blocks the panels/overlay/exports read directly.
-      riskFactors: risk.factors || {},
-      collisionEta: { display: eta.display ?? null, sec: num(eta.collisionSec, null) },
-      kinematics: {
-        distanceM: num(motion.distanceM, null),
-        closingMps: num(motion.closingSpeedMps, null),
+      risk_factors: risk.factors || {},
+      eta: { display: eta.display ?? null, collision_ttc_sec: num(eta.collision_ttc_sec, null) },
+      motion: {
+        distance_m: num(motion.distance_m, null),
+        closing_mps: num(motion.closing_mps, null),
       },
       evidence: {
         flow: {
-          expansionScore: num(motion.expansionScore, null),
-          radialScore: num(motion.radialScore, null),
+          expansion_rate: num(motion.expansion_rate, null),
+          radial_flow_score: num(motion.radial_flow_score, null),
         },
       },
       confidence: conf,
-      overallConfidence: overall,
-      ttcAgreement: num(eta.agreement, null),
-      lane: laneInfo.bucket ?? null,
-      lanePosition: num(laneInfo.position, null),
+      risk_confidence,
+      ttc_agreement: num(eta.ttc_agreement, null),
+      lane: laneInfo.lane ?? null,
+      lane_position: num(laneInfo.lane_position, null),
       bbox: obj.bbox ?? null,
-      confidencePct: overall === null ? null : Math.round(overall * 1000) / 10,
+      risk_confidence_pct: risk_confidence === null ? null : Math.round(risk_confidence * 1000) / 10,
     };
   };
 
@@ -214,51 +216,51 @@ export function initializeSpectra() {
     if (!frame) return frame;
     const objs = Array.isArray(frame.objects) ? frame.objects.map(flattenObject) : [];
     const primaryInfo = frame.primary || {};
-    const primaryId = primaryInfo.trackId ?? null;
-    const primary = objs.find((o) => o && o.objectId === primaryId) || null;
-    const ts = num(frame.timestampSec, null);
-    const riskFactors = primary?.riskFactors || {};
-    const kinematics = primary?.kinematics || {};
+    const primary_id = primaryInfo.object_id ?? null;
+    const primary = objs.find((o) => o && o.object_id === primary_id) || null;
+    const ts = num(frame.timestamp_sec, null);
+    const risk_factors = primary?.risk_factors || {};
+    const motion = primary?.motion || {};
     return {
       ...frame,
       objects: objs,
       // Normalized ego-lane corridor polygon for the canvas overlay.
-      laneGeometry: frame.laneGeometry ?? null,
+      lane_geometry: frame.lane_geometry ?? null,
       // Frame-level traffic-light advisory: collapse {state, confidence} to the
       // state string the renderers compare against.
-      trafficLight: frame.trafficLight?.state ?? null,
-      timeSec: ts === null ? null : Math.round(ts * 100) / 100,
-      riskState: frame.state ?? null,
-      riskScore: num(primaryInfo.score, null),
-      primaryObjectId: primaryId,
-      objectId: primaryId,
-      displayId: primary?.displayId ?? primaryId,
-      objectType: primary?.objectType ?? null,
+      traffic_light: frame.traffic_light?.state ?? null,
+      time_sec: ts === null ? null : Math.round(ts * 100) / 100,
+      stabilized_state: frame.stabilized_state ?? null,
+      risk_score: num(primaryInfo.raw_primary_score, null),
+      primary_object_id: primary_id,
+      object_id: primary_id,
+      display_id: primary?.display_id ?? primary_id,
+      object_type: primary?.object_type ?? null,
       lane: primary ? (primaryInfo.lane ?? null) : null,
-      collisionEta: primary?.collisionEta ?? null,
-      riskFactors: primary?.riskFactors ?? null,
-      kinematics: primary?.kinematics ?? null,
+      eta: primary?.eta ?? null,
+      risk_factors: primary?.risk_factors ?? null,
+      motion: primary?.motion ?? null,
       evidence: primary?.evidence ?? null,
       confidence: primary?.confidence ?? null,
-      ttcAgreement: primary?.ttcAgreement ?? null,
-      proximityScore: riskFactors.proximity ?? null,
-      approachScore: riskFactors.approach ?? null,
-      crossingScore: riskFactors.crossing ?? null,
-      distanceM: kinematics.distanceM ?? null,
-      closingMps: kinematics.closingMps ?? null,
-      lanePosition: primary?.lanePosition ?? null,
-      confidencePct: primary ? (num(primary.overallConfidence, 0) * 100) : null,
+      ttc_agreement: primary?.ttc_agreement ?? null,
+      proximity_score: risk_factors.proximity_score ?? null,
+      approach_score: risk_factors.approach_score ?? null,
+      corridor_score: risk_factors.corridor_score ?? null,
+      distance_m: motion.distance_m ?? null,
+      closing_mps: motion.closing_mps ?? null,
+      lane_position: primary?.lane_position ?? null,
+      risk_confidence_pct: primary ? (num(primary.risk_confidence, 0) * 100) : null,
     };
   };
 
   const flattenEvent = (event, imagesByRef) => {
     if (!event) return event;
     const flat = flattenFrame(event);
-    const ref = event.imageRef;
+    const ref = event.image_ref;
     const images = ref && imagesByRef && imagesByRef[ref] ? imagesByRef[ref] : null;
     return {
       ...flat,
-      riskScore: num(event.primary?.score, null) ?? flat.riskScore ?? null,
+      risk_score: num(event.primary?.raw_primary_score, null) ?? flat.risk_score ?? null,
       images: images || {},
     };
   };
@@ -270,15 +272,16 @@ export function initializeSpectra() {
     if (v === "safe") return "safe";
     return "none";
   };
+  const sourceState = (source) => source?.raw_state ?? source?.stabilized_state ?? null;
   const eventSeverityScore = (ev) => {
-    return num(ev?.riskScore, 0);
+    return num(ev?.risk_score, 0);
   };
-  const eventStateClass = (ev) => stateClass(ev?.riskState);
+  const eventStateClass = (ev) => stateClass(sourceState(ev));
   const isActionableObject = (obj) => {
-    const sc = stateClass(obj?.riskState ?? obj?.rawRiskState);
+    const sc = stateClass(sourceState(obj));
     return sc === "caution" || sc === "danger";
   };
-  const eventTimestamp = (ev) => num(ev?.timestampSec, null);
+  const eventTimestamp = (ev) => num(ev?.timestamp_sec, null);
   const eventLane = (ev) => titleCase(ev?.lane);
   const eventItemsFromEvents = (events) => (Array.isArray(events) ? events : [])
     .map((ev, sourceIndex) => ({
@@ -286,7 +289,7 @@ export function initializeSpectra() {
       index: sourceIndex,
       sc: eventStateClass(ev),
       ts: eventTimestamp(ev),
-      eta: ev?.collisionEta || null,
+      eta: ev?.eta || null,
     }))
     .filter((item) => item.ts !== null && (item.sc === "caution" || item.sc === "danger"));
   const timelineEventItems = (source = state) => {
@@ -303,13 +306,13 @@ export function initializeSpectra() {
     return parts.join(" | ");
   };
   const timelineSeverity = (row) => {
-    const sc = stateClass(row?.riskState);
+    const sc = stateClass(sourceState(row));
     if (sc === "danger") return 2;
     if (sc === "caution") return 1;
     return 0;
   };
   const isRiskRow = (row) => {
-    const sc = stateClass(row?.riskState);
+    const sc = stateClass(sourceState(row));
     return sc === "caution" || sc === "danger";
   };
   const preferTimelineRow = (candidate, current) => {
@@ -322,16 +325,16 @@ export function initializeSpectra() {
     const currentSeverity = timelineSeverity(current);
     if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity;
 
-    const candidateEta = etaSeconds(candidate?.collisionEta);
-    const currentEta = etaSeconds(current?.collisionEta);
-    if (candidateEta !== null && currentEta !== null && candidateEta !== currentEta) {
-      return candidateEta < currentEta;
+    const candidate_collision_ttc_sec = collision_ttc_seconds(candidate?.eta);
+    const current_collision_ttc_sec = collision_ttc_seconds(current?.eta);
+    if (candidate_collision_ttc_sec !== null && current_collision_ttc_sec !== null && candidate_collision_ttc_sec !== current_collision_ttc_sec) {
+      return candidate_collision_ttc_sec < current_collision_ttc_sec;
     }
-    if (candidateEta !== null && currentEta === null) return true;
-    if (candidateEta === null && currentEta !== null) return false;
+    if (candidate_collision_ttc_sec !== null && current_collision_ttc_sec === null) return true;
+    if (candidate_collision_ttc_sec === null && current_collision_ttc_sec !== null) return false;
 
-    const candidateApproach = num(candidate?.riskFactors?.approach, null);
-    const currentApproach = num(current?.riskFactors?.approach, null);
+    const candidateApproach = num(candidate?.risk_factors?.approach_score, null);
+    const currentApproach = num(current?.risk_factors?.approach_score, null);
     if (candidateApproach !== null && currentApproach !== null && candidateApproach !== currentApproach) {
       return candidateApproach > currentApproach;
     }
@@ -341,25 +344,25 @@ export function initializeSpectra() {
   const normalizeTimelineRowsForChart = (rows) => {
     const grouped = new Map();
     (Array.isArray(rows) ? rows : []).forEach((row) => {
-      const timeSec = roundedTimelineTime(row?.timeSec);
-      if (timeSec === null) return;
-      const key = timeSec.toFixed(2);
-      const normalizedRow = { ...row, timeSec };
+      const time_sec = roundedTimelineTime(row?.time_sec);
+      if (time_sec === null) return;
+      const key = time_sec.toFixed(2);
+      const normalizedRow = { ...row, time_sec };
       if (preferTimelineRow(normalizedRow, grouped.get(key))) {
         grouped.set(key, normalizedRow);
       }
     });
-    return Array.from(grouped.values()).sort((a, b) => a.timeSec - b.timeSec);
+    return Array.from(grouped.values()).sort((a, b) => a.time_sec - b.time_sec);
   };
   const timelinePointTooltip = (point) => {
-    const type = shortType(point.objectType);
-    const displayId = point.displayId ?? point.objectId;
-    const id = isReal(displayId) ? ` #${displayId}` : "";
+    const type = shortType(point.object_type);
+    const display_id = point.display_id ?? point.object_id;
+    const id = isReal(display_id) ? ` #${display_id}` : "";
     const object = type === MISSING && !id ? MISSING : `${type === MISSING ? "Object" : type}${id}`;
     return [
-      `Time: ${point.timeSec.toFixed(2).replace(/\.?0+$/, "")}s`,
-      `State: ${point.riskState}`,
-      `ETA: ${etaDisplay(point.collisionEta)}`,
+      `Time: ${point.time_sec.toFixed(2).replace(/\.?0+$/, "")}s`,
+      `State: ${sourceState(point)}`,
+      `ETA: ${etaDisplay(point.eta)}`,
       `Object: ${object}`,
       `Lane: ${shortLane(point.lane)}`,
     ].join("\n");
@@ -485,8 +488,8 @@ export function initializeSpectra() {
   // processed frame and share the source aspect ratio, so they map onto this
   // rect regardless of render size.
   function containRect(boxW, boxH) {
-    const intrinsicW = previewVideo?.videoWidth || state.currentResult?.frameWidth || boxW;
-    const intrinsicH = previewVideo?.videoHeight || state.currentResult?.frameHeight || boxH;
+    const intrinsicW = previewVideo?.videoWidth || state.currentResult?.frame_width || boxW;
+    const intrinsicH = previewVideo?.videoHeight || state.currentResult?.frame_height || boxH;
     if (!intrinsicW || !intrinsicH || !boxW || !boxH) return { x: 0, y: 0, w: boxW, h: boxH };
     const scale = Math.min(boxW / intrinsicW, boxH / intrinsicH);
     const w = intrinsicW * scale;
@@ -537,10 +540,10 @@ export function initializeSpectra() {
     const py = (ny) => rect.y + ny * rect.h;
 
     // Ego-lane corridor.
-    const lane = row.laneGeometry;
+    const lane = row.lane_geometry;
     const corridor = Array.isArray(lane?.corridor) ? lane.corridor : [];
     if (corridor.length >= 3) {
-      const stateColor = RISK_COLORS[row.riskState] || "#8aa0b4";
+      const stateColor = RISK_COLORS[sourceState(row)] || "#8aa0b4";
       overlayCtx.beginPath();
       corridor.forEach(([nx, ny], i) => {
         const x = px(nx), y = py(ny);
@@ -560,12 +563,12 @@ export function initializeSpectra() {
     // overlay); a SAFE object is drawn only when the user has selected it, so
     // clicking any object in the list marks where it is on the frame — the
     // selected box is always highlighted regardless of its state.
-    const selId = state.selectedObjectId;
+    const selId = state.overlayHighlightId;
     const objects = Array.isArray(row.objects) ? row.objects : [];
     objects.forEach((obj) => {
       if (!obj?.bbox) return;
-      const st = obj?.rawRiskState ?? obj?.riskState;
-      const isSelected = selId !== null && selId !== undefined && obj.objectId === selId;
+      const st = sourceState(obj);
+      const isSelected = selId !== null && selId !== undefined && obj.object_id === selId;
       if ((st === "SAFE" || !st) && !isSelected) return;
       const [x1, y1, x2, y2] = obj.bbox;
       const bx = px(x1), by = py(y1), bw = px(x2) - px(x1), bh = py(y2) - py(y1);
@@ -576,12 +579,12 @@ export function initializeSpectra() {
       overlayCtx.strokeRect(bx, by, bw, bh);
 
       const parts = [];
-      const did = obj.displayId ?? obj.objectId;
+      const did = obj.display_id ?? obj.object_id;
       if (did !== null && did !== undefined) parts.push(`#${did}`);
-      if (obj.objectType) parts.push(String(obj.objectType).toUpperCase());
-      const eta = num(obj.collisionEta?.sec, null);
+      if (obj.object_type) parts.push(String(obj.object_type).toUpperCase());
+      const eta = num(obj.eta?.collision_ttc_sec, null);
       if (eta !== null) parts.push(`ETA ${eta.toFixed(1)}s`);
-      if (num(obj.riskFactors?.brake, 0) >= 0.5) parts.push("BRAKE");
+      if (num(obj.risk_factors?.brake_score, 0) >= 0.5) parts.push("BRAKE");
       // A selected SAFE object has no ETA/state cue in its label; show its band
       // so the marked box is still self-explanatory.
       if (isSelected && eta === null && st) parts.push(String(st));
@@ -597,6 +600,24 @@ export function initializeSpectra() {
         overlayCtx.fillText(label, bx + 4, ly + lh - 4);
       }
     });
+  }
+
+  // How long a clicked object's box stays marked on the frame before fading.
+  const OVERLAY_HIGHLIGHT_MS = 5000;
+
+  function highlightObjectOnOverlay(object_id) {
+    if (state.overlayHighlightTimer) {
+      clearTimeout(state.overlayHighlightTimer);
+      state.overlayHighlightTimer = null;
+    }
+    state.overlayHighlightId = object_id;
+    redrawOverlayAtCurrentTime();
+    if (object_id === null || object_id === undefined) return;
+    state.overlayHighlightTimer = setTimeout(() => {
+      state.overlayHighlightId = null;
+      state.overlayHighlightTimer = null;
+      redrawOverlayAtCurrentTime();
+    }, OVERLAY_HIGHLIGHT_MS);
   }
 
   function redrawOverlayAtCurrentTime() {
@@ -737,8 +758,8 @@ export function initializeSpectra() {
   function fpsForReadout() {
     return num(state.currentResult?.fps, 0) || 30;
   }
-  function renderTimeReadout(timeSec) {
-    const t = num(timeSec, 0) || 0;
+  function renderTimeReadout(time_sec) {
+    const t = num(time_sec, 0) || 0;
     const dur = (previewVideo?.duration && Number.isFinite(previewVideo.duration))
       ? previewVideo.duration
       : (currentTotalDuration() || 0);
@@ -819,23 +840,23 @@ export function initializeSpectra() {
 
   function sameEvent(a, b) {
     if (!a || !b) return false;
-    return a.frameIndex === b.frameIndex && num(a.timestampSec, null) === num(b.timestampSec, null);
+    return a.frame_index === b.frame_index && num(a.timestamp_sec, null) === num(b.timestamp_sec, null);
   }
 
   function normalizePayload(response) {
     const payload = cleanResponsePayload(response);
     const metadata = payload?.metadata || {};
     const imagesByRef = (payload?.images && typeof payload.images === "object") ? payload.images : {};
-    const peakEventRaw = payload?.peakEvent || null;
-    const peakEvent = peakEventRaw ? flattenEvent(peakEventRaw, imagesByRef) : null;
-    const peakImages = peakEvent?.images || {};
+    const peak_event_raw = payload?.peak_event || null;
+    const peak_event = peak_event_raw ? flattenEvent(peak_event_raw, imagesByRef) : null;
+    const peak_images = peak_event?.images || {};
 
-    const eventKey = (ev) => `${ev?.frameIndex ?? ""}:${num(ev?.timestampSec, null) ?? ""}`;
+    const eventKey = (ev) => `${ev?.frame_index ?? ""}:${num(ev?.timestamp_sec, null) ?? ""}`;
     const events = [];
     const seenEvents = new Set();
-    if (peakEvent?.frameIndex !== undefined) {
-      events.push(peakEvent);
-      seenEvents.add(eventKey(peakEvent));
+    if (peak_event?.frame_index !== undefined) {
+      events.push(peak_event);
+      seenEvents.add(eventKey(peak_event));
     }
     if (Array.isArray(payload?.events)) {
       payload.events.forEach((evRaw) => {
@@ -851,20 +872,20 @@ export function initializeSpectra() {
 
     return {
       images: {
-        original: peakImages.original,
-        blend: peakImages.blend,
+        original: peak_images.original,
+        blend: peak_images.blend,
       },
       imagesByRef,
-      elapsedSec: num(metadata.elapsedSec, null),
+      elapsed_sec: num(metadata.elapsed_sec, null),
       fps: num(metadata.fps, null),
-      frameCount: num(metadata.frameCount, null),
-      processedFrames: num(metadata.processedFrames, null),
-      frameWidth: num(metadata.frameWidth, null),
-      frameHeight: num(metadata.frameHeight, null),
-      peakEvent,
+      frame_count: num(metadata.frame_count, null),
+      processed_frames: num(metadata.processed_frames, null),
+      frame_width: num(metadata.frame_width, null),
+      frame_height: num(metadata.frame_height, null),
+      peak_event,
       events,
       timelineRows: frames,
-      sourceName: metadata.sourceName || fileInput.files[0]?.name || null,
+      source_name: metadata.source_name || fileInput.files[0]?.name || null,
       sensitivity: metadata.sensitivity || null,
     };
   }
@@ -938,7 +959,7 @@ export function initializeSpectra() {
   function renderStatRow(result) {
     const fps = result?.fps ?? null;
     const dur = state.sourceMeta?.durationSec ?? null;
-    const totalFrames = result?.frameCount ?? (fps && dur ? Math.round(fps * dur) : null);
+    const totalFrames = result?.frame_count ?? (fps && dur ? Math.round(fps * dur) : null);
     
     if (totalFrames && dur) {
       const meta = byId("selected-meta");
@@ -952,9 +973,9 @@ export function initializeSpectra() {
   // ─── LIVE / SUMMARY risk panel ───────────────────────────
   function objectLabel(source) {
     if (!source) return MISSING;
-    const type = shortType(source.objectType);
-    const displayId = source.displayId ?? source.objectId;
-    const id = isReal(displayId) ? ` #${displayId}` : "";
+    const type = shortType(source.object_type);
+    const display_id = source.display_id ?? source.object_id;
+    const id = isReal(display_id) ? ` #${display_id}` : "";
     return type === MISSING && !id ? MISSING : `${type === MISSING ? "Object" : type}${id}`;
   }
 
@@ -970,7 +991,7 @@ export function initializeSpectra() {
     const sign = n < -0.05 ? "−" : "";
     return `${sign}${Math.abs(n).toFixed(1)} m/s`;
   };
-  const riskScoreLabel = (value) => {
+  const risk_scoreLabel = (value) => {
     const n = num(value, null);
     return n === null ? MISSING : String(Math.round(clamp(n, 0, 1) * 100));
   };
@@ -1002,7 +1023,7 @@ export function initializeSpectra() {
   }
 
   function panelSource() {
-    if (state.uiMode === "summary") return state.selectedSummaryEvent || state.currentResult?.peakEvent || null;
+    if (state.uiMode === "summary") return state.selectedSummaryEvent || state.currentResult?.peak_event || null;
     if (state.uiMode === "objects") {
       if (!state.currentTimelineRow) state.currentTimelineRow = findTimelineRowAt(previewVideo?.currentTime ?? 0);
       return state.selectedSummaryEvent || state.currentTimelineRow || null;
@@ -1011,7 +1032,7 @@ export function initializeSpectra() {
     return state.currentTimelineRow;
   }
 
-  function setUiMode(mode, { sourceEvent = null, timeSec = null } = {}) {
+  function setUiMode(mode, { sourceEvent = null, time_sec = null } = {}) {
     const nextMode = mode === "summary" ? "summary" : mode === "objects" ? "objects" : "live";
     const previousMode = state.uiMode;
     state.uiMode = nextMode;
@@ -1021,19 +1042,19 @@ export function initializeSpectra() {
       state.objectsMenuCollapsed = false;
     }
     if (state.uiMode === "summary") {
-      state.selectedSummaryEvent = sourceEvent || state.currentResult?.peakEvent || null;
+      state.selectedSummaryEvent = sourceEvent || state.currentResult?.peak_event || null;
     } else if (state.uiMode === "objects") {
       state.objectsMenuCollapsed = false;
       if (sourceEvent) state.selectedSummaryEvent = sourceEvent;
       if (previousMode === "summary" && !state.selectedSummaryEvent) {
-        state.selectedSummaryEvent = state.currentResult?.peakEvent || null;
+        state.selectedSummaryEvent = state.currentResult?.peak_event || null;
       }
       if (!state.currentTimelineRow) {
-        state.currentTimelineRow = findTimelineRowAt(timeSec ?? previewVideo?.currentTime ?? 0);
+        state.currentTimelineRow = findTimelineRowAt(time_sec ?? previewVideo?.currentTime ?? 0);
       }
     } else {
       state.selectedSummaryEvent = null;
-      state.currentTimelineRow = findTimelineRowAt(timeSec ?? previewVideo?.currentTime ?? 0);
+      state.currentTimelineRow = findTimelineRowAt(time_sec ?? previewVideo?.currentTime ?? 0);
     }
     setModeButtons();
     renderRiskPanel();
@@ -1042,65 +1063,65 @@ export function initializeSpectra() {
   const setText = (id, value) => { const el = byId(id); if (el) el.textContent = value; };
   const pctLabel = (v) => { const n = num(v, null); return n === null ? MISSING : `${Math.round(clamp(n, 0, 1) * 100)}%`; };
   const confidenceLabel = (source) => {
-    const overall = num(source?.overallConfidence, null);
+    const overall = num(source?.risk_confidence, null);
     if (overall !== null) return pctLabel(overall);
-    const pct = num(source?.confidencePct, null);
+    const pct = num(source?.risk_confidence_pct, null);
     return pct === null ? MISSING : `${Math.round(clamp(pct, 0, 100))}%`;
   };
 
   // Detail Mode mirrors the How It Works pipeline sections for the selected object.
-  function renderAdvanced(source, trafficLight) {
+  function renderAdvanced(source, traffic_light) {
     const ev = source?.evidence || null;
     const conf = source?.confidence || {};
-    const riskFactors = source?.riskFactors || {};
-    const oid = source?.displayId ?? source?.objectId;
+    const risk_factors = source?.risk_factors || {};
+    const oid = source?.display_id ?? source?.object_id;
     // Decision + Delivery: delivered frame/object decision surfaced first.
-    setText("ev-fusion-state", (() => { const rawState = source?.rawRiskState ?? source?.riskState; return isReal(rawState) ? titleCase(rawState) : MISSING; })());
+    setText("ev-fusion-state", (() => { const rawState = sourceState(source); return isReal(rawState) ? titleCase(rawState) : MISSING; })());
     setText("ev-decision-primary", isReal(oid) ? `#${oid}` : MISSING);
-    setText("ev-fusion-score", riskScoreLabel(source?.riskScore));
-    setText("ev-fusion-eta", etaDisplay(source?.collisionEta));
+    setText("ev-fusion-score", risk_scoreLabel(source?.risk_score));
+    setText("ev-fusion-eta", etaDisplay(source?.eta));
     // Per-Object Risk Evaluation: score terms and gates.
-    const etaSec = etaSeconds(source?.collisionEta);
-    setText("ev-fusion-eta-pressure", etaSec === null ? MISSING : pctLabel(etaPressure(source?.collisionEta)));
-    setText("ev-depth-proximity", pctLabel(riskFactors.proximity));
-    setText("ev-fusion-approach", pctLabel(riskFactors.approach));
-    setText("ev-risk-lane-relevance", pctLabel(riskFactors.crossing));
-    setText("ev-advisory-brake", pctLabel(riskFactors.brake));
+    const collision_ttc_sec = collision_ttc_seconds(source?.eta);
+    setText("ev-fusion-eta-pressure", collision_ttc_sec === null ? MISSING : pctLabel(ttc_score(source?.eta)));
+    setText("ev-depth-proximity", pctLabel(risk_factors.proximity_score));
+    setText("ev-fusion-approach", pctLabel(risk_factors.approach_score));
+    setText("ev-risk-lane-relevance", pctLabel(risk_factors.corridor_score));
+    setText("ev-advisory-brake", pctLabel(risk_factors.brake_score));
     setText("ev-fusion-confidence", confidenceLabel(source));
-    setText("ev-fusion-agreement", pctLabel(source?.ttcAgreement));
+    setText("ev-fusion-agreement", pctLabel(source?.ttc_agreement));
     // Motion + Depth: distance, depth confidence and visual motion cues.
-    setText("ev-depth-distance", distanceLabel(source?.kinematics?.distanceM));
-    setText("ev-depth-closing", closingShort(source?.kinematics?.closingMps));
-    setText("ev-depth-conf", pctLabel(conf.depth));
+    setText("ev-depth-distance", distanceLabel(source?.motion?.distance_m));
+    setText("ev-depth-closing", closingShort(source?.motion?.closing_mps));
+    setText("ev-depth-conf", pctLabel(conf.depth_confidence));
     const flow = ev?.flow || {};
-    setText("ev-expansion-rate", pctLabel(flow.expansionScore));
-    setText("ev-flow-radial", pctLabel(flow.radialScore));
-    setText("ev-flow-conf", pctLabel(conf.flow));
+    setText("ev-expansion-rate", pctLabel(flow.expansion_rate));
+    setText("ev-flow-radial", pctLabel(flow.radial_flow_score));
+    setText("ev-flow-conf", pctLabel(conf.flow_confidence));
     // Lane Pipeline: lane-relative object geometry.
     setText("ev-lane-bucket", isReal(source?.lane) ? titleCase(source.lane) : MISSING);
-    const pos = num(source?.lanePosition, null);
+    const pos = num(source?.lane_position, null);
     setText("ev-lane-pos", pos === null ? MISSING : pos.toFixed(2));
-    setText("ev-lane-crossing", pctLabel(riskFactors.crossing));
-    setText("ev-lane-conf", pctLabel(conf.lane));
+    setText("ev-lane-crossing", pctLabel(risk_factors.corridor_score));
+    setText("ev-lane-conf", pctLabel(conf.lane_confidence));
     // Detection + Tracking: detector outputs plus the tracker-assigned object id.
-    setText("ev-detector-class", isReal(source?.objectType) ? titleCase(source.objectType) : MISSING);
-    setText("ev-detector-conf", pctLabel(conf.detection));
+    setText("ev-detector-class", isReal(source?.object_type) ? titleCase(source.object_type) : MISSING);
+    setText("ev-detector-conf", pctLabel(conf.detection_confidence));
     setText("ev-tracking-id", isReal(oid) ? `#${oid}` : MISSING);
     // Advisory Context: non-object context.
-    const tl = trafficLight;
+    const tl = traffic_light;
     setText("ev-advisory-traffic", (tl === "red" || tl === "yellow" || tl === "green") ? titleCase(tl) : MISSING);
   }
 
   const confidenceBreakdown = (conf) => {
     if (!conf) return "Overall confidence scales the final Risk Score using detection and lane-geometry reliability.";
-    return `Overall confidence scales the final Risk Score. Detection ${pctLabel(conf.detection)} · Lane ${pctLabel(conf.lane)} · Depth ${pctLabel(conf.depth)}.`;
+    return `Overall confidence scales the final Risk Score. Detection ${pctLabel(conf.detection_confidence)} · Lane ${pctLabel(conf.lane_confidence)} · Depth ${pctLabel(conf.depth_confidence)}.`;
   };
 
   // Frame-level traffic-light advisory (red/yellow/green); hidden otherwise.
   function renderTrafficLight(source) {
     const chip = byId("traffic-light-dot");
     if (!chip) return;
-    const tl = source?.trafficLight;
+    const tl = source?.traffic_light;
     const show = tl === "red" || tl === "yellow" || tl === "green";
     chip.hidden = !show;
     if (!show) return;
@@ -1110,25 +1131,25 @@ export function initializeSpectra() {
   }
 
   function applyRiskBannerState({ source, timeTag }) {
-    const hasObject = source?.objectId !== null && source?.objectId !== undefined;
-    const riskState = hasObject ? (source?.riskState || null) : null;
+    const hasObject = source?.object_id !== null && source?.object_id !== undefined;
+    const stabilized_state = hasObject ? sourceState(source) : null;
     const banner = byId("risk-banner");
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
-    banner.classList.add(riskClass(riskState));
-    byId("risk-band-main").textContent = riskState ? String(riskState).toUpperCase() : MISSING;
-    byId("alert-ttc").textContent = etaDisplay(source?.collisionEta);
-    setText("risk-score-main", hasObject ? riskScoreLabel(source?.riskScore) : MISSING);
+    banner.classList.add(riskClass(stabilized_state));
+    byId("risk-band-main").textContent = stabilized_state ? String(stabilized_state).toUpperCase() : MISSING;
+    byId("alert-ttc").textContent = etaDisplay(source?.eta);
+    setText("risk-score-main", hasObject ? risk_scoreLabel(source?.risk_score) : MISSING);
     const subtitle = byId("risk-subtitle");
     if (subtitle) {
       const label = objectLabel(source);
       const present = hasObject && label !== MISSING;
       // Lane lives here now (object · lane) rather than as a standalone box.
-      const laneText = present && source?.lane ? ` · ${laneWithPosition(source.lane, source.lanePosition)}` : "";
+      const laneText = present && source?.lane ? ` · ${laneWithPosition(source.lane, source.lane_position)}` : "";
       subtitle.textContent = present ? `${label}${laneText}` : "";
       subtitle.hidden = !present;
     }
-    setText("risk-distance", distanceLabel(source?.kinematics?.distanceM));
-    setText("risk-approach", closingShort(source?.kinematics?.closingMps));
+    setText("risk-distance", distanceLabel(source?.motion?.distance_m));
+    setText("risk-approach", closingShort(source?.motion?.closing_mps));
     const tag = byId("risk-time-tag");
     if (tag) {
       if (timeTag) { tag.innerHTML = timeTag; tag.hidden = false; }
@@ -1155,7 +1176,7 @@ export function initializeSpectra() {
   const speedGauge = (mps) => { const n = num(mps, null); return n === null ? 0 : clamp(n / 12, 0, 1); };
 
   function objectsForSource(source) {
-    return (Array.isArray(source?.objects) ? source.objects : []).filter((obj) => obj && isReal(obj.objectId));
+    return (Array.isArray(source?.objects) ? source.objects : []).filter((obj) => obj && isReal(obj.object_id));
   }
 
   function highestRiskObject(objects) {
@@ -1176,23 +1197,22 @@ export function initializeSpectra() {
         sorted.forEach((item) => {
           const button = document.createElement("button");
           button.type = "button";
-          const isSelected = item.objectId === state.selectedObjectId;
-          const sClass = stateClass(item.riskState);
+          const isSelected = item.object_id === state.selectedObjectId;
+          const sClass = stateClass(sourceState(item));
           button.className = `detection-row is-${sClass} ${isSelected ? 'is-selected' : ''}`;
           button.onclick = () => {
-            state.selectedObjectId = item.objectId;
+            state.selectedObjectId = item.object_id;
             state.objectsMenuCollapsed = true;
             focusSummaryFrame(source);
             renderRiskPanel();
-            // Mark the clicked object's box on the frame immediately (works even
-            // while the video is paused, and for SAFE objects the auto-overlay
-            // skips).
-            redrawOverlayAtCurrentTime();
+            // Box the clicked object on the frame for a few seconds, then let it
+            // fade — the panel selection persists, only the marker is transient.
+            highlightObjectOnOverlay(item.object_id);
           };
           button.innerHTML = `
             <span class="status-dot is-${sClass}"></span>
             <span class="detection-main">${objectLabel(item)}</span>
-            <span class="detection-ttc"><span style="color:var(--muted); margin-right:4px; font-size:10.5px; font-weight:600;">ETA:</span>${etaDisplay(item.collisionEta)}</span>
+            <span class="detection-ttc"><span style="color:var(--muted); margin-right:4px; font-size:10.5px; font-weight:600;">ETA:</span>${etaDisplay(item.eta)}</span>
           `;
           list.appendChild(button);
         });
@@ -1204,22 +1224,22 @@ export function initializeSpectra() {
     const source = panelSource();
     const isSummary = state.uiMode === "summary";
     const isObjectsMode = state.uiMode === "objects";
-    const sourceTime = (isSummary || isObjectsMode) ? eventTimestamp(source) : num(source?.timeSec, null);
+    const sourceTime = (isSummary || isObjectsMode) ? eventTimestamp(source) : num(source?.time_sec, null);
     const timeLabel = isSummary ? "Peak" : isObjectsMode ? "Objects" : "Live";
     const objects = objectsForSource(source);
 
     if (isObjectsMode) {
-      if (state.selectedObjectId !== null && !objects.some(o => o.objectId === state.selectedObjectId)) {
+      if (state.selectedObjectId !== null && !objects.some(o => o.object_id === state.selectedObjectId)) {
         state.selectedObjectId = null;
       }
       if (state.selectedObjectId === null) {
         const firstObject = highestRiskObject(objects);
-        state.selectedObjectId = firstObject?.objectId ?? null;
+        state.selectedObjectId = firstObject?.object_id ?? null;
       }
     }
 
     const selectedObject = isObjectsMode && state.selectedObjectId !== null
-      ? objects.find(o => o.objectId === state.selectedObjectId) || null
+      ? objects.find(o => o.object_id === state.selectedObjectId) || null
       : null;
     const displaySource = selectedObject || source;
 
@@ -1233,22 +1253,22 @@ export function initializeSpectra() {
     renderTrafficLight(source);
     const activeObject = selectedObject || source;
       
-    const factors = activeObject?.riskFactors || {};
-    const km = activeObject?.kinematics || {};
+    const factors = activeObject?.risk_factors || {};
+    const km = activeObject?.motion || {};
     // Collision-ETA input gauges (raw measurements on a fixed scale).
-    setFillWidth("fill-distance", closenessGauge(km.distanceM));
-    setFillWidth("fill-closing", speedGauge(km.closingMps));
+    setFillWidth("fill-distance", closenessGauge(km.distance_m));
+    setFillWidth("fill-closing", speedGauge(km.closing_mps));
     // Additive weighted contributors (mirror score_raw): ETA + proximity + approach + brake.
-    setSignalBar("eta", etaPressure(activeObject?.collisionEta));
-    setSignalBar("near", factors.proximity);
-    setSignalBar("closing", factors.approach);
-    setSignalBar("brake", factors.brake);
+    setSignalBar("eta", ttc_score(activeObject?.eta));
+    setSignalBar("near", factors.proximity_score);
+    setSignalBar("closing", factors.approach_score);
+    setSignalBar("brake", factors.brake_score);
     // Multipliers: lane relevance (crossing) and confidence — shown as bars too.
-    setSignalBar("relevance", factors.crossing);
-    const conf = num(activeObject?.confidencePct, null);
+    setSignalBar("relevance", factors.corridor_score);
+    const conf = num(activeObject?.risk_confidence_pct, null);
     setSignalBar("confidence", conf === null ? null : conf / 100);
     setText("confidence-breakdown", confidenceBreakdown(activeObject?.confidence));
-    renderAdvanced(activeObject, source?.trafficLight);
+    renderAdvanced(activeObject, source?.traffic_light);
   }
 
   // ─── Timeline + event strip ──────────────────────────────
@@ -1322,7 +1342,7 @@ export function initializeSpectra() {
         </div>
         <div class="card-info">
           <div class="card-header">
-            <span class="event-id">${shortType(ev.objectType)} ${isReal(ev.displayId ?? ev.objectId) ? `#${ev.displayId ?? ev.objectId}` : MISSING}</span>
+            <span class="event-id">${shortType(ev.object_type)} ${isReal(ev.display_id ?? ev.object_id) ? `#${ev.display_id ?? ev.object_id}` : MISSING}</span>
             <span class="time">${formatSeconds(ts)}</span>
           </div>
 
@@ -1333,15 +1353,15 @@ export function initializeSpectra() {
             </div>
             <div class="box-item">
               <span class="lbl">COLLISION ETA</span>
-              <span class="val">${etaDisplay(ev.collisionEta)}</span>
+              <span class="val">${etaDisplay(ev.eta)}</span>
             </div>
             <div class="box-item">
               <span class="lbl">RISK SCORE</span>
-              <span class="val risk-score-val">${riskScoreLabel(ev.riskScore)}</span>
+              <span class="val risk-score-val">${risk_scoreLabel(ev.risk_score)}</span>
             </div>
             <div class="box-item">
               <span class="lbl">LANE</span>
-              <span class="val">${laneWithPosition(ev.lane, ev.lanePosition)}</span>
+              <span class="val">${laneWithPosition(ev.lane, ev.lane_position)}</span>
             </div>
           </div>
         </div>
@@ -1352,20 +1372,20 @@ export function initializeSpectra() {
 
   function frameSegmentsFromTimelineRows(rows) {
     const normalized = normalizeTimelineRowsForChart(rows)
-      .filter((row) => num(row.timeSec, null) !== null)
-      .sort((a, b) => a.timeSec - b.timeSec);
+      .filter((row) => num(row.time_sec, null) !== null)
+      .sort((a, b) => a.time_sec - b.time_sec);
     if (!normalized.length) return [];
     const { start: winStart, end: winEnd } = winBounds();
     return normalized.map((row, index) => {
       const prev = normalized[index - 1] || null;
       const next = normalized[index + 1] || null;
-      const rowTime = num(row.timeSec, winStart);
-      const start = index === 0 ? winStart : (num(prev?.timeSec, rowTime) + rowTime) / 2;
-      const end = next ? (rowTime + num(next.timeSec, rowTime)) / 2 : winEnd;
+      const rowTime = num(row.time_sec, winStart);
+      const start = index === 0 ? winStart : (num(prev?.time_sec, rowTime) + rowTime) / 2;
+      const end = next ? (rowTime + num(next.time_sec, rowTime)) / 2 : winEnd;
       return {
         start: clamp(start, winStart, winEnd),
         end: clamp(Math.max(end, start), winStart, winEnd),
-        sc: stateClass(row.riskState) === "none" ? "safe" : stateClass(row.riskState),
+        sc: stateClass(sourceState(row)) === "none" ? "safe" : stateClass(sourceState(row)),
         row,
       };
     }).filter((segment) => segment.end > segment.start);
@@ -1402,7 +1422,7 @@ export function initializeSpectra() {
       cell.className = `heat-cell heat-${seg.sc}`;
       cell.style.left = `${left}%`;
       cell.style.width = `${Math.max(0.2, right - left)}%`;
-      const score = clamp(num(seg.row?.riskScore, 0), 0, 1);
+      const score = clamp(num(seg.row?.risk_score, 0), 0, 1);
       const base = seg.sc === "safe" ? 0.16 : 0.4;
       cell.style.opacity = String(clamp(base + score * 0.6, 0.12, 1));
       layer.appendChild(cell);
@@ -1423,8 +1443,8 @@ export function initializeSpectra() {
     const hit = railTimeFromX(clientX);
     if (!tip || !hit || !state.timelineRows.length) return;
     const row = findTimelineRowAt(hit.t);
-    const sc = stateClass(row?.riskState);
-    const score = Math.round(clamp(num(row?.riskScore, 0), 0, 1) * 100);
+    const sc = stateClass(sourceState(row));
+    const score = Math.round(clamp(num(row?.risk_score, 0), 0, 1) * 100);
     tip.innerHTML = `<span class="tt-time">${formatSeconds(hit.t)}</span>`
       + `<span class="tt-state risk-${sc}">${sc === "none" ? "SAFE" : sc.toUpperCase()} · ${score}</span>`;
     tip.hidden = false;
@@ -1478,8 +1498,8 @@ export function initializeSpectra() {
     }
   }
 
-  function nearestEventIndexAt(timeSec, toleranceSec = null) {
-    const t = num(timeSec, null);
+  function nearestEventIndexAt(time_sec, toleranceSec = null) {
+    const t = num(time_sec, null);
     if (t === null) return null;
     const items = timelineEventItems();
     if (!items.length) return null;
@@ -1579,15 +1599,15 @@ export function initializeSpectra() {
   // Interactive marker: tooltip + click/Enter seeks the preview to that time.
   // `dot:false` draws only the invisible hit area + tooltip (no visible circle),
   // so the smooth numeric tabs keep seek/hover without a dense dot blob.
-  function addChartMarker(lineGroup, { x, y, color, sc, timeSec, tooltip, radius, dot = true }) {
+  function addChartMarker(lineGroup, { x, y, color, sc, time_sec, tooltip, radius, dot = true }) {
     const group = makeSvg("g", {
       class: `chart-event-marker chart-event-${sc}`,
-      "data-time": timeSec.toFixed(2),
+      "data-time": time_sec.toFixed(2),
       tabindex: 0,
       role: "button",
     });
     group.style.cursor = "pointer";
-    const seek = () => { seekPreviewVideo(timeSec); applyTimelineStateAt(timeSec); };
+    const seek = () => { seekPreviewVideo(time_sec); applyTimelineStateAt(time_sec); };
     group.addEventListener("click", seek);
     group.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -1616,8 +1636,8 @@ export function initializeSpectra() {
   function bucketRows(rows, winStart, winSpan, N) {
     const buckets = Array.from({ length: N }, () => []);
     rows.forEach((r) => {
-      if (r.timeSec == null) return;
-      const k = clamp(Math.floor(((r.timeSec - winStart) / winSpan) * N), 0, N - 1);
+      if (r.time_sec == null) return;
+      const k = clamp(Math.floor(((r.time_sec - winStart) / winSpan) * N), 0, N - 1);
       buckets[k].push(r);
     });
     return buckets;
@@ -1626,7 +1646,7 @@ export function initializeSpectra() {
   // Column (bar) renderer for the numeric tabs (Score / ETA). Each bar grows up
   // from `baselineY` to valueToY(value) → tall bar = danger, in both tabs. Zone
   // colour matches the background bands; clicking a bar seeks to that moment.
-  // `bars`: [{ x(center), value, sc, timeSec }].
+  // `bars`: [{ x(center), value, sc, time_sec }].
   function drawBars(group, bars, valueToY, baselineY, barW, tooltipFn) {
     bars.forEach((bar) => {
       const yTop = valueToY(bar.value);
@@ -1634,12 +1654,12 @@ export function initializeSpectra() {
       if (h <= 0.5) return; // safe / empty bucket → nothing to draw
       const g = makeSvg("g", {
         class: `chart-event-marker chart-event-${bar.sc}`,
-        "data-time": bar.timeSec.toFixed(2),
+        "data-time": bar.time_sec.toFixed(2),
         tabindex: 0,
         role: "button",
       });
       g.style.cursor = "pointer";
-      const seek = () => { seekPreviewVideo(bar.timeSec); applyTimelineStateAt(bar.timeSec); };
+      const seek = () => { seekPreviewVideo(bar.time_sec); applyTimelineStateAt(bar.time_sec); };
       g.addEventListener("click", seek);
       g.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
@@ -1736,18 +1756,18 @@ export function initializeSpectra() {
     });
 
     const points = rows.map((row) => {
-      const sc = stateClass(row.riskState);
+      const sc = stateClass(sourceState(row));
       const cls = sc === "none" ? "safe" : sc;
       return {
-        timeSec: row.timeSec,
+        time_sec: row.time_sec,
         sc: cls,
-        riskState: cls.toUpperCase(),
-        collisionEta: row.collisionEta,
-        objectType: row.objectType,
-        objectId: row.objectId,
-        displayId: row.displayId,
+        stabilized_state: cls.toUpperCase(),
+        eta: row.eta,
+        object_type: row.object_type,
+        object_id: row.object_id,
+        display_id: row.display_id,
         lane: row.lane,
-        x: clamp(xForTime(row.timeSec), 0, W),
+        x: clamp(xForTime(row.time_sec), 0, W),
         y: yByState[cls] ?? yByState.safe,
       };
     });
@@ -1758,7 +1778,7 @@ export function initializeSpectra() {
     }
     points.forEach((point) => {
       addChartMarker(lineGroup, {
-        x: point.x, y: point.y, sc: point.sc, timeSec: point.timeSec,
+        x: point.x, y: point.y, sc: point.sc, time_sec: point.time_sec,
         color: MARKER_COLOR[point.sc] || MARKER_COLOR.safe,
         radius: point.sc === "danger" ? 4.6 : 4,
         tooltip: timelinePointTooltip(point),
@@ -1769,14 +1789,14 @@ export function initializeSpectra() {
   // Score tab: 0–100 risk score as zone-coloured columns (worst-case per time
   // bucket). Threshold lines/zones drawn at the bands this analysis used.
   function renderScoreLayer(rows, { areaGroup, lineGroup, W }) {
-    const bands = state.riskBands || { cautionBand: 0.25, dangerBand: 0.60 };
-    const cautionY = chartY(bands.cautionBand, 0, 1);
-    const dangerY = chartY(bands.dangerBand, 0, 1);
+    const bands = state.riskBands || { caution_band: 0.25, danger_band: 0.60 };
+    const cautionY = chartY(bands.caution_band, 0, 1);
+    const dangerY = chartY(bands.danger_band, 0, 1);
     // Y-axis ticks ARE the band edges, drawn at their exact line positions.
     setChartYAxis([
       { text: "100", y: CHART_Y_TOP },
-      { text: String(Math.round(bands.dangerBand * 100)), y: dangerY },
-      { text: String(Math.round(bands.cautionBand * 100)), y: cautionY },
+      { text: String(Math.round(bands.danger_band * 100)), y: dangerY },
+      { text: String(Math.round(bands.caution_band * 100)), y: cautionY },
       { text: "0", y: CHART_Y_BOT },
     ]);
 
@@ -1802,7 +1822,7 @@ export function initializeSpectra() {
     // One column per time bucket; each bar = the worst-case (max) score in that
     // slice, so a brief danger spike isn't averaged away.
     const zoneOf = (score) =>
-      score >= bands.dangerBand ? "danger" : score >= bands.cautionBand ? "caution" : "safe";
+      score >= bands.danger_band ? "danger" : score >= bands.caution_band ? "caution" : "safe";
     const { start: winStart, span: winSpan } = winBounds();
     const N = clamp(Math.round(W / 12), 8, 40);
     const barW = (W / N) * 0.8;
@@ -1811,17 +1831,17 @@ export function initializeSpectra() {
     bucketRows(rows, winStart, winSpan, N).forEach((bucket, k) => {
       if (!bucket.length) return;
       let best = bucket[0];
-      let bestScore = num(bucket[0].riskScore, 0);
+      let bestScore = num(bucket[0].risk_score, 0);
       bucket.forEach((r) => {
-        const s = num(r.riskScore, 0);
+        const s = num(r.risk_score, 0);
         if (s > bestScore) { bestScore = s; best = r; }
       });
-      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc: zoneOf(bestScore), timeSec: best.timeSec });
+      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc: zoneOf(bestScore), time_sec: best.time_sec });
     });
     if (!bars.length) return;
 
     drawBars(lineGroup, bars, (v) => chartY(v, 0, 1), CHART_H, barW,
-      (b) => `Risk ${Math.round(b.value * 100)}/100 · ${formatSeconds(b.timeSec)}`);
+      (b) => `Risk ${Math.round(b.value * 100)}/100 · ${formatSeconds(b.time_sec)}`);
   }
 
   // ETA tab: collision TTC in seconds as zone-coloured columns. Low TTC sits at
@@ -1872,23 +1892,23 @@ export function initializeSpectra() {
       let best = null;
       let bestSec = Infinity;
       bucket.forEach((r) => {
-        const s = num(r?.collisionEta?.sec, null);
+        const s = num(r?.eta?.collision_ttc_sec, null);
         if (s !== null && s < bestSec) { bestSec = s; best = r; }
       });
       if (!best) return; // no closing in this bucket → safe, no bar
-      bars.push({ x: ((k + 0.5) / N) * W, value: bestSec, sc: zoneOf(bestSec), timeSec: best.timeSec });
+      bars.push({ x: ((k + 0.5) / N) * W, value: bestSec, sc: zoneOf(bestSec), time_sec: best.time_sec });
     });
     if (!bars.length) return;
 
     drawBars(lineGroup, bars, (v) => etaY(v), CHART_H, barW,
-      (b) => `TTC ${b.value.toFixed(1)}s · ${formatSeconds(b.timeSec)}`);
+      (b) => `TTC ${b.value.toFixed(1)}s · ${formatSeconds(b.time_sec)}`);
   }
 
 
   function currentTotalDuration() {
     return previewVideo?.duration
       || state.sourceMeta?.durationSec
-      || (state.currentResult?.frameCount && state.currentResult?.fps ? state.currentResult.frameCount / state.currentResult.fps : null)
+      || (state.currentResult?.frame_count && state.currentResult?.fps ? state.currentResult.frame_count / state.currentResult.fps : null)
       || 1;
   }
 
@@ -1903,10 +1923,10 @@ export function initializeSpectra() {
     return { start, end, span: Math.max(end - start, 0.01) };
   }
 
-  // Derive [min, max] timeSec from a set of timeline rows. Used to scale the
+  // Derive [min, max] time_sec from a set of timeline rows. Used to scale the
   // timeline/chart to the actually-analyzed span (both time and frames modes).
   function computeWindowFromRows(rows) {
-    const times = (rows || []).map((row) => num(row.timeSec ?? row.timestampSec, null)).filter((v) => v !== null);
+    const times = (rows || []).map((row) => num(row.time_sec ?? row.timestamp_sec, null)).filter((v) => v !== null);
     if (!times.length) return { startSec: 0, endSec: null };
     return { startSec: Math.min(...times), endSec: Math.max(...times) };
   }
@@ -1925,11 +1945,11 @@ export function initializeSpectra() {
     }
   }
 
-  function updateChartCursor(timeSec) {
+  function updateChartCursor(time_sec) {
     const cursor = byId("chart-cursor");
     if (!cursor) return;
     const { start, span } = winBounds();
-    const ratio = clamp((timeSec - start) / span, 0, 1);
+    const ratio = clamp((time_sec - start) / span, 0, 1);
     if (cursor) {
       const x = ratio * 400;
       cursor.setAttribute("x1", String(x));
@@ -1938,8 +1958,8 @@ export function initializeSpectra() {
     }
   }
 
-  function updateVideoTimeControls(timeSec) {
-    const t = num(timeSec, null);
+  function updateVideoTimeControls(time_sec) {
+    const t = num(time_sec, null);
     if (t === null) return;
     renderTimeReadout(t);
     // Seek bar spans the analyzed window (0% = winStart, 100% = winEnd).
@@ -1949,8 +1969,8 @@ export function initializeSpectra() {
     seekBar.style.setProperty("--fill", `${(ratio * 100).toFixed(1)}%`);
   }
 
-  function seekPreviewVideo(timeSec) {
-    const t = num(timeSec, null);
+  function seekPreviewVideo(time_sec) {
+    const t = num(time_sec, null);
     if (t === null || !previewVideo || previewVideo.hidden || !previewVideo.src) return;
     const applySeek = () => {
       // Clamp seeks to the analyzed window so the player stays scoped to it.
@@ -2071,15 +2091,15 @@ export function initializeSpectra() {
       if (state.pauseRiskLastKey === key) return;
       state.pauseRiskLastKey = key;
       previewVideo.pause();
-      const target = num(row?.timeSec, currentTime);
+      const target = num(row?.time_sec, currentTime);
       state.suppressVideoSyncCount = 1;
       seekPreviewVideo(target);
       applyTimelineStateAt(target, { switchMode: true });
     }
   }
 
-  function applyTimelineStateAt(timeSec, { switchMode = true } = {}) {
-    const t = num(timeSec, 0);
+  function applyTimelineStateAt(time_sec, { switchMode = true } = {}) {
+    const t = num(time_sec, 0);
     updateChartCursor(t);
     updateVideoTimeControls(t);
     const activeEventIndex = nearestEventIndexAt(t);
@@ -2095,7 +2115,7 @@ export function initializeSpectra() {
     const row = findTimelineRowAt(t);
     state.currentTimelineRow = row;
     drawOverlay(row);
-    if (switchMode) setUiMode("live", { timeSec: t });
+    if (switchMode) setUiMode("live", { time_sec: t });
     else renderRiskPanel();
     updateEvidenceControls();
 
@@ -2103,14 +2123,14 @@ export function initializeSpectra() {
 
 
   // ─── video-time sync to timelineRows ─────────────────────
-  function findTimelineRowAt(timeSec) {
+  function findTimelineRowAt(time_sec) {
     const rows = state.timelineRows;
     if (!rows.length) return null;
     let best = 0, bestDiff = Infinity;
     for (let i = 0; i < rows.length; i++) {
-      const t = num(rows[i].timeSec, null);
+      const t = num(rows[i].time_sec, null);
       if (t === null) continue;
-      const diff = Math.abs(t - timeSec);
+      const diff = Math.abs(t - time_sec);
       if (diff < bestDiff) { bestDiff = diff; best = i; }
     }
     return rows[best];
@@ -2131,7 +2151,7 @@ export function initializeSpectra() {
     const result = normalizePayload(payload);
     state.lastResult = { payload: cleanResponsePayload(payload) };
     state.currentResult = result;
-    if (result.sensitivity && Number.isFinite(result.sensitivity.cautionBand)) {
+    if (result.sensitivity && Number.isFinite(result.sensitivity.caution_band)) {
       state.riskBands = result.sensitivity;
     }
     state.timelineRows = result.timelineRows || [];
@@ -2211,7 +2231,7 @@ export function initializeSpectra() {
 
     const flatFrame = msg.frame ? flattenFrame(msg.frame) : null;
     const flatFrames = Array.isArray(msg.frames) ? msg.frames.map(flattenFrame) : null;
-    const ts = num(flatFrame?.timestampSec, 0);
+    const ts = num(flatFrame?.timestamp_sec, 0);
 
     const status = byId("ap-status");
     if (status && msg.progress !== undefined && msg.progress !== null) {
@@ -2308,8 +2328,8 @@ export function initializeSpectra() {
     });
     if (changed) {
       state.liveTimelineRows.sort((a, b) => {
-        const ta = num(a.timeSec, 0);
-        const tb = num(b.timeSec, 0);
+        const ta = num(a.time_sec, 0);
+        const tb = num(b.time_sec, 0);
         return ta - tb;
       });
     }
@@ -2317,20 +2337,20 @@ export function initializeSpectra() {
   }
 
   function upsertLiveEventFromFrame(frame, frameImage) {
-    const sc = stateClass(frame?.riskState);
+    const sc = stateClass(sourceState(frame));
     if (sc !== "danger" && sc !== "caution") return false;
-    const ts = num(frame.timestampSec, null);
+    const ts = num(frame.timestamp_sec, null);
     if (ts === null) return false;
 
     const candidate = {
       ...frame,
-      riskState: String(frame.riskState || "").toUpperCase(),
+      stabilized_state: String(sourceState(frame) || "").toUpperCase(),
       images: frameImage ? { blend: frameImage } : {},
     };
 
     let replaceIndex = -1;
     for (let i = 0; i < state.liveEvents.length; i++) {
-      if (Math.abs(num(state.liveEvents[i].timestampSec, 0) - ts) <= 1.0) {
+      if (Math.abs(num(state.liveEvents[i].timestamp_sec, 0) - ts) <= 1.0) {
         replaceIndex = i;
         break;
       }
@@ -2341,7 +2361,7 @@ export function initializeSpectra() {
     } else {
       state.liveEvents.push(candidate);
     }
-    state.liveEvents.sort((a, b) => num(a.timestampSec, 0) - num(b.timestampSec, 0));
+    state.liveEvents.sort((a, b) => num(a.timestamp_sec, 0) - num(b.timestamp_sec, 0));
     state.events = state.liveEvents.slice();
     return true;
   }
@@ -2760,7 +2780,7 @@ export function initializeSpectra() {
 
     const savedEvents = byId("max-saved-events-input");
     if (savedEvents) {
-      savedEvents.value = "20";
+      savedEvents.value = "25";
       savedEvents.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
@@ -2821,7 +2841,7 @@ export function initializeSpectra() {
       if (previewVideo.playbackRate !== state.playbackRate && state.playbackMode !== "slow-risk") {
         previewVideo.playbackRate = state.playbackRate;
       }
-      setUiMode("live", { timeSec: previewVideo.currentTime });
+      setUiMode("live", { time_sec: previewVideo.currentTime });
       startOverlayLoop();
     });
     previewVideo.addEventListener("pause", () => { previewFrame.classList.remove("is-playing"); stopOverlayLoop(); });
@@ -2843,7 +2863,7 @@ export function initializeSpectra() {
         const { start, span } = winBounds();
         const target = start + ratio * span;
         previewVideo.currentTime = target;
-        setUiMode("live", { timeSec: target });
+        setUiMode("live", { time_sec: target });
       }
     });
     byId("center-play-btn")?.addEventListener("click", () => {
@@ -2945,30 +2965,30 @@ export function initializeSpectra() {
     return selectedEventAtCurrentTime()
       || state.currentTimelineRow
       || findTimelineRowAt(previewVideo?.currentTime ?? 0)
-      || state.currentResult?.peakEvent
+      || state.currentResult?.peak_event
       || null;
   }
 
   function evidenceExportPayload() {
     const source = selectedEvidenceSource();
     if (!source) return null;
-    const primaryObject = getPrimaryObject(source) || source;
+    const primary_object = getPrimaryObject(source) || source;
     return {
-      sourceName: state.currentResult?.sourceName || fileInput.files[0]?.name || null,
-      frameIndex: source.frameIndex ?? null,
-      timestampSec: num(source.timestampSec ?? source.timeSec, null),
-      riskState: source.riskState || null,
-      riskScore: num(source.riskScore, null),
-      primaryObject: primaryObject ? {
-        objectId: primaryObject.objectId ?? null,
-        displayId: primaryObject.displayId ?? null,
-        objectType: primaryObject.objectType ?? null,
-        collisionEta: primaryObject.collisionEta ?? source.collisionEta ?? null,
-        lane: primaryObject.lane ?? source.lane ?? null,
-        lanePosition: primaryObject.lanePosition ?? source.lanePosition ?? null,
-        riskFactors: primaryObject.riskFactors ?? source.riskFactors ?? null,
-        kinematics: primaryObject.kinematics ?? source.kinematics ?? null,
-        confidence: primaryObject.confidence ?? source.confidence ?? null,
+      source_name: state.currentResult?.source_name || fileInput.files[0]?.name || null,
+      frame_index: source.frame_index ?? null,
+      timestamp_sec: num(source.timestamp_sec ?? source.time_sec, null),
+      stabilized_state: sourceState(source),
+      risk_score: num(source.risk_score, null),
+      primary_object: primary_object ? {
+        object_id: primary_object.object_id ?? null,
+        display_id: primary_object.display_id ?? null,
+        object_type: primary_object.object_type ?? null,
+        eta: primary_object.eta ?? source.eta ?? null,
+        lane: primary_object.lane ?? source.lane ?? null,
+        lane_position: primary_object.lane_position ?? source.lane_position ?? null,
+        risk_factors: primary_object.risk_factors ?? source.risk_factors ?? null,
+        motion: primary_object.motion ?? source.motion ?? null,
+        confidence: primary_object.confidence ?? source.confidence ?? null,
       } : null,
     };
   }
@@ -2998,7 +3018,7 @@ export function initializeSpectra() {
     if (!ctx) return;
     ctx.drawImage(previewVideo, 0, 0, width, height);
     canvas.toBlob((blob) => {
-      const base = safeFileStem(state.currentResult?.sourceName || fileInput.files[0]?.name);
+      const base = safeFileStem(state.currentResult?.source_name || fileInput.files[0]?.name);
       const stamp = Math.round((previewVideo.currentTime || 0) * 1000);
       downloadBlob(blob, `${base}_snapshot_${stamp}ms.png`);
     }, "image/png");
@@ -3009,16 +3029,16 @@ export function initializeSpectra() {
     if (!event) return;
     const blend = event?.images?.blend;
     if (!blend) return;
-    const base = safeFileStem(state.currentResult?.sourceName || fileInput.files[0]?.name);
-    const ts = Math.round(num(event?.timestampSec ?? event?.timeSec, previewVideo?.currentTime ?? 0) * 1000);
+    const base = safeFileStem(state.currentResult?.source_name || fileInput.files[0]?.name);
+    const ts = Math.round(num(event?.timestamp_sec ?? event?.time_sec, previewVideo?.currentTime ?? 0) * 1000);
     await downloadDataUrl(mediaSrc(blend), `${base}_evidence_${ts}ms.jpg`);
   }
 
   function exportEvidenceJson() {
     const payload = evidenceExportPayload();
     if (!payload) return;
-    const base = safeFileStem(payload.sourceName);
-    const ts = Math.round(num(payload.timestampSec, previewVideo?.currentTime ?? 0) * 1000);
+    const base = safeFileStem(payload.source_name);
+    const ts = Math.round(num(payload.timestamp_sec, previewVideo?.currentTime ?? 0) * 1000);
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     downloadBlob(blob, `${base}_evidence_${ts}ms.json`);
   }
@@ -3105,11 +3125,11 @@ export function initializeSpectra() {
     const payload = state.lastResult?.payload;
     const perfLogs = payload?.performance?.logs;
     if (!perfLogs || !perfLogs.length) return;
-    const sourceName = payload?.metadata?.sourceName || payload?.sourceName;
-    const baseName = safeFileStem(sourceName);
+    const source_name = payload?.metadata?.source_name || payload?.source_name;
+    const base_name = safeFileStem(source_name);
     const dateStr = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 16).replace("T", "_");
     const blob = new Blob([perfLogs.join("\n")], { type: "text/plain;charset=utf-8" });
-    downloadBlob(blob, `${baseName}_performance_logs_${dateStr}.txt`);
+    downloadBlob(blob, `${base_name}_performance_logs_${dateStr}.txt`);
   }
 
   function downloadJson() {
@@ -3119,10 +3139,10 @@ export function initializeSpectra() {
     const a = document.createElement("a");
     a.href = url;
     const payload = cleanResponsePayload(state.lastResult);
-    const sourceName = payload?.metadata?.sourceName || payload?.sourceName;
-    const baseName = sourceName ? sourceName.split('.')[0] : 'spectra';
+    const source_name = payload?.metadata?.source_name || payload?.source_name;
+    const base_name = source_name ? source_name.split('.')[0] : 'spectra';
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16).replace('T', '_');
-    a.download = `${baseName}_telemetry_${dateStr}.json`;
+    a.download = `${base_name}_telemetry_${dateStr}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -3194,9 +3214,9 @@ export function initializeSpectra() {
     byId("copy-logs-btn")?.addEventListener("click", copyLogs);
     byId("download-logs-btn")?.addEventListener("click", downloadLogs);
     
-    byId("toggle-mode-live")?.addEventListener("click", () => setUiMode("live", { timeSec: previewVideo?.currentTime ?? 0 }));
+    byId("toggle-mode-live")?.addEventListener("click", () => setUiMode("live", { time_sec: previewVideo?.currentTime ?? 0 }));
     byId("toggle-mode-summary")?.addEventListener("click", () => setUiMode("summary"));
-    byId("toggle-mode-objects")?.addEventListener("click", () => setUiMode("objects", { timeSec: previewVideo?.currentTime ?? 0 }));
+    byId("toggle-mode-objects")?.addEventListener("click", () => setUiMode("objects", { time_sec: previewVideo?.currentTime ?? 0 }));
 
     document.querySelectorAll("[data-telemetry-close]").forEach(el => el.addEventListener("click", closeTelemetryDrawer));
     document.querySelectorAll("[data-logs-close]").forEach(el => el.addEventListener("click", closeLogsDrawer));

@@ -74,25 +74,24 @@ def _serialize_event(
     *,
     image_ref: str | None,
 ) -> dict[str, Any]:
-    """Strip internal snake_case diagnostics, keep the v5 client-facing row.
+    """Strip internal diagnostics and keep the v6 client-facing row.
 
-    ``_event_payload_base`` already builds the v5 row (``frameIndex``,
-    ``state``, ``primary``, ``trafficLight``, ``laneGeometry``, ``objects``)
-    and overlays snake_case keys used only for dedup/ranking; here we select
-    just the client-facing fields and attach the shared image reference.
+    ``_event_payload_base`` already builds the v6 row and overlays a few
+    internal keys used only for dedup/ranking; here we select just the
+    client-facing fields and attach the shared image reference.
     """
 
     payload: dict[str, Any] = {
-        "frameIndex": event.get("frameIndex"),
-        "timestampSec": event.get("timestampSec"),
-        "state": event.get("state"),
+        "frame_index": event.get("frame_index"),
+        "timestamp_sec": event.get("timestamp_sec"),
+        "stabilized_state": event.get("stabilized_state"),
         "primary": event.get("primary"),
-        "trafficLight": event.get("trafficLight"),
-        "laneGeometry": event.get("laneGeometry"),
+        "traffic_light": event.get("traffic_light"),
+        "lane_geometry": event.get("lane_geometry"),
         "objects": event.get("objects") or [],
     }
     if image_ref is not None:
-        payload["imageRef"] = image_ref
+        payload["image_ref"] = image_ref
     return payload
 
 
@@ -114,7 +113,7 @@ _IMAGE_FIELDS: tuple[tuple[str, str], ...] = (
 def _pull_event_images(event: dict[str, Any], images: dict[str, dict[str, str]]) -> str | None:
     """Move RGB images from the event payload into the shared images dict.
 
-    Returns the imageRef key, or None if the event has no images attached.
+    Returns the image_ref key, or None if the event has no images attached.
     Frame index is unique per saved event (deduplicated upstream), so it's
     a stable lookup key.
     """
@@ -141,20 +140,20 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
     ]
 
     payload: dict[str, Any] = {
-        "schemaVersion": 5,
+        "schema_version": 6,
         "metadata": {
-            "sourceName": source_name,
+            "source_name": source_name,
             "fps": result.get("fps"),
-            "frameCount": result.get("frame_count"),
-            "processedFrames": result.get("processed_frames"),
-            "frameWidth": result.get("frame_width"),
-            "frameHeight": result.get("frame_height"),
-            "elapsedSec": round(elapsed_sec, 3),
+            "frame_count": result.get("frame_count"),
+            "processed_frames": result.get("processed_frames"),
+            "frame_width": result.get("frame_width"),
+            "frame_height": result.get("frame_height"),
+            "elapsed_sec": round(elapsed_sec, 3),
             "sensitivity": result.get("sensitivity")
-            or {"cautionBand": 0.25, "dangerBand": 0.60},
+            or {"caution_band": 0.25, "danger_band": 0.60},
         },
         "frames": result.get("frames") or [],
-        "peakEvent": None if peak_event is None else _serialize_event(peak_event, image_ref=peak_ref),
+        "peak_event": None if peak_event is None else _serialize_event(peak_event, image_ref=peak_ref),
         "events": serialized_events,
         "images": images,
         "performance": {
@@ -258,7 +257,7 @@ async def analyze_endpoint(
     file: UploadFile = File(...),
     mode: str = Form("video"),
     max_processed_frames: int = Form(DEFAULT_MAX_PROCESSED_FRAMES),
-    max_saved_events: int = Form(20),
+    max_saved_events: int = Form(25),
     resize_max_side: int = Form(512),
     depth_every: int = Form(10),
     adaptive_depth: str = Form("1"),
@@ -315,6 +314,9 @@ async def analyze_endpoint(
             source_path = Path(temp_dir) / source_name
             source_path.write_bytes(upload_bytes)
 
+            sensitivity_value = (
+                sensitivity.strip().lower() if isinstance(sensitivity, str) else "balanced"
+            )
             result = await asyncio.to_thread(
                 analyze_spatial_video,
                 video_path=source_path,
@@ -326,11 +328,7 @@ async def analyze_endpoint(
                 detect_every=_nearest_allowed(int(detect_every), DETECT_EVERY_OPTIONS),
                 lane_every=_nearest_allowed(int(lane_every), LANE_EVERY_OPTIONS),
                 flow_every=_nearest_allowed(int(flow_every), FLOW_EVERY_OPTIONS),
-                sensitivity=(
-                    sensitivity.strip().lower()
-                    if sensitivity.strip().lower() in SENSITIVITY_OPTIONS
-                    else "balanced"
-                ),
+                sensitivity=sensitivity_value if sensitivity_value in SENSITIVITY_OPTIONS else "balanced",
                 start_sec=float(start_sec),
                 end_sec=float(end_sec) if float(end_sec) > 0 else None,
                 start_frame=max(0, int(start_frame)),

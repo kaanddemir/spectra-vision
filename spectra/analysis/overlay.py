@@ -34,11 +34,11 @@ def _readable_lane(lane: str | None) -> str:
 def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
     if event.bbox is None:
         return
-    if event.state == "SAFE":
+    if event.raw_state == "SAFE":
         return
     x1, y1, x2, y2 = event.bbox
-    color = COLORS.get(event.state, (160, 170, 190))
-    thickness = 2 if event.state == "DANGER" else 1
+    color = COLORS.get(event.raw_state, (160, 170, 190))
+    thickness = 2 if event.raw_state == "DANGER" else 1
 
     cv2.rectangle(output, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
 
@@ -47,8 +47,8 @@ def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
     if display_id is not None:
         label_parts.append(f"#{display_id}")
     label_parts.append(event.object_type.upper())
-    if event.ttc_sec is not None:
-        label_parts.append(f"ETA {event.ttc_sec:.1f}s")
+    if event.collision_ttc_sec is not None:
+        label_parts.append(f"ETA {event.collision_ttc_sec:.1f}s")
     if event.brake_score >= 0.5:
         label_parts.append("BRAKE")
     label = " ".join(label_parts)
@@ -238,7 +238,7 @@ def annotate_frame(
 ) -> np.ndarray:
     output = frame_bgr.copy()
     height, width = output.shape[:2]
-    color = COLORS.get(primary_event.state, (220, 220, 220))
+    color = COLORS.get(primary_event.raw_state, (220, 220, 220))
 
     # 1. Forward collision corridor. This is presentation only; risk uses the
     # same lane geometry upstream and adjusts trust via lane confidence.
@@ -248,16 +248,16 @@ def annotate_frame(
     # 2. Per-object bboxes — draw only actionable objects so safe background
     # traffic does not clutter the analysis view.
     state_order = {"SAFE": 0, "CAUTION": 1, "DANGER": 2}
-    for event in sorted(object_events, key=lambda e: state_order.get(e.state, 0)):
+    for event in sorted(object_events, key=lambda e: state_order.get(e.raw_state, 0)):
         _draw_bbox(output, event)
 
-    eta_str = "--" if primary_event.ttc_sec is None else f"{primary_event.ttc_sec:.1f}s"
+    eta_str = "--" if primary_event.collision_ttc_sec is None else f"{primary_event.collision_ttc_sec:.1f}s"
     lane_lbl = _readable_lane(primary_event.lane)
     obj_lbl = (primary_event.object_type or "scene").title()
 
     # 3. Telemetry HUD card. Only visible in CAUTION/DANGER states to keep 
     # the SAFE view clean, matching the event timeline logic.
-    if primary_event.state in {"CAUTION", "DANGER"}:
+    if primary_event.raw_state in {"CAUTION", "DANGER"}:
         card_x, card_y = 12, 10
         pad = 10
         inner_x = card_x + pad
@@ -267,7 +267,7 @@ def annotate_frame(
         lane_text = lane_lbl if lane_lbl and primary_event.bbox is not None else "--"
         metric_text = f"C. ETA {eta_str} | Risk {risk_label} | {lane_text}"
 
-        state_text = primary_event.state
+        state_text = primary_event.raw_state
         (stw, _), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
         (otw, _), _ = cv2.getTextSize(object_label, _FONT, 0.43, 1)
         (mtw, _), _ = cv2.getTextSize(metric_text, _FONT, 0.4, 1)
