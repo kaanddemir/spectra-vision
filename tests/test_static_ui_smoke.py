@@ -94,3 +94,18 @@ def test_sampling_presets_keep_balanced_video_resolution():
         match = re.search(rf"{preset}: .*?values: \{{([^}}]+)\}}", controls)
         assert match is not None
         assert "resize_max_side: 512" in match.group(1)
+
+
+def test_event_timeline_renders_risk_segments_instead_of_point_markers():
+    index = _read("index.html")
+    controls = _read("js/controls.js")
+    timeline_css = _read("css/timeline.css")
+
+    assert "Risk Segments:" in index
+    assert "eventBandsFromTimelineRows" in controls
+    assert "timeline-event-segment" in controls
+    assert "dataset.indexes" in controls
+    assert "No risk segments yet" in controls
+    assert "eventBands.forEach((band, bandIndex)" in controls
+    assert "seekFromPlayerTrack" in controls
+    assert ".timeline-event.timeline-event-segment" in timeline_css

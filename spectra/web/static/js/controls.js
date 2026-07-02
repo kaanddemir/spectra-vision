@@ -1266,9 +1266,6 @@ export function initializeSpectra() {
     // Scale the strip to the analyzed window so the data fills the timeline.
     const { start: winStart, span: winSpan } = winBounds();
 
-    const totalEventsEl = byId("stat-total-events");
-    if (totalEventsEl) totalEventsEl.textContent = String(eventItems.length);
-
     const axis = byId("timeline-axis");
     axis.replaceChildren();
     const ticks = 6;
@@ -1286,42 +1283,72 @@ export function initializeSpectra() {
     const strip = byId("event-strip");
     strip.replaceChildren();
 
-    if (!eventItems.length) {
+    const eventBands = eventBandsFromTimelineRows(timelineRows, eventItems);
+    const totalEventsEl = byId("stat-total-events");
+    if (totalEventsEl) totalEventsEl.textContent = String(eventBands.length);
+
+    eventBands.forEach((band, bandIndex) => {
+      const left = clamp(((band.start - winStart) / winSpan) * 100, 0, 100);
+      const right = clamp(((band.end - winStart) / winSpan) * 100, 0, 100);
+      const width = Math.max(0.6, right - left);
+      const firstItem = band.items[0] || null;
+      const targetTs = firstItem?.ts ?? clamp(num(band.row?.timestamp_sec ?? band.row?.time_sec, band.start), band.start, band.end);
+      const markerLeft = clamp(((targetTs - winStart) / winSpan) * 100, 0, 100);
+      const segment = document.createElement("span");
+      segment.className = `timeline-event timeline-event-segment ev-${band.sc}`;
+      segment.dataset.segment = String(bandIndex);
+      if (firstItem) segment.dataset.index = String(firstItem.index);
+      if (band.items.length) segment.dataset.indexes = band.items.map((item) => item.index).join(",");
+      segment.style.left = `${left}%`;
+      segment.style.width = `${width}%`;
+      const suffix = band.items.length ? ` | ${band.items.length} event${band.items.length === 1 ? "" : "s"}` : "";
+      segment.title = `${band.sc.toUpperCase()} ${formatSeconds(band.start)} - ${formatSeconds(band.end)}${suffix}`;
+      segment.setAttribute("aria-label", segment.title);
+      track.appendChild(segment);
+
+      const marker = document.createElement("button");
+      marker.type = "button";
+      marker.className = `timeline-evidence-dot ev-${band.sc}`;
+      marker.dataset.segment = String(bandIndex);
+      if (firstItem) marker.dataset.index = String(firstItem.index);
+      if (band.items.length) marker.dataset.indexes = band.items.map((item) => item.index).join(",");
+      marker.style.left = `${markerLeft}%`;
+      marker.title = `Show evidence · ${segment.title}`;
+      marker.setAttribute("aria-label", marker.title);
+      marker.addEventListener("click", (e) => {
+        e.stopPropagation();
+        focusRiskBand(band, bandIndex);
+      });
+      track.appendChild(marker);
+    });
+
+    if (!eventBands.length) {
       const e = document.createElement("div");
       e.className = "event-empty";
-      e.textContent = "No events yet";
+      e.textContent = "No risk segments yet";
       strip.appendChild(e);
       return;
     }
 
-    eventItems.forEach((item) => {
-      const { ev, index: idx, sc, ts } = item;
-      const left = clamp(((ts - winStart) / winSpan) * 100, 0, 100);
-      const dot = document.createElement("button");
-      dot.type = "button";
-      dot.className = `timeline-event ev-${sc}`;
-      dot.dataset.index = String(idx);
-      dot.style.left = `${left}%`;
-      dot.title = eventTooltip(item);
-      dot.setAttribute("aria-label", dot.title);
-      dot.addEventListener("click", (e) => {
-        e.stopPropagation();
-        seekPreviewVideo(ts);
-        applyTimelineStateAt(ts);
-        setActiveEventIndex(idx, { scroll: true });
-      });
-      track.appendChild(dot);
-    });
-
-    eventItems.forEach((item) => {
-      const { ev, index: idx, sc, ts } = item;
+    eventBands.forEach((band, bandIndex) => {
+      const firstItem = band.items[0] || null;
+      const source = firstItem?.ev || band.row || {};
+      const indexes = band.items.map((item) => item.index).join(",");
+      const displayId = source.display_id ?? source.object_id;
+      const typeLabel = shortType(source.object_type);
+      const objectLabel = isReal(displayId)
+        ? `${typeLabel === MISSING ? "Object" : typeLabel} #${displayId}`
+        : `${band.sc.toUpperCase()} #${bandIndex + 1}`;
+      const durationSec = Math.max(0, band.end - band.start);
       const card = document.createElement("button");
       card.type = "button";
-      card.className = `event-card ev-${sc}`;
-      card.dataset.index = String(idx);
-      card.addEventListener("click", () => focusEvent(idx));
+      card.className = `event-card ev-${band.sc}`;
+      card.dataset.segment = String(bandIndex);
+      if (firstItem) card.dataset.index = String(firstItem.index);
+      if (indexes) card.dataset.indexes = indexes;
+      card.addEventListener("click", () => focusRiskBand(band, bandIndex));
 
-      const thumbImg = mediaSrc(ev?.images?.original || ev?.images?.blend || resultImages.original || resultImages.blend);
+      const thumbImg = mediaSrc(source?.images?.original || source?.images?.blend || resultImages.original || resultImages.blend);
 
       card.innerHTML = `
         <div class="card-visual">
@@ -1329,32 +1356,61 @@ export function initializeSpectra() {
         </div>
         <div class="card-info">
           <div class="card-header">
-            <span class="event-id">${shortType(ev.object_type)} ${isReal(ev.display_id ?? ev.object_id) ? `#${ev.display_id ?? ev.object_id}` : MISSING}</span>
-            <span class="time">${formatSeconds(ts)}</span>
+            <span class="event-id">${objectLabel}</span>
+            <span class="time">${formatSeconds(band.start)} - ${formatSeconds(band.end)}</span>
           </div>
 
           <div class="card-boxes">
             <div class="box-item">
               <span class="lbl">STATUS</span>
-              <span class="val status-val">${sc.toUpperCase()}</span>
+              <span class="val status-val">${band.sc.toUpperCase()}</span>
             </div>
             <div class="box-item">
-              <span class="lbl">COLLISION ETA</span>
-              <span class="val">${etaDisplay(ev.eta)}</span>
+              <span class="lbl">DURATION</span>
+              <span class="val">${durationSec.toFixed(1)}s</span>
             </div>
             <div class="box-item">
               <span class="lbl">RISK SCORE</span>
-              <span class="val risk-score-val">${risk_scoreLabel(ev.risk_score)}</span>
+              <span class="val risk-score-val">${risk_scoreLabel(source.risk_score)}</span>
             </div>
             <div class="box-item">
               <span class="lbl">LANE</span>
-              <span class="val">${laneWithPosition(ev.lane, ev.lane_position)}</span>
+              <span class="val">${laneWithPosition(source.lane, source.lane_position)}</span>
             </div>
           </div>
         </div>
       `;
       strip.appendChild(card);
     });
+  }
+
+  function focusRiskBand(band, bandIndex = null) {
+    if (!band) return;
+    const firstItem = band.items?.[0] || null;
+    const source = firstItem?.ev || band.row || null;
+    const sourceTs = num(source?.timestamp_sec ?? source?.time_sec, null);
+    const targetTs = firstItem?.ts ?? clamp(sourceTs ?? band.start, band.start, band.end);
+    state.suppressVideoSyncCount = 2;
+    seekPreviewVideo(targetTs);
+    updateChartCursor(targetTs);
+    updateVideoTimeControls(targetTs);
+    applyTimelineStateAt(targetTs, { switchMode: false });
+    if (firstItem) {
+      setUiMode("summary", { sourceEvent: firstItem.ev });
+    } else {
+      setUiMode("live", { time_sec: targetTs });
+    }
+    if (bandIndex !== null && bandIndex !== undefined) {
+      setActiveRiskSegmentIndex(bandIndex, { scroll: true });
+    } else if (firstItem) {
+      setActiveEventIndex(firstItem.index, { scroll: true });
+    } else {
+      setActiveEventIndex(null);
+    }
+    const blendImage = imageSetForEvent(source).blend;
+    if (blendImage) {
+      showPreviewOverlay(blendImage, 3000);
+    }
   }
 
   function frameSegmentsFromTimelineRows(rows) {
@@ -1394,6 +1450,73 @@ export function initializeSpectra() {
     return segments;
   }
 
+  function eventBandsFromTimelineRows(rows, eventItems = []) {
+    const { start: winStart, end: winEnd, span: winSpan } = winBounds();
+    const mergeGap = clamp(winSpan * 0.004, 0.04, 0.12);
+    const frameSegments = frameSegmentsFromTimelineRows(rows);
+    const bands = [];
+    frameSegments.forEach((segment) => {
+      if (segment.sc !== "caution" && segment.sc !== "danger") return;
+      const last = bands[bands.length - 1] || null;
+      if (last && last.sc === segment.sc && segment.start <= last.end + mergeGap) {
+        last.end = Math.max(last.end, segment.end);
+        last.row = preferTimelineRow(segment.row, last.row) ? segment.row : last.row;
+        last.score = Math.max(last.score, clamp(num(segment.row?.risk_score, 0), 0, 1));
+        return;
+      }
+      bands.push({
+        start: segment.start,
+        end: segment.end,
+        sc: segment.sc,
+        row: segment.row,
+        score: clamp(num(segment.row?.risk_score, 0), 0, 1),
+        items: [],
+      });
+    });
+
+    if (!bands.length && eventItems.length) {
+      const fallbackHalfSpan = clamp(winSpan * 0.018, 0.12, 0.45);
+      eventItems.forEach((item) => {
+        const start = clamp(item.ts - fallbackHalfSpan, winStart, winEnd);
+        const end = clamp(item.ts + fallbackHalfSpan, start + 0.01, winEnd);
+        const last = bands[bands.length - 1] || null;
+        if (last && last.sc === item.sc && start <= last.end + mergeGap) {
+          last.end = Math.max(last.end, end);
+          last.score = Math.max(last.score, clamp(num(item.ev?.risk_score, 0), 0, 1));
+          return;
+        }
+        bands.push({ start, end, sc: item.sc, row: item.ev, score: clamp(num(item.ev?.risk_score, 0), 0, 1), items: [] });
+      });
+    }
+
+    bands.forEach((band) => {
+      const tolerance = Math.max(mergeGap, (band.end - band.start) * 0.25);
+      band.items = eventItems.filter((item) => (
+        item.sc === band.sc &&
+        item.ts >= band.start - tolerance &&
+        item.ts <= band.end + tolerance
+      ));
+      if (!band.items.length) {
+        let best = null;
+        let bestDiff = Infinity;
+        eventItems.forEach((item) => {
+          if (item.sc !== band.sc) return;
+          const diff = Math.min(Math.abs(item.ts - band.start), Math.abs(item.ts - band.end));
+          if (diff < bestDiff) {
+            best = item;
+            bestDiff = diff;
+          }
+        });
+        if (best && bestDiff <= clamp(winSpan * 0.04, 0.4, 1.2)) band.items = [best];
+      }
+      band.items.forEach((item) => {
+        band.score = Math.max(band.score, clamp(num(item.ev?.risk_score, 0), 0, 1));
+      });
+    });
+
+    return bands;
+  }
+
   // Event-timeline heat band: one colored cell per frame segment, coloured by
   // risk state and faded by risk score so risk concentration reads at a glance.
   function renderTimelineHeat(rows) {
@@ -1409,9 +1532,7 @@ export function initializeSpectra() {
       cell.className = `heat-cell heat-${seg.sc}`;
       cell.style.left = `${left}%`;
       cell.style.width = `${Math.max(0.2, right - left)}%`;
-      const score = clamp(num(seg.row?.risk_score, 0), 0, 1);
-      const base = seg.sc === "safe" ? 0.16 : 0.4;
-      cell.style.opacity = String(clamp(base + score * 0.6, 0.12, 1));
+      cell.style.opacity = seg.sc === "safe" ? "0.28" : "0.82";
       layer.appendChild(cell);
     });
   }
@@ -1450,6 +1571,26 @@ export function initializeSpectra() {
     applyTimelineStateAt(hit.t);
   }
 
+  function seekTimeFromTrackX(clientX) {
+    const track = seekBar?.closest(".seek-track");
+    if (!track) return null;
+    const rect = track.getBoundingClientRect();
+    const ratio = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const { start, span } = winBounds();
+    return { t: start + ratio * span, ratio };
+  }
+
+  function seekFromPlayerTrack(clientX) {
+    if (!previewVideo?.src || previewVideo.hidden) return;
+    const hit = seekTimeFromTrackX(clientX);
+    if (!hit) return;
+    seekBar.value = String(Math.round(hit.ratio * 1000));
+    seekBar.style.setProperty("--fill", `${(hit.ratio * 100).toFixed(1)}%`);
+    state.suppressVideoSyncCount = 1;
+    seekPreviewVideo(hit.t);
+    applyTimelineStateAt(hit.t);
+  }
+
   function renderFrameRiskSegments(rows) {
     const layer = byId("player-risk-segments");
     if (!layer) return;
@@ -1475,8 +1616,22 @@ export function initializeSpectra() {
   function setActiveEventIndex(idx, { scroll = false } = {}) {
     const activeValue = idx === null || idx === undefined ? null : String(idx);
     let activeCard = null;
-    document.querySelectorAll(".event-card, .timeline-event, .chart-event-marker").forEach((el) => {
-      const isActive = activeValue !== null && el.getAttribute("data-index") === activeValue;
+    document.querySelectorAll(".event-card, .timeline-event, .timeline-evidence-dot, .chart-event-marker").forEach((el) => {
+      const indexes = (el.dataset.indexes || el.getAttribute("data-index") || "").split(",").filter(Boolean);
+      const isActive = activeValue !== null && indexes.includes(activeValue);
+      el.classList.toggle("is-active", isActive);
+      if (isActive && el.classList.contains("event-card")) activeCard = el;
+    });
+    if (scroll && activeCard) {
+      activeCard.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+    }
+  }
+
+  function setActiveRiskSegmentIndex(idx, { scroll = false } = {}) {
+    const activeValue = idx === null || idx === undefined ? null : String(idx);
+    let activeCard = null;
+    document.querySelectorAll(".event-card, .timeline-event, .timeline-evidence-dot").forEach((el) => {
+      const isActive = activeValue !== null && el.dataset.segment === activeValue;
       el.classList.toggle("is-active", isActive);
       if (isActive && el.classList.contains("event-card")) activeCard = el;
     });
@@ -2792,6 +2947,10 @@ export function initializeSpectra() {
         setUiMode("live", { time_sec: target });
       }
     });
+    seekBar.addEventListener("click", (e) => {
+      e.stopPropagation();
+      seekFromPlayerTrack(e.clientX);
+    });
     byId("center-play-btn")?.addEventListener("click", () => {
       if (!previewVideo.src) return;
       if (previewVideo.paused) {
@@ -2811,6 +2970,7 @@ export function initializeSpectra() {
     const seekTrackEl = seekBar?.closest(".seek-track");
     seekTrackEl?.addEventListener("mousemove", (e) => showSeekTooltipAt(e.clientX));
     seekTrackEl?.addEventListener("mouseleave", hideSeekTooltip);
+    seekTrackEl?.addEventListener("click", (e) => seekFromPlayerTrack(e.clientX));
     const railEl = byId("timeline-rail");
     railEl?.addEventListener("mousemove", (e) => showTimelineTipAt(e.clientX));
     railEl?.addEventListener("mouseleave", hideTimelineTip);
