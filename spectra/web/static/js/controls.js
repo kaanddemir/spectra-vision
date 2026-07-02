@@ -987,6 +987,19 @@ export function initializeSpectra() {
     return n === null ? MISSING : String(Math.round(clamp(n, 0, 1) * 100));
   };
 
+  // Colour a 0–1 risk score by its own band (the Risk Timeline Score-tab zones),
+  // NOT by the stabilized banner state. Keeps the score number consistent with
+  // where it lands on the timeline: a low score reads green even while the
+  // scene-level banner is escalated to DANGER, and vice versa.
+  const scoreBandColor = (value) => {
+    const n = num(value, null);
+    if (n === null) return null;
+    const bands = state.riskBands || { caution_band: 0.25, danger_band: 0.60 };
+    if (n >= bands.danger_band) return RISK_COLORS.DANGER;
+    if (n >= bands.caution_band) return RISK_COLORS.CAUTION;
+    return RISK_COLORS.SAFE;
+  };
+
   function focusSummaryFrame(source) {
     if (state.uiMode !== "summary") return;
     const ts = eventTimestamp(source);
@@ -1126,6 +1139,10 @@ export function initializeSpectra() {
     byId("risk-band-main").textContent = stabilized_state ? String(stabilized_state).toUpperCase() : MISSING;
     byId("alert-ttc").textContent = etaDisplay(source?.eta);
     setText("risk-score-main", hasObject ? risk_scoreLabel(source?.risk_score) : MISSING);
+    const scoreEl = byId("risk-score-main");
+    // Score number follows its own band (green/yellow/red per the Risk Timeline
+    // thresholds), independent of the escalated banner state above it.
+    if (scoreEl) scoreEl.style.color = hasObject ? (scoreBandColor(source?.risk_score) || "") : "";
     const subtitle = byId("risk-subtitle");
     if (subtitle) {
       const label = objectLabel(source);
@@ -1976,14 +1993,12 @@ export function initializeSpectra() {
         const s = num(r.risk_score, 0);
         if (s > bestScore) { bestScore = s; best = r; }
       });
-      // Colour by the frame's authoritative state (same field the State tab and
-      // banner use) so a score sitting on a band edge is not re-thresholded into
-      // a different colour — e.g. a CAUTION frame stays yellow even if its score
-      // lands exactly on the danger edge. Fall back to score banding if the row
-      // carries no explicit state.
-      const rowState = stateClass(sourceState(best));
-      const sc = rowState === "none" ? zoneOf(bestScore) : rowState;
-      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc, time_sec: best.time_sec });
+      // Colour by the score's own band (the same sensitivity thresholds the
+      // RISK SCORE number and the zone fills use), NOT the escalated banner
+      // state — so a 44 score reads yellow under a 48 danger edge even when TTC
+      // imminence pushed the banner to DANGER. Bars, zones, threshold line and
+      // the score number all move together when alert sensitivity changes.
+      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc: zoneOf(bestScore), time_sec: best.time_sec });
     });
     if (!bars.length) return;
 
