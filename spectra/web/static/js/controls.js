@@ -128,15 +128,15 @@ export function initializeSpectra() {
     const s = Math.max(0, n) % 60;
     return `${String(m).padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}`;
   };
-  const etaDisplay = (eta) => {
-    const display = eta?.display;
+  const ttcDisplay = (ttc) => {
+    const display = ttc?.display;
     if (!display) return MISSING;
     return ["Estimating", "No closing", "Low confidence"].includes(display) ? MISSING : display;
   };
-  const collision_ttc_seconds = (eta) => num(eta?.collision_ttc_sec, null);
+  const collision_ttc_seconds = (ttc) => num(ttc?.collision_ttc_sec, null);
   // TTC score mirrors the backend: (3 - ttc)/3 clamped, 0 when not closing.
-  const ttc_score = (eta) => {
-    const sec = collision_ttc_seconds(eta);
+  const ttc_score = (ttc) => {
+    const sec = collision_ttc_seconds(ttc);
     return sec === null ? 0 : clamp((3 - sec) / 3, 0, 1);
   };
   const laneWithPosition = (lane, lane_position) => {
@@ -163,7 +163,7 @@ export function initializeSpectra() {
   };
 
   // Lift the primary object's fields onto the row so chart, banner and panel
-  // consumers can read the selected object's ETA/risk data directly.
+  // consumers can read the selected object's TTC/risk data directly.
   const getPrimaryObject = (row) => {
     if (!row || !Array.isArray(row.objects)) return null;
     const id = row.primary_object_id;
@@ -171,12 +171,12 @@ export function initializeSpectra() {
     return row.objects.find((o) => o && o.object_id === id) || null;
   };
 
-  // Translate one v6 object-centric metric into the flat field names the panels,
+  // Translate one v7 object-centric metric into the flat field names the panels,
   // chart, banner, overlay and exports consume.
   const flattenObject = (obj) => {
     if (!obj) return obj;
     const risk = obj.risk || {};
-    const eta = obj.eta || {};
+    const ttc = obj.ttc || {};
     const motion = obj.motion || {};
     const laneInfo = obj.lane || {};
     const conf = obj.confidence || {};
@@ -191,7 +191,7 @@ export function initializeSpectra() {
       risk_score: num(risk.risk_score, null),
       // Flat signal blocks the panels/overlay/exports read directly.
       risk_factors: risk.factors || {},
-      eta: { display: eta.display ?? null, collision_ttc_sec: num(eta.collision_ttc_sec, null) },
+      ttc: { display: ttc.display ?? null, collision_ttc_sec: num(ttc.collision_ttc_sec, null) },
       motion: {
         distance_m: num(motion.distance_m, null),
         closing_mps: num(motion.closing_mps, null),
@@ -204,7 +204,7 @@ export function initializeSpectra() {
       },
       confidence: conf,
       risk_confidence,
-      ttc_agreement: num(eta.ttc_agreement, null),
+      ttc_agreement: num(ttc.ttc_agreement, null),
       lane: laneInfo.lane ?? null,
       lane_position: num(laneInfo.lane_position, null),
       bbox: obj.bbox ?? null,
@@ -237,7 +237,7 @@ export function initializeSpectra() {
       display_id: primary?.display_id ?? primary_id,
       object_type: primary?.object_type ?? null,
       lane: primary ? (primaryInfo.lane ?? null) : null,
-      eta: primary?.eta ?? null,
+      ttc: primary?.ttc ?? null,
       risk_factors: primary?.risk_factors ?? null,
       motion: primary?.motion ?? null,
       evidence: primary?.evidence ?? null,
@@ -285,7 +285,7 @@ export function initializeSpectra() {
       index: sourceIndex,
       sc: eventStateClass(ev),
       ts: eventTimestamp(ev),
-      eta: ev?.eta || null,
+      ttc: ev?.ttc || null,
     }))
     .filter((item) => item.ts !== null && (item.sc === "caution" || item.sc === "danger"));
   const timelineEventItems = (source = state) => {
@@ -296,7 +296,7 @@ export function initializeSpectra() {
   };
   const eventTooltip = (item) => {
     const parts = [`#${(item.displayIndex ?? item.index) + 1}`, formatSeconds(item.ts), item.sc.toUpperCase()];
-    parts.push(`ETA ${etaDisplay(item.eta)}`);
+    parts.push(`TTC ${ttcDisplay(item.ttc)}`);
     const lane = eventLane(item.ev);
     if (lane) parts.push(lane);
     return parts.join(" | ");
@@ -321,8 +321,8 @@ export function initializeSpectra() {
     const currentSeverity = timelineSeverity(current);
     if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity;
 
-    const candidate_collision_ttc_sec = collision_ttc_seconds(candidate?.eta);
-    const current_collision_ttc_sec = collision_ttc_seconds(current?.eta);
+    const candidate_collision_ttc_sec = collision_ttc_seconds(candidate?.ttc);
+    const current_collision_ttc_sec = collision_ttc_seconds(current?.ttc);
     if (candidate_collision_ttc_sec !== null && current_collision_ttc_sec !== null && candidate_collision_ttc_sec !== current_collision_ttc_sec) {
       return candidate_collision_ttc_sec < current_collision_ttc_sec;
     }
@@ -358,7 +358,7 @@ export function initializeSpectra() {
     return [
       `Time: ${point.time_sec.toFixed(2).replace(/\.?0+$/, "")}s`,
       `State: ${sourceState(point)}`,
-      `TTC: ${etaDisplay(point.eta)}`,
+      `TTC: ${ttcDisplay(point.ttc)}`,
       `Object: ${object}`,
       `Lane: ${shortLane(point.lane)}`,
     ].join("\n");
@@ -578,12 +578,12 @@ export function initializeSpectra() {
       const did = obj.display_id ?? obj.object_id;
       if (did !== null && did !== undefined) parts.push(`#${did}`);
       if (obj.object_type) parts.push(String(obj.object_type).toUpperCase());
-      const eta = num(obj.eta?.collision_ttc_sec, null);
-      if (eta !== null) parts.push(`ETA ${eta.toFixed(1)}s`);
+      const ttc = num(obj.ttc?.collision_ttc_sec, null);
+      if (ttc !== null) parts.push(`TTC ${ttc.toFixed(1)}s`);
       if (num(obj.risk_factors?.brake_score, 0) >= 0.5) parts.push("BRAKE");
-      // A selected SAFE object has no ETA/state cue in its label; show its band
+      // A selected SAFE object has no TTC/state cue in its label; show its band
       // so the marked box is still self-explanatory.
-      if (isSelected && eta === null && st) parts.push(String(st));
+      if (isSelected && ttc === null && st) parts.push(String(st));
       const label = parts.join(" ");
       if (label) {
         overlayCtx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
@@ -1079,10 +1079,10 @@ export function initializeSpectra() {
     setText("ev-fusion-state", (() => { const rawState = sourceState(source); return isReal(rawState) ? titleCase(rawState) : MISSING; })());
     setText("ev-decision-primary", isReal(oid) ? `#${oid}` : MISSING);
     setText("ev-fusion-score", risk_scoreLabel(source?.risk_score));
-    setText("ev-fusion-eta", etaDisplay(source?.eta));
+    setText("ev-fusion-ttc", ttcDisplay(source?.ttc));
     // Per-Object Risk Evaluation: score terms and gates.
-    const collision_ttc_sec = collision_ttc_seconds(source?.eta);
-    setText("ev-fusion-eta-pressure", collision_ttc_sec === null ? MISSING : pctLabel(ttc_score(source?.eta)));
+    const collision_ttc_sec = collision_ttc_seconds(source?.ttc);
+    setText("ev-fusion-ttc-pressure", collision_ttc_sec === null ? MISSING : pctLabel(ttc_score(source?.ttc)));
     setText("ev-depth-proximity", pctLabel(risk_factors.proximity_score));
     setText("ev-fusion-approach", pctLabel(risk_factors.approach_score));
     setText("ev-risk-lane-relevance", pctLabel(risk_factors.corridor_score));
@@ -1137,7 +1137,7 @@ export function initializeSpectra() {
     banner.classList.remove("risk-none", "risk-low", "risk-medium", "risk-high", "risk-critical");
     banner.classList.add(riskClass(stabilized_state));
     byId("risk-band-main").textContent = stabilized_state ? String(stabilized_state).toUpperCase() : MISSING;
-    byId("alert-ttc").textContent = etaDisplay(source?.eta);
+    byId("alert-ttc").textContent = ttcDisplay(source?.ttc);
     setText("risk-score-main", hasObject ? risk_scoreLabel(source?.risk_score) : MISSING);
     const scoreEl = byId("risk-score-main");
     // Score number follows its own band (green/yellow/red per the Risk Timeline
@@ -1170,7 +1170,7 @@ export function initializeSpectra() {
     if (label) label.textContent = n === null ? MISSING : `${pct}%`;
   }
 
-  // ETA-input gauges: visualise the raw measurement on a fixed scale (these are
+  // TTC-input gauges: visualise the raw measurement on a fixed scale (these are
   // not 0–1 risk scores, so they get their own gauge, not proximity/approach).
   const setFillWidth = (id, frac) => {
     const el = byId(id);
@@ -1216,7 +1216,7 @@ export function initializeSpectra() {
           button.innerHTML = `
             <span class="status-dot is-${sClass}"></span>
             <span class="detection-main">${objectLabel(item)}</span>
-            <span class="detection-ttc"><span style="color:var(--muted); margin-right:4px; font-size:10.5px; font-weight:600;">ETA:</span>${etaDisplay(item.eta)}</span>
+            <span class="detection-ttc"><span style="color:var(--muted); margin-right:4px; font-size:10.5px; font-weight:600;">TTC:</span>${ttcDisplay(item.ttc)}</span>
           `;
           list.appendChild(button);
         });
@@ -1259,11 +1259,11 @@ export function initializeSpectra() {
       
     const factors = activeObject?.risk_factors || {};
     const km = activeObject?.motion || {};
-    // Collision-ETA input gauges (raw measurements on a fixed scale).
+    // TTC input gauges (raw measurements on a fixed scale).
     setFillWidth("fill-distance", closenessGauge(km.distance_m));
     setFillWidth("fill-closing", speedGauge(km.closing_mps));
-    // Additive weighted contributors (mirror score_raw): ETA + proximity + approach + brake.
-    setSignalBar("eta", ttc_score(activeObject?.eta));
+    // Additive weighted contributors (mirror score_raw): TTC + proximity + approach + brake.
+    setSignalBar("ttc", ttc_score(activeObject?.ttc));
     setSignalBar("near", factors.proximity_score);
     setSignalBar("closing", factors.approach_score);
     setSignalBar("brake", factors.brake_score);
@@ -1704,7 +1704,7 @@ export function initializeSpectra() {
   // ─── Risk state timeline from timelineRows ───────────────
   const CHART_W = 400;
   const CHART_H = 150;
-  // Numeric tabs (Score / ETA) map value → y across the FULL chart height, so
+  // Numeric tabs (Score / TTC) map value → y across the FULL chart height, so
   // the axis numbers, threshold lines and zone fills all line up: the top value
   // sits at the very top edge and the bottom value at the very bottom edge with
   // no empty band. (The y-axis label for an edge value is nudged a few % inward
@@ -1802,7 +1802,7 @@ export function initializeSpectra() {
     return buckets;
   }
 
-  // Column (bar) renderer for the numeric tabs (Score / ETA). Each bar grows up
+  // Column (bar) renderer for the numeric tabs (Score / TTC). Each bar grows up
   // from `baselineY` to valueToY(value) → tall bar = danger, in both tabs. Zone
   // colour matches the background bands; clicking a bar seeks to that moment.
   // `bars`: [{ x(center), value, sc, time_sec }].
@@ -1882,7 +1882,7 @@ export function initializeSpectra() {
     const ctx = { areaGroup, lineGroup, xForTime, W: CHART_W };
     const tab = state.riskChartTab || "state";
     if (tab === "score") renderScoreLayer(rows, ctx);
-    else if (tab === "eta") renderEtaLayer(rows, ctx);
+    else if (tab === "ttc") renderTtcLayer(rows, ctx);
     else renderStateLayer(rows, ctx);
 
     updateChartAxisX();
@@ -1919,7 +1919,7 @@ export function initializeSpectra() {
         time_sec: row.time_sec,
         sc: cls,
         stabilized_state: cls.toUpperCase(),
-        eta: row.eta,
+        ttc: row.ttc,
         object_type: row.object_type,
         object_id: row.object_id,
         display_id: row.display_id,
@@ -2006,28 +2006,28 @@ export function initializeSpectra() {
       (b) => `Risk ${Math.round(b.value * 100)}/100 · ${formatSeconds(b.time_sec)}`);
   }
 
-  // ETA tab: collision TTC in seconds as zone-coloured columns. Low TTC sits at
+  // TTC tab: collision TTC in seconds as zone-coloured columns. Low TTC sits at
   // the top (danger), so the most-urgent measured TTC per bucket = the tallest
   // bar. Buckets with no closing measurement draw no bar (empty = safe).
-  function renderEtaLayer(rows, { areaGroup, lineGroup, W }) {
+  function renderTtcLayer(rows, { areaGroup, lineGroup, W }) {
     const CAP = 6; // seconds; the dangerous range (0–6s) gets the full height
     // Inverted scale: low TTC (danger) at the top, high TTC (safe) at the
     // bottom — consistent with State/Score where danger is up.
-    const etaY = (s) => CHART_Y_TOP + clamp(s / CAP, 0, 1) * (CHART_Y_BOT - CHART_Y_TOP);
-    const guide1 = etaY(1);
-    const guide3 = etaY(3);
+    const ttcY = (s) => CHART_Y_TOP + clamp(s / CAP, 0, 1) * (CHART_Y_BOT - CHART_Y_TOP);
+    const guide1 = ttcY(1);
+    const guide3 = ttcY(3);
     // Evenly-spaced ticks (0/1.5/3/4.5/6s) that land on the background grid
     // lines, so a bar's top reads against a real, aligned gridline instead of
     // the cramped non-uniform 0/1/3/6 labels (which made bars look ~1s off).
     const evenTicks = [0, 1.5, 3, 4.5, 6];
-    setChartYAxis(evenTicks.map((s) => ({ text: `${s % 1 ? s.toFixed(1) : s}s`, y: etaY(s) })));
+    setChartYAxis(evenTicks.map((s) => ({ text: `${s % 1 ? s.toFixed(1) : s}s`, y: ttcY(s) })));
 
     // Faint solid gridlines at the tick seconds so the eye has a reference the
     // bars actually line up with.
     evenTicks.forEach((s) => {
       if (s === 0 || s === CAP) return;
       areaGroup.appendChild(makeSvg("line", {
-        x1: 0, y1: etaY(s).toFixed(1), x2: W, y2: etaY(s).toFixed(1),
+        x1: 0, y1: ttcY(s).toFixed(1), x2: W, y2: ttcY(s).toFixed(1),
         stroke: "rgba(255,255,255,0.06)", "stroke-width": 1,
       }));
     });
@@ -2062,7 +2062,7 @@ export function initializeSpectra() {
       let best = null;
       let bestSec = Infinity;
       bucket.forEach((r) => {
-        const s = num(r?.eta?.collision_ttc_sec, null);
+        const s = num(r?.ttc?.collision_ttc_sec, null);
         if (s !== null && s < bestSec) { bestSec = s; best = r; }
       });
       if (!best) return; // no closing in this bucket → safe, no bar
@@ -2070,7 +2070,7 @@ export function initializeSpectra() {
     });
     if (!bars.length) return;
 
-    drawBars(lineGroup, bars, (v) => etaY(v), CHART_H, barW,
+    drawBars(lineGroup, bars, (v) => ttcY(v), CHART_H, barW,
       (b) => `TTC ${b.value.toFixed(1)}s · ${formatSeconds(b.time_sec)}`);
   }
 
@@ -3099,7 +3099,7 @@ export function initializeSpectra() {
         object_id: primary_object.object_id ?? null,
         display_id: primary_object.display_id ?? null,
         object_type: primary_object.object_type ?? null,
-        eta: primary_object.eta ?? source.eta ?? null,
+        ttc: primary_object.ttc ?? source.ttc ?? null,
         lane: primary_object.lane ?? source.lane ?? null,
         lane_position: primary_object.lane_position ?? source.lane_position ?? null,
         risk_factors: primary_object.risk_factors ?? source.risk_factors ?? null,

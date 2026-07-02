@@ -165,7 +165,7 @@
     </section>
   </div>
 
-  <!-- ════════ DETAIL POPUPS (full-screen overlays) ════════ -->
+  <!-- ════════ FULLSCREEN POPUPS ════════ -->
 
   <!-- Input -->
   <div class="doc-modal" id="doc-modal-input" hidden>
@@ -487,17 +487,17 @@
         <div class="doc-formula-set">
           <div class="doc-formula">
             <div class="doc-formula__label">Time-to-collision</div>
-            <span class="formula-var formula-var--shared">ttc_depth</span> = distance_m / closing_mps (physical ETA)<br>
+            <span class="formula-var formula-var--shared">ttc_depth</span> = distance_m / closing_mps (physical TTC)<br>
             <span class="formula-var formula-var--shared">ttc_expansion</span> = 1 / expansion_rate when expansion_rate ≥ 0.01<br>
             <span class="formula-var formula-var--shared">ttc_flow</span> = distance_from_vp / radial_p75 × flow_dt<br>
             valid TTC cues are floored at 0.15s; a cue above 15.0s is discarded as invalid<br>
             <span class="formula-var formula-var--shared">fused_ttc</span> = weighted_median(valid cues, cue_confidence)<br>
             <b>ttc_score</b>(ttc_depth) = clamp((3 − ttc_depth) / 3, 0, 1)<br>
             display gating: an off-corridor object (corridor_score &lt; 0.15, i.e. a
-            vehicle we are passing) shows ETA "—" and a zeroed ttc_score factor —
+            vehicle we are passing) shows TTC "—" and a zeroed ttc_score factor —
             its depth TTC is a real closing time but not a forward-collision
             course; the risk score and SAFE/DANGER band still use it internally<br>
-            ETA also shows "—" when closing_mps ≤ 0.30 or depth_confidence &lt; 0.12,
+            TTC also shows "—" when closing_mps ≤ 0.30 or depth_confidence &lt; 0.12,
             and "&gt;10s" beyond a 10s horizon
           </div>
           <div class="doc-formula">

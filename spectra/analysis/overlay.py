@@ -48,7 +48,7 @@ def _draw_bbox(output: np.ndarray, event: RiskEvent) -> None:
         label_parts.append(f"#{display_id}")
     label_parts.append(event.object_type.upper())
     if event.collision_ttc_sec is not None:
-        label_parts.append(f"ETA {event.collision_ttc_sec:.1f}s")
+        label_parts.append(f"TTC {event.collision_ttc_sec:.1f}s")
     if event.brake_score >= 0.5:
         label_parts.append("BRAKE")
     label = " ".join(label_parts)
@@ -251,7 +251,7 @@ def annotate_frame(
     for event in sorted(object_events, key=lambda e: state_order.get(e.raw_state, 0)):
         _draw_bbox(output, event)
 
-    eta_str = "--" if primary_event.collision_ttc_sec is None else f"{primary_event.collision_ttc_sec:.1f}s"
+    ttc_str = "--" if primary_event.collision_ttc_sec is None else f"{primary_event.collision_ttc_sec:.1f}s"
     lane_lbl = _readable_lane(primary_event.lane)
     obj_lbl = (primary_event.object_type or "scene").title()
 
@@ -265,7 +265,7 @@ def annotate_frame(
         object_label = f"{obj_lbl} #{display_id}" if display_id is not None else obj_lbl
         risk_label = f"{int(round(score_event(primary_event) * 100))}"
         lane_text = lane_lbl if lane_lbl and primary_event.bbox is not None else "--"
-        metric_text = f"C. ETA {eta_str} | Risk {risk_label} | {lane_text}"
+        metric_text = f"TTC {ttc_str} | Risk {risk_label} | {lane_text}"
 
         state_text = primary_event.raw_state
         (stw, _), _ = cv2.getTextSize(state_text, _FONT, 0.45, 1)
@@ -306,7 +306,7 @@ def annotate_frame(
             cv2.LINE_AA,
         )
 
-        # row 2 — physical ETA, risk score, lane
+        # row 2 — physical TTC, risk score, lane
         cv2.putText(
             output,
             metric_text,

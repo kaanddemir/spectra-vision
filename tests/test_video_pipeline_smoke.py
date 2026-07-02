@@ -197,20 +197,20 @@ def _passing_event(*, corridor_score):
     )
 
 
-def test_off_corridor_object_withholds_collision_eta_and_pressure():
+def test_off_corridor_object_withholds_collision_ttc_and_pressure():
     # A passing (off-corridor, low crossing) vehicle must not surface a collision
-    # ETA or ETA-pressure — it reads SAFE, so "0.4s / 85%" would be contradictory.
+    # TTC or TTC-pressure — it reads SAFE, so "0.4s / 85%" would be contradictory.
     passing = _passing_event(corridor_score=0.05)
-    eta = video._eta_metric(passing)
-    assert eta["display"] == "—"
-    assert eta["collision_ttc_sec"] is None
+    ttc = video._ttc_metric(passing)
+    assert ttc["display"] == "—"
+    assert ttc["collision_ttc_sec"] is None
     assert video._risk_metric(passing)["factors"]["ttc_score"] == 0.0
 
 
-def test_in_corridor_object_still_surfaces_collision_eta():
+def test_in_corridor_object_still_surfaces_collision_ttc():
     # A genuine in-path closing object keeps its collision TTC and score.
     approaching = _passing_event(corridor_score=0.7)
-    eta = video._eta_metric(approaching)
-    assert eta["display"] == "0.4s"
-    assert eta["collision_ttc_sec"] == 0.4
+    ttc = video._ttc_metric(approaching)
+    assert ttc["display"] == "0.4s"
+    assert ttc["collision_ttc_sec"] == 0.4
     assert video._risk_metric(approaching)["factors"]["ttc_score"] > 0.0

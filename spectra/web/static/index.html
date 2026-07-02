@@ -486,7 +486,7 @@
                   <span class="risk-state-cap">Overall Status
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">Overall Status is the final risk band for the selected object. Risk Score ≥60 becomes DANGER, ≥25 becomes CAUTION, and an already-risky object with ETA under 1s can escalate to DANGER.</div>
+                      <div class="tooltip-content">Overall Status is the final risk band for the selected object. Risk Score ≥60 becomes DANGER, ≥25 becomes CAUTION, and an already-risky object with TTC under 1s can escalate to DANGER.</div>
                     </span>
                   </span>
                   <h1 id="risk-band-main" class="modern-risk-title">—</h1>
@@ -521,7 +521,7 @@
                   <div class="tooltip-content">Time to Collision (TTC) uses only longitudinal motion from depth: distance and closing speed. Lane position affects Risk Score, not the TTC calculation.</div>
                 </span>
               </h3>
-              <div class="eta-builder signal-bars">
+              <div class="ttc-builder signal-bars">
                 <div class="signal-row">
                   <span class="signal-label">Distance</span>
                   <span class="info-tip">
@@ -553,14 +553,14 @@
                   </span>
                 </h3>
                 <div class="signal-bars">
-                  <div class="signal-row" data-signal="eta">
+                  <div class="signal-row" data-signal="ttc">
                     <span class="signal-label">TTC Score <span class="signal-weight">40%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
                       <div class="tooltip-content">How close Time to Collision (TTC) is to the 3s caution horizon. Shorter TTC creates more pressure; no closing motion produces no TTC score.</div>
                     </span>
-                    <div class="signal-track"><span class="signal-fill" id="signal-eta" style="width:0%"></span></div>
-                    <span class="signal-value" id="signal-eta-value">—</span>
+                    <div class="signal-track"><span class="signal-fill" id="signal-ttc" style="width:0%"></span></div>
+                    <span class="signal-value" id="signal-ttc-value">—</span>
                   </div>
                   <div class="signal-row" data-signal="near">
                     <span class="signal-label">Proximity <span class="signal-weight">30%</span></span>
@@ -575,7 +575,7 @@
                     <span class="signal-label">Approach <span class="signal-weight">25%</span></span>
                     <span class="info-tip">
                       <svg><use href="#icon-info"></use></svg>
-                      <div class="tooltip-content">How strongly the object is approaching the camera. Higher closing speed increases the score even when ETA is still above the danger threshold.</div>
+                      <div class="tooltip-content">How strongly the object is approaching the camera. Higher closing speed increases the score even when TTC is still above the danger threshold.</div>
                     </span>
                     <div class="signal-track"><span class="signal-fill" id="signal-closing" style="width:0%"></span></div>
                     <span class="signal-value" id="signal-closing-value">—</span>
@@ -620,11 +620,11 @@
                       <div class="evidence-row"><span>State</span><span id="ev-fusion-state">—</span></div>
                       <div class="evidence-row"><span>Primary Object</span><span id="ev-decision-primary">—</span></div>
                       <div class="evidence-row"><span>Risk Score</span><span id="ev-fusion-score">—</span></div>
-                      <div class="evidence-row"><span>Time to Collision (TTC)</span><span id="ev-fusion-eta">—</span></div>
+                      <div class="evidence-row"><span>Time to Collision (TTC)</span><span id="ev-fusion-ttc">—</span></div>
                     </div>
                     <div class="evidence-group evidence-group--object-risk">
                       <span class="evidence-group-lbl">Per-Object Risk Evaluation</span>
-                      <div class="evidence-row"><span>TTC Score</span><span id="ev-fusion-eta-pressure">—</span></div>
+                      <div class="evidence-row"><span>TTC Score</span><span id="ev-fusion-ttc-pressure">—</span></div>
                       <div class="evidence-row"><span>Proximity</span><span id="ev-depth-proximity">—</span></div>
                       <div class="evidence-row"><span>Approach</span><span id="ev-fusion-approach">—</span></div>
                       <div class="evidence-row"><span>Lane Relevance</span><span id="ev-risk-lane-relevance">—</span></div>
@@ -667,7 +667,7 @@
                 <div class="modern-mode-toggle chart-tabs" id="risk-chart-tabs">
                   <button type="button" class="mode-btn is-active" data-chart-tab="state">State</button>
                   <button type="button" class="mode-btn" data-chart-tab="score">Score</button>
-                  <button type="button" class="mode-btn" data-chart-tab="eta">TTC</button>
+                  <button type="button" class="mode-btn" data-chart-tab="ttc">TTC</button>
                 </div>
               </div>
               <div class="chart-container">

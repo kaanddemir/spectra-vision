@@ -139,7 +139,7 @@ _IMMINENT_MIN_AGREEMENT = 0.5       # otherwise the TTC cues must corroborate
 # reads "0.4s" while the object is correctly SAFE. Below this lane-relevance the
 # collision_ttc_sec is withheld (shown as "—"); the risk SCORE and SAFE/DANGER band
 # are unchanged (they still use the physical TTC internally).
-_ETA_SURFACE_MIN_CROSSING = 0.15
+_TTC_SURFACE_MIN_CROSSING = 0.15
 
 # Lowest multiplier applied to the trust gate when the TTC cues fully disagree
 # (agreement → 0). Worst case tempers confidence to ×0.7; agreement → 1 leaves
@@ -532,7 +532,7 @@ def ttc_agreement(components: list[TtcComponent]) -> float:
     """How much the independent TTC cues corroborate each other, in [0, 1].
 
     1.0 when fewer than two cues have a usable estimate (nothing to disagree
-    about — the eta term is already 0 in that case) or when the cues are tight.
+    about — the TTC term is already 0 in that case) or when the cues are tight.
     Drops toward 0 as the cues diverge, measured as the relative spread of their
     values. This only ever *lowers* trust, so it can never fabricate risk.
     """
@@ -823,7 +823,7 @@ def score_raw(
     — the state is now *derived* from this score (see ``state_from_score``), so
     there is no state floor and no circular dependency.
 
-        signal    = 0.40·eta + 0.30·proximity + 0.25·approach + 0.05·brake
+        signal    = 0.40·ttc + 0.30·proximity + 0.25·approach + 0.05·brake
         gate      = 0.65 + 0.35·risk_confidence
         relevance = corridor_score           (probability in ego lane at impact)
         score     = gate · relevance · signal
@@ -1156,7 +1156,7 @@ def calculate_track_risk(
     brake = brake_score(bgr, bbox) if track.class_name in _BRAKE_LIGHT_CLASSES else 0.0
 
     # Single canonical Risk Score, then derive the discrete status by banding
-    # it. ``physical_ttc`` (the depth ETA we also expose) is used for both the
+    # it. ``physical_ttc`` (the depth TTC we also expose) is used for both the
     # score and the imminence escalation so the status and the displayed score
     # always agree. ``score_event`` recomputes the identical value from the
     # serialized event fields.

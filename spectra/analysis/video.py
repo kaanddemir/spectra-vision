@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from .risk import (
-    _ETA_SURFACE_MIN_CROSSING,
+    _TTC_SURFACE_MIN_CROSSING,
     ConfidenceSmoother,
     DepthDeltaSmoother,
     ExpansionSmoother,
@@ -311,8 +311,8 @@ def _to_rgb(image_bgr: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
 
-_ETA_HORIZON_SEC = 10.0
-_ETA_LOW_CONFIDENCE = 0.12
+_TTC_HORIZON_SEC = 10.0
+_TTC_LOW_CONFIDENCE = 0.12
 _MIN_CLOSING_FOR_DISPLAY_MPS = 0.30
 
 
@@ -400,7 +400,7 @@ def _component(event: RiskEvent, name: str) -> Any | None:
     return None
 
 
-def _eta_metric(event: RiskEvent) -> dict[str, Any]:
+def _ttc_metric(event: RiskEvent) -> dict[str, Any]:
     """Collision TTC: the fused physical reading plus the per-cue breakdown.
 
     ``collision_ttc_sec`` + ``display`` reproduce the previous gated display logic
@@ -415,7 +415,7 @@ def _eta_metric(event: RiskEvent) -> dict[str, Any]:
     display = "—"
     sec: float | None = None
 
-    if event.corridor_score < _ETA_SURFACE_MIN_CROSSING:
+    if event.corridor_score < _TTC_SURFACE_MIN_CROSSING:
         # Off-corridor object we are passing (not approaching): its depth TTC is
         # a real relative closing time but not a forward-collision TTC. Withhold
         # it so a correctly-SAFE passing vehicle does not show "0.4s". The risk
@@ -426,14 +426,14 @@ def _eta_metric(event: RiskEvent) -> dict[str, Any]:
     elif float(closing_mps) <= _MIN_CLOSING_FOR_DISPLAY_MPS:
         display = "—"
     else:
-        display_eta_candidate = float(distance_m) / max(float(closing_mps), 1e-6)
+        display_ttc_candidate = float(distance_m) / max(float(closing_mps), 1e-6)
         depth_confidence = float(getattr(depth_component, "confidence", 0.0) or 0.0)
-        if display_eta_candidate > _ETA_HORIZON_SEC:
-            display = f">{_ETA_HORIZON_SEC:.0f}s"
-        elif depth_confidence < _ETA_LOW_CONFIDENCE:
+        if display_ttc_candidate > _TTC_HORIZON_SEC:
+            display = f">{_TTC_HORIZON_SEC:.0f}s"
+        elif depth_confidence < _TTC_LOW_CONFIDENCE:
             display = "—"
         else:
-            sec = event.collision_ttc_sec if event.collision_ttc_sec is not None else display_eta_candidate
+            sec = event.collision_ttc_sec if event.collision_ttc_sec is not None else display_ttc_candidate
             display = f"{float(sec):.1f}s"
 
     sources: dict[str, Any] = {}
@@ -447,13 +447,13 @@ def _eta_metric(event: RiskEvent) -> dict[str, Any]:
             "confidence": _unit_score(getattr(component, "confidence", 0.0)),
         }
 
-    eta: dict[str, Any] = {
+    ttc: dict[str, Any] = {
         "collision_ttc_sec": None if sec is None else round(float(sec), 2),
         "display": display,
         "ttc_agreement": _unit_score(event.ttc_agreement),
         "sources": sources,
     }
-    return eta
+    return ttc
 
 
 def _motion_metric(event: RiskEvent) -> dict[str, Any]:
@@ -484,7 +484,7 @@ def _risk_metric(event: RiskEvent) -> dict[str, Any]:
     # rather than showing a scary 85% next to a SAFE verdict.
     ttc_score_surfaced = (
         0.0
-        if event.corridor_score < _ETA_SURFACE_MIN_CROSSING
+        if event.corridor_score < _TTC_SURFACE_MIN_CROSSING
         else ttc_score(event.collision_ttc_sec)
     )
     return {
@@ -553,7 +553,7 @@ def _object_metric(
         "object_type": event.object_type,
         "raw_state": event.raw_state,
         "risk": _risk_metric(event),
-        "eta": _eta_metric(event),
+        "ttc": _ttc_metric(event),
         "motion": _motion_metric(event),
         "lane": _lane_obj_metric(event),
         "confidence": _confidence_metric(event),
@@ -598,7 +598,7 @@ def _frame_row(
     frame_width: int = 0,
     frame_height: int = 0,
 ) -> dict[str, Any]:
-    """Build the v6 client-facing row shared by timeline frames and events.
+    """Build the v7 client-facing row shared by timeline frames and events.
 
     ``primary.raw_primary_score`` is computed from the **raw** primary event (before
     hysteresis stabilization) so it matches the corresponding entry in
@@ -637,7 +637,7 @@ def _event_payload_base(
 ) -> dict[str, Any]:
     """Build the metadata-only event payload. RGB views are attached later.
 
-    Carries the v6 client-facing row (see ``_frame_row``) plus snake_case
+    Carries the v7 client-facing row (see ``_frame_row``) plus snake_case
     diagnostics used only for saved-event dedup/ranking and event identity
     (``risk_score``, ``frame_index``, ``timestamp_sec``); those internal keys
     are stripped by ``_serialize_event`` before the payload reaches the
@@ -1054,7 +1054,7 @@ class SpatialFrameAnalyzer:
         )
 
         # 4. Smooth State Transitions (Hysteresis)
-        # Note: physical ETA is preserved through SAFE stabilization so the
+        # Note: physical TTC is preserved through SAFE stabilization so the
         # timeline can stay continuous while the scene is calm.
         # The primary's RAW risk score is captured before stabilization
         # mutates the event, so it stays consistent with the entry in

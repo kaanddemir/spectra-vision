@@ -70,7 +70,7 @@ The response is always wrapped as:
 ```json
 {
   "payload": {
-    "schemaVersion": 5,
+    "schema_version": 7,
     "metadata": {},
     "frames": [],
     "peakEvent": null,
@@ -81,7 +81,7 @@ The response is always wrapped as:
 }
 ```
 
-Client-facing JSON is camelCase. Keep internal snake_case diagnostics out of serialized event rows. Images belong under top-level `payload.images`; frame/event rows use `imageRef` instead of embedding RGB arrays or data URIs directly.
+Client-facing JSON is snake_case. Keep internal diagnostics out of serialized event rows. Images belong under top-level `payload.images`; frame/event rows use `image_ref` instead of embedding RGB arrays or data URIs directly.
 
 The old `timelineRows` contract is not current. Use `payload.frames`, `payload.peakEvent`, and `payload.events`.
 
@@ -99,7 +99,7 @@ The old `timelineRows` contract is not current. Use `payload.frames`, `payload.p
 10. The IoU tracker links detections to active tracks and propagates tracks through skipped detection frames; "hot" threat ids coast longer through a brief miss, and re-id reconnects a fast-approaching lead car to its original id.
 11. Risk scoring fuses metric depth TTC, bbox expansion TTC, radial-flow TTC, lane relationship, proximity, brake-light cues, and confidence. The imminent-DANGER escalation (TTC < 1s) only fires when corroborated — the object is genuinely close (≤12m) or the TTC cues agree — so a young depth-Kalman track's non-physical closing speed cannot snap a distant vehicle to DANGER.
 12. State stabilization drives the banner from raw per-object states while the shown primary/score stay on the real current object (never frozen or a dropped-out track). It holds only the banner band at CAUTION when an *approaching* near in-corridor threat briefly drops out (released once that threat is seen receding), and downgrades faster once the scene has cleared so a passed threat's DANGER does not linger. "Near in corridor" is decided by lane position, with a geometry escape hatch — a close, wide, bottom-anchored box counts as a lead in our path even when its `lane_position` snaps to the ±1.5 clamp, so a tailgated lead car reading far-left/right is not treated as harmless side traffic.
-13. On serialization, an off-corridor object (very low lane relevance, i.e. a vehicle we are *passing* rather than approaching) has its collision ETA and ETA-pressure factor withheld (shown as "—"/0). Its depth TTC is a real relative closing time but not a forward-collision course, so surfacing "0.4s" next to a correctly-SAFE verdict would be contradictory. The risk score and SAFE/DANGER band are unchanged — they still use the physical TTC internally; only the surfaced ETA is gated.
+13. On serialization, an off-corridor object (very low lane relevance, i.e. a vehicle we are *passing* rather than approaching) has its collision TTC and TTC-pressure factor withheld (shown as "—"/0). Its depth TTC is a real relative closing time but not a forward-collision course, so surfacing "0.4s" next to a correctly-SAFE verdict would be contradictory. The risk score and SAFE/DANGER band are unchanged — they still use the physical TTC internally; only the surfaced TTC is gated.
 14. Events are deduplicated, ranked, trimmed, serialized, and rendered only when needed.
 
 ## Development Guardrails

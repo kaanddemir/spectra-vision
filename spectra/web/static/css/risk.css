@@ -275,7 +275,7 @@
   letter-spacing: 0.05em;
 }
 
-/* Chart view tabs (State / Score / ETA) reuse the Live/Peak/Objects toggle
+/* Chart view tabs (State / Score / TTC) reuse the Live/Peak/Objects toggle
    look (.modern-mode-toggle + .mode-btn), but compact so this panel head stays
    the same height as the text-only sub-panel heads (e.g. "Current Risk"). */
 .chart-tabs.modern-mode-toggle {
@@ -450,9 +450,9 @@
   padding: 18px 20px 0;
 }
 
-.eta-builder { margin-top: 0; }
+.ttc-builder { margin-top: 0; }
 
-/* Shared 4-column grid for every contributor row (ETA inputs, score bars,
+/* Shared 4-column grid for every contributor row (TTC inputs, score bars,
    lane relevance + confidence): [label(+weight) 120px] · [info icon 16px] ·
    [track 1fr] · [value 56px]. Fixed columns keep the info icons, bars and
    values aligned across both "What builds…" sections. */

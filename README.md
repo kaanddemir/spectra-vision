@@ -128,7 +128,7 @@ The response shape is:
 ```json
 {
   "payload": {
-    "schemaVersion": 5,
+    "schema_version": 7,
     "metadata": {},
     "frames": [],
     "peakEvent": null,
@@ -139,7 +139,7 @@ The response shape is:
 }
 ```
 
-Images are stored once under top-level `payload.images`. Events reference them with `imageRef`.
+Images are stored once under top-level `payload.images`. Events reference them with `image_ref`.
 
 ## Project Structure
 

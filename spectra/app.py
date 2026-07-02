@@ -74,9 +74,9 @@ def _serialize_event(
     *,
     image_ref: str | None,
 ) -> dict[str, Any]:
-    """Strip internal diagnostics and keep the v6 client-facing row.
+    """Strip internal diagnostics and keep the v7 client-facing row.
 
-    ``_event_payload_base`` already builds the v6 row and overlays a few
+    ``_event_payload_base`` already builds the v7 row and overlays a few
     internal keys used only for dedup/ranking; here we select just the
     client-facing fields and attach the shared image reference.
     """
@@ -140,7 +140,7 @@ def _serialize_result(result: dict[str, Any], *, elapsed_sec: float, source_name
     ]
 
     payload: dict[str, Any] = {
-        "schema_version": 6,
+        "schema_version": 7,
         "metadata": {
             "source_name": source_name,
             "fps": result.get("fps"),

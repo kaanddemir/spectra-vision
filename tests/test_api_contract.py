@@ -25,7 +25,7 @@ def _client_object(**overrides):
                 "brake_score": 0.0,
             },
         },
-        "eta": {
+        "ttc": {
             "collision_ttc_sec": 2.2,
             "display": "2.2s",
             "ttc_agreement": 0.9,
@@ -81,7 +81,7 @@ def _assert_keys_absent(value, forbidden: set[str]) -> None:
             _assert_keys_absent(child, forbidden)
 
 
-def test_serialize_result_keeps_v6_shape_and_strips_internal_fields():
+def test_serialize_result_keeps_v7_shape_and_strips_internal_fields():
     event = {
         "frame_index": 1,
         "timestamp_sec": 0.1,
@@ -96,7 +96,7 @@ def test_serialize_result_keeps_v6_shape_and_strips_internal_fields():
 
     payload = _serialize_result(_result_with_event(event), elapsed_sec=0.01, source_name="sample.mp4")["payload"]
 
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 7
     assert set(payload) >= {"frames", "events", "peak_event", "images", "performance"}
     assert set(payload["metadata"]) >= {
         "source_name",
@@ -110,7 +110,7 @@ def test_serialize_result_keeps_v6_shape_and_strips_internal_fields():
     assert payload["frames"][0]["primary"] == {"object_id": 7, "raw_primary_score": 0.42, "lane": "center"}
     assert payload["peak_event"]["objects"][0]["object_id"] == 7
     assert payload["peak_event"]["primary"]["raw_primary_score"] == payload["peak_event"]["objects"][0]["risk"]["risk_score"]
-    assert payload["peak_event"]["objects"][0]["eta"]["collision_ttc_sec"] == 2.2
+    assert payload["peak_event"]["objects"][0]["ttc"]["collision_ttc_sec"] == 2.2
     assert payload["peak_event"]["objects"][0]["risk"]["factors"]["ttc_score"] == 0.2
     assert "timelineRows" not in payload
     assert "raw_primary_score" not in payload["peak_event"]
@@ -118,12 +118,24 @@ def test_serialize_result_keeps_v6_shape_and_strips_internal_fields():
     assert "frameIndex" not in payload
     assert "timestampSec" not in payload["peak_event"]
     assert "peakEvent" not in payload
-    assert "collisionSec" not in payload["peak_event"]["objects"][0]["eta"]
-    assert "etaPressure" not in payload["peak_event"]["objects"][0]["risk"]["factors"]
+    assert "collisionSec" not in payload["peak_event"]["objects"][0]["ttc"]
+    assert "ttcPressure" not in payload["peak_event"]["objects"][0]["risk"]["factors"]
+    legacy_timing_key = "e" + "ta"
+    legacy_pressure_key = legacy_timing_key + "Pressure"
+    assert legacy_timing_key not in payload["peak_event"]["objects"][0]
     assert "trackId" not in payload["peak_event"]["primary"]
     _assert_keys_absent(
         payload,
-        {"frameIndex", "timestampSec", "peakEvent", "collisionSec", "etaPressure", "trackId"},
+        {
+            "frameIndex",
+            "timestampSec",
+            "peakEvent",
+            "collisionSec",
+            legacy_timing_key,
+            legacy_pressure_key,
+            "ttcPressure",
+            "trackId",
+        },
     )
 
 
@@ -182,7 +194,7 @@ def test_object_metric_exposes_stable_client_fields():
         "expansion_confidence",
     }
     assert metric["confidence"]["lane_confidence"] == 0.7
-    assert metric["eta"]["ttc_agreement"] == 0.85
+    assert metric["ttc"]["ttc_agreement"] == 0.85
 
 
 def test_lane_metric_default_corridor_is_normalized():
@@ -231,7 +243,7 @@ def test_analyze_endpoint_forwards_clamped_analysis_settings(monkeypatch):
 
     response = asyncio.run(call_endpoint())
 
-    assert response["payload"]["schema_version"] == 6
+    assert response["payload"]["schema_version"] == 7
     assert captured["max_processed_frames"] == 1
     assert captured["max_saved_events"] == 50
     assert captured["resize_max_side"] == 1024
