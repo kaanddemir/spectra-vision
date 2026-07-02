@@ -358,7 +358,7 @@ export function initializeSpectra() {
     return [
       `Time: ${point.time_sec.toFixed(2).replace(/\.?0+$/, "")}s`,
       `State: ${sourceState(point)}`,
-      `ETA: ${etaDisplay(point.eta)}`,
+      `TTC: ${etaDisplay(point.eta)}`,
       `Object: ${object}`,
       `Lane: ${shortLane(point.lane)}`,
     ].join("\n");
@@ -1366,7 +1366,7 @@ export function initializeSpectra() {
               <span class="val status-val">${band.sc.toUpperCase()}</span>
             </div>
             <div class="box-item">
-              <span class="lbl">DURATION</span>
+              <span class="lbl">TTC</span>
               <span class="val">${durationSec.toFixed(1)}s</span>
             </div>
             <div class="box-item">
@@ -1407,7 +1407,9 @@ export function initializeSpectra() {
     } else {
       setActiveEventIndex(null);
     }
-    const blendImage = imageSetForEvent(source).blend;
+    // Use only this band's own baked overlay — never the global peak blend,
+    // which is the DANGER frame and would wrongly flash DANGER over a CAUTION.
+    const blendImage = mediaSrc(source?.images?.blend);
     if (blendImage) {
       showPreviewOverlay(blendImage, 3000);
     }
@@ -1550,11 +1552,7 @@ export function initializeSpectra() {
     const tip = byId("timeline-tip");
     const hit = railTimeFromX(clientX);
     if (!tip || !hit || !state.timelineRows.length) return;
-    const row = findTimelineRowAt(hit.t);
-    const sc = stateClass(sourceState(row));
-    const score = Math.round(clamp(num(row?.risk_score, 0), 0, 1) * 100);
-    tip.innerHTML = `<span class="tt-time">${formatSeconds(hit.t)}</span>`
-      + `<span class="tt-state risk-${sc}">${sc === "none" ? "SAFE" : sc.toUpperCase()} · ${score}</span>`;
+    tip.innerHTML = `<span class="tt-time">${formatSeconds(hit.t)}</span>`;
     tip.hidden = false;
     const half = tip.offsetWidth / 2;
     tip.style.left = `${clamp(clientX - hit.rect.left, half, hit.rect.width - half)}px`;
@@ -1678,7 +1676,9 @@ export function initializeSpectra() {
     setUiMode("summary", { sourceEvent: ev });
     setActiveEventIndex(idx, { scroll: true });
 
-    const blendImage = imageSetForEvent(ev).blend;
+    // Only this event's own baked overlay — avoid falling back to the global
+    // peak (DANGER) blend, which would show DANGER over a CAUTION event.
+    const blendImage = mediaSrc(ev?.images?.blend);
     if (blendImage) {
       showPreviewOverlay(blendImage, 5000);
     }
