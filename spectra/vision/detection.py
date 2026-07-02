@@ -18,7 +18,6 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -199,7 +198,7 @@ class ObjectDetector:
         confidence: float = 0.30,
         iou: float = 0.45,
         image_size: int = 640,
-        device: Optional[str] = None,
+        device: str | None = None,
     ) -> None:
         self.model_name = model_name
         self.confidence = float(confidence)

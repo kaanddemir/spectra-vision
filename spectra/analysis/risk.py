@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
@@ -30,7 +29,7 @@ from ..vision.road import LaneFrame, lane_corridor_relevance, lane_position
 @dataclass
 class TtcComponent:
     name: str
-    value: Optional[float]
+    value: float | None
     confidence: float
 
 
@@ -496,7 +495,7 @@ def ttc_from_depth_delta(
 # ── Weighted-median fusion ───────────────────────────────────────────────────
 
 
-def fuse_ttc(components: list[TtcComponent]) -> tuple[Optional[float], list[TtcComponent]]:
+def fuse_ttc(components: list[TtcComponent]) -> tuple[float | None, list[TtcComponent]]:
     """Robust fusion of the three TTC estimators.
 
     Sort components by TTC value and pick the one whose cumulative weight
@@ -622,7 +621,7 @@ def lane_lateral_velocity(
 def lane_corridor_score(
     track: Track,
     lane: LaneFrame,
-    fused_ttc: Optional[float],
+    fused_ttc: float | None,
 ) -> float:
     """How likely the object is to be inside the ego lane at impact time."""
 
@@ -956,7 +955,7 @@ def state_from_score(
     return base
 
 
-def _risk_reason(state: str, ttc_sec: Optional[float], lane_pos: float) -> str:
+def _risk_reason(state: str, ttc_sec: float | None, lane_pos: float) -> str:
     if state == "DANGER":
         if ttc_sec is not None:
             return f"imminent collision: TTC {ttc_sec:.1f}s"

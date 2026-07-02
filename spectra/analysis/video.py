@@ -545,12 +545,6 @@ def _normalized_bbox(
     ]
 
 
-def _object_label(object_type: str | None) -> str | None:
-    if not object_type:
-        return None
-    return object_type.replace("_", " ").title()
-
-
 def _object_metric(
     event: RiskEvent, frame_width: int = 0, frame_height: int = 0
 ) -> dict[str, Any]:

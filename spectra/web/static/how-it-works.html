@@ -106,7 +106,7 @@
             </button>
             <button type="button" class="flow-node flow-node--link" data-doc-open="motion-depth" data-module="motion-depth">
               <h5>Depth Anything V2 Metric VKITTI</h5>
-              <p>Produces metric depth for distance_m, proximity_score and collision_ttc_sec.</p>
+              <p>Produces metric depth for distance, proximity score and Time to Collision (TTC).</p>
               <span class="flow-jump">Details</span>
             </button>
           </div>
@@ -131,8 +131,8 @@
           <h3>Per-Object Risk Evaluation</h3>
           <div class="pipeline-steps">
             <button type="button" class="flow-node flow-node--hub flow-node--link" data-doc-open="per-object-risk" data-module="risk">
-              <h5>Collision TTC</h5>
-              <p>Uses depth distance and closing speed to produce the physical collision_ttc_sec shown in the UI.</p>
+              <h5>Time to Collision (TTC)</h5>
+              <p>Uses depth distance and closing speed to produce the physical Time to Collision shown in the UI.</p>
               <span class="flow-jump">Details</span>
             </button>
             <button type="button" class="flow-node flow-node--hub flow-node--link" data-doc-open="per-object-risk" data-module="risk">
@@ -359,7 +359,7 @@
           <h3>Motion + Depth Models</h3>
           <div class="pipeline-steps pipeline-steps--two">
             <article class="flow-node" data-module="motion-depth" data-route="Feeds Optical Flow and downstream Flow TTC."><h5>OpenCV DIS Optical Flow</h5><p>Computes dense optical flow classically on grayscale frames with ego-motion compensation.</p></article>
-            <article class="flow-node" data-module="motion-depth" data-route="Feeds Depth Estimation, metric distance and downstream collision_ttc_sec."><h5>Depth Anything V2 Metric VKITTI</h5><p>Runs the required ONNX metric depth model and produces depth in meters.</p></article>
+            <article class="flow-node" data-module="motion-depth" data-route="Feeds Depth Estimation, metric distance and downstream Time to Collision (TTC)."><h5>Depth Anything V2 Metric VKITTI</h5><p>Runs the required ONNX metric depth model and produces depth in meters.</p></article>
           </div>
         </div>
         <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
@@ -369,7 +369,7 @@
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Quick Motion Risk, Flow TTC, Approach Score and flow confidence."><h5>Optical Flow</h5><p>Computes frame-to-frame motion with DIS flow and ego-motion compensation.</p></article>
             <article class="flow-node" data-module="motion-depth" data-route="Feeds Adaptive Depth Refresh scheduling."><h5>Quick Motion Risk</h5><p>Uses inexpensive flow evidence to decide whether depth should run early.</p></article>
             <article class="flow-node" data-module="motion-depth" data-route="Feeds Depth Estimation timing."><h5>Adaptive Depth Refresh</h5><p>Runs depth initially, periodically, and when motion risk crosses the refresh threshold.</p></article>
-            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Depth / Kalman Distance, collision_ttc_sec, proximity_score and depth_confidence."><h5>Depth Estimation</h5><p>Builds metric scene depth for object distance and closing-speed estimates.</p></article>
+            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Depth / Kalman Distance, Time to Collision (TTC), proximity score and depth confidence."><h5>Depth Estimation</h5><p>Builds metric scene depth for object distance and closing-speed estimates.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Lane-Relevance Filter as the near-object map."><h5>Near Map</h5><p>Converts metric depth into a normalized nearness map for filtering nearby objects.</p></article>
           </div>
         </div>
@@ -377,11 +377,11 @@
         <div class="pipeline-group pipeline-group--hub">
           <h3>Per-Object Risk Evaluation</h3>
           <div class="pipeline-steps">
-            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds collision_ttc_sec, proximity_score, approach_score and depth TTC."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and range rate per track.</p></article>
+            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Time to Collision (TTC), proximity score, approach score and depth TTC."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and range rate per track.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds TTC Fusion as the expansion TTC cue."><h5>BBox Expansion</h5><p>Measures object scale growth and smooths it across track history.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds TTC Fusion as the optical-flow TTC cue."><h5>Flow TTC</h5><p>Estimates collision time from radial motion around the vanishing point.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds TTC agreement, confidence and lane crossing horizon."><h5>TTC Fusion</h5><p>Combines depth, flow and expansion cues with confidence and agreement scoring.</p></article>
-            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds ttc_score, state escalation and the UI collision_ttc_sec display."><h5>Collision TTC</h5><p>Uses depth distance and closing speed as the physical TTC displayed to the user.</p></article>
+            <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds ttc_score, state escalation and the UI Time to Collision display."><h5>Time to Collision (TTC)</h5><p>Uses depth distance and closing speed as the physical TTC displayed to the user.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Risk Score proximity."><h5>Proximity Score</h5><p>Scores proximity as part of the final risk decision.</p></article>
             <article class="flow-node flow-node--hub" data-module="motion-depth" data-route="Feeds Risk Score approach."><h5>Approach Score</h5><p>Scores approach as part of the final risk decision.</p></article>
           </div>
@@ -550,11 +550,11 @@
         <div class="pipeline-group">
           <h3>TTC Cues</h3>
           <div class="pipeline-steps">
-            <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and collision_ttc_sec."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and closing speed from metric depth (the physical backbone).</p></article>
+            <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the depth/kinematic cue and Time to Collision (TTC)."><h5>Depth / Kalman Distance</h5><p>Smooths object distance and closing speed from metric depth (the physical backbone).</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the visual expansion cue and the approach term."><h5>BBox Expansion</h5><p>Measures object scale growth across track history as a visual approach cue.</p></article>
             <article class="flow-node" data-module="risk" data-route="Feeds TTC Fusion as the optical-flow cue."><h5>Flow TTC</h5><p>Estimates time-to-collision from radial optical flow around the vanishing point.</p></article>
             <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds TTC agreement, confidence damping and the lane-crossing prediction horizon."><h5>TTC Fusion</h5><p>Blends the depth, flow and expansion cues with a confidence-weighted median for internal risk timing.</p></article>
-            <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds ttc_score and the physical collision_ttc_sec displayed to the user."><h5>Collision TTC</h5><p>Uses depth distance and closing speed for the physical TTC shown in the UI.</p></article>
+            <article class="flow-node flow-node--hub" data-module="risk" data-route="Feeds ttc_score and the physical Time to Collision displayed to the user."><h5>Time to Collision (TTC)</h5><p>Uses depth distance and closing speed for the physical TTC shown in the UI.</p></article>
           </div>
         </div>
         <div class="flow-connector flow-connector--down" aria-hidden="true"></div>
