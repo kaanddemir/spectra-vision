@@ -85,9 +85,9 @@ export function initializeSpectra() {
     full: { label: "Full", ratio: 1, quality: "Full" },
   };
   const SAMPLING_PRESETS = {
-    fast: { label: "Fast", help: "Lower cost, less frequent model refresh.", values: { depth_every: 15, adaptive_depth: 1, detect_every: 5, lane_every: 5, flow_every: 2, resize_max_side: 384 } },
+    fast: { label: "Fast", help: "Lower cost, less frequent model refresh.", values: { depth_every: 15, adaptive_depth: 1, detect_every: 5, lane_every: 5, flow_every: 2, resize_max_side: 512 } },
     balanced: { label: "Balanced", help: "Balanced cost and tracking responsiveness.", values: { depth_every: 10, adaptive_depth: 1, detect_every: 3, lane_every: 3, flow_every: 1, resize_max_side: 512 } },
-    accurate: { label: "Accurate", help: "Sharper and more frequent model refresh.", values: { depth_every: 5, adaptive_depth: 1, detect_every: 2, lane_every: 3, flow_every: 1, resize_max_side: 768 } },
+    accurate: { label: "Accurate", help: "More frequent model refresh at the balanced video resolution.", values: { depth_every: 5, adaptive_depth: 1, detect_every: 2, lane_every: 3, flow_every: 1, resize_max_side: 512 } },
     custom: { label: "Custom", help: "Manual sampling values are active.", values: null },
   };
   const SAMPLING_PARAMS = new Set(["depth_every", "adaptive_depth", "detect_every", "lane_every", "flow_every", "resize_max_side"]);

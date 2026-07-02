@@ -85,3 +85,12 @@ def test_how_it_works_interaction_contract_is_present():
         "doc-modal-open",
     ):
         assert required in script
+
+
+def test_sampling_presets_keep_balanced_video_resolution():
+    controls = _read("js/controls.js")
+
+    for preset in ("fast", "balanced", "accurate"):
+        match = re.search(rf"{preset}: .*?values: \{{([^}}]+)\}}", controls)
+        assert match is not None
+        assert "resize_max_side: 512" in match.group(1)
