@@ -25,9 +25,6 @@
   min-width: 0;
 }
 
-/* ─── Preview card ───────────────────────────────────────── */
-.preview-card { padding-bottom: 16px; }
-
 .unified-analysis-card {
   flex: 1;
   display: flex;
@@ -107,4 +104,3 @@
   font-size: 13px;
 }
 .preview-empty[hidden] { display: none; }
-

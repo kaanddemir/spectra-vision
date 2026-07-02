@@ -308,49 +308,6 @@
 }
 .box-item .risk-score-val { color: rgba(var(--evrgb), 1); }
 
-.card-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
-}
-.bar-row {
-  display: grid;
-  grid-template-columns: 75px 1fr 35px;
-  align-items: center;
-  gap: 10px;
-}
-.bar-row .lbl { 
-  font-size: 10px; 
-  font-weight: 700; 
-  color: var(--muted); 
-  text-transform: capitalize; 
-}
-.bar-row .bar-outer { 
-  height: 4px; 
-  background: rgba(255,255,255,0.05); 
-  border-radius: 2px; 
-  overflow: hidden; 
-}
-.bar-row .bar-inner { 
-  height: 100%; 
-  border-radius: 2px; 
-  transition: width 0.4s ease-out; 
-}
-
-.bar-proximity .bar-inner { background: var(--signal-proximity); }
-.bar-approach .bar-inner  { background: var(--signal-approach); }
-.bar-crossing .bar-inner  { background: var(--signal-crossing); }
-.bar-confidence .bar-inner { background: var(--signal-confidence); }
-
-.bar-row .val { 
-  font-size: 11px; 
-  font-weight: 800; 
-  color: var(--text); 
-  text-align: right; 
-  font-variant-numeric: tabular-nums;
-}
-
 .event-card.ev-danger  { --evrgb: var(--danger-rgb); }
 .event-card.ev-caution { --evrgb: var(--caution-rgb); }
 .event-card.ev-safe    { --evrgb: var(--safe-rgb); }

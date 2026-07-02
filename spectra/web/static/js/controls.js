@@ -277,10 +277,6 @@ export function initializeSpectra() {
     return num(ev?.risk_score, 0);
   };
   const eventStateClass = (ev) => stateClass(sourceState(ev));
-  const isActionableObject = (obj) => {
-    const sc = stateClass(sourceState(obj));
-    return sc === "caution" || sc === "danger";
-  };
   const eventTimestamp = (ev) => num(ev?.timestamp_sec, null);
   const eventLane = (ev) => titleCase(ev?.lane);
   const eventItemsFromEvents = (events) => (Array.isArray(events) ? events : [])
@@ -838,11 +834,6 @@ export function initializeSpectra() {
     return response?.payload && typeof response.payload === "object" ? response.payload : (response || {});
   }
 
-  function sameEvent(a, b) {
-    if (!a || !b) return false;
-    return a.frame_index === b.frame_index && num(a.timestamp_sec, null) === num(b.timestamp_sec, null);
-  }
-
   function normalizePayload(response) {
     const payload = cleanResponsePayload(response);
     const metadata = payload?.metadata || {};
@@ -1010,10 +1001,6 @@ export function initializeSpectra() {
     if (blendImage) {
       showPreviewOverlay(blendImage, 5000);
     }
-  }
-
-  function stateLabel(value) {
-    return isReal(value) ? titleCase(value) : MISSING;
   }
 
   function setModeButtons() {
@@ -1710,7 +1697,6 @@ export function initializeSpectra() {
   function renderRiskTimeline(result) {
     const lineGroup = byId("chart-line");
     const areaGroup = byId("chart-area");
-    const pointCountEl = byId("stat-risk-points");
     if (!lineGroup || !areaGroup) return;
 
     const rows = normalizeTimelineRowsForChart(result?.timelineRows);
@@ -1720,7 +1706,6 @@ export function initializeSpectra() {
 
     areaGroup.replaceChildren();
     lineGroup.replaceChildren();
-    if (pointCountEl) pointCountEl.textContent = String(rows.length);
 
     const ctx = { areaGroup, lineGroup, xForTime, W: CHART_W };
     const tab = state.riskChartTab || "state";
@@ -2016,16 +2001,6 @@ export function initializeSpectra() {
     document.querySelectorAll("[data-playback-mode]").forEach((btn) => {
       btn.classList.toggle("is-active", btn.dataset.playbackMode === state.playbackMode);
     });
-    const label = byId("playback-mode-label");
-    if (label) {
-      label.textContent = state.playbackMode === "risk"
-        ? "Risk Only"
-        : state.playbackMode === "pause-risk"
-          ? "Pause On Risk"
-          : state.playbackMode === "slow-risk"
-            ? "Slow On Risk"
-            : "Normal";
-    }
   }
 
   function setPlaybackMode(mode) {
@@ -2201,8 +2176,7 @@ export function initializeSpectra() {
     updateEvidenceControls();
 
     updateChartCursor(0);
-    const fInp = byId("max-frames-input"), sInp = byId("start-time-input"), eInp = byId("end-time-input");
-    if (fInp) fInp.disabled = true;
+    const sInp = byId("start-time-input"), eInp = byId("end-time-input");
     if (sInp) sInp.disabled = true;
     if (eInp) eInp.disabled = true;
   }
@@ -2546,10 +2520,6 @@ export function initializeSpectra() {
     setTimeout(() => { if (!settingsDrawer.classList.contains("is-open")) settingsDrawer.hidden = true; }, 400);
   }
 
-  // "How Spectra Works" now lives on the standalone /how-it-works page;
-  // the header's #open-help link navigates there directly (no modal JS).
-
-
   function setupSegmentedControls() {
     document.querySelectorAll(".segmented-control").forEach(ctrl => {
       const param = ctrl.dataset.param;
@@ -2580,13 +2550,11 @@ export function initializeSpectra() {
       panel.hidden = panel.dataset.windowPanel !== mode;
     });
 
-    const framesInput = byId("max-frames-input");
     const startInp = byId("start-time-input");
     const endInp = byId("end-time-input");
     const startFrameInp = byId("start-frame-input");
     const endFrameInp = byId("end-frame-input");
 
-    if (framesInput) framesInput.disabled = !hasSource || mode !== "frames";
     document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
       btn.disabled = !hasSource || mode !== "frames";
     });
@@ -2638,12 +2606,6 @@ export function initializeSpectra() {
     state.frameBudgetPreset = null;
     const hidden = formField("max_processed_frames");
     if (hidden) hidden.value = "";
-    const input = byId("max-frames-input");
-    if (input) {
-      input.value = "";
-      input.placeholder = "";
-      input.max = "";
-    }
     document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
       btn.classList.remove("active");
       btn.disabled = true;
@@ -2661,11 +2623,6 @@ export function initializeSpectra() {
     state.frameBudgetPreset = key;
     const hidden = formField("max_processed_frames");
     if (hidden) hidden.value = key === "full" ? String(FULL_VIDEO_FRAME_BUDGET) : String(frames);
-    const input = byId("max-frames-input");
-    if (input) {
-      input.value = String(frames);
-      input.max = String(totalFrames);
-    }
     document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
       btn.disabled = false;
       btn.classList.toggle("active", btn.dataset.framePreset === state.frameBudgetPreset);
@@ -2675,37 +2632,6 @@ export function initializeSpectra() {
       help.textContent = key === "full"
         ? `${config.label} · all ~${totalFrames} frames`
         : `${config.label} · ~${frames} of ${totalFrames} frames`;
-    }
-  }
-
-  function syncFrameBudgetPresetFromValue(value) {
-    const frames = num(value, null);
-    if (frames === null) {
-      state.frameBudgetPreset = null;
-      const help = byId("frame-budget-help");
-      if (help) help.textContent = state.sourceMeta ? "Choose a frame budget." : "";
-      return;
-    }
-    const totalFrames = estimatedSourceFrames();
-    const match = totalFrames
-      ? Object.entries(FRAME_BUDGET_PRESETS).find(([key, config]) => {
-        const presetFrames = key === "full"
-          ? totalFrames
-          : clamp(Math.round(totalFrames * config.ratio), 1, totalFrames);
-        return presetFrames === frames;
-      })
-      : null;
-    state.frameBudgetPreset = match ? match[0] : "custom";
-    document.querySelectorAll("[data-frame-preset]").forEach((btn) => {
-      btn.disabled = !totalFrames;
-      btn.classList.toggle("active", btn.dataset.framePreset === state.frameBudgetPreset);
-    });
-    const help = byId("frame-budget-help");
-    if (help) {
-      if (!totalFrames) help.textContent = "";
-      else if (match && match[0] === "full") help.textContent = `${match[1].label} · all ~${totalFrames} frames`;
-      else if (match) help.textContent = `${match[1].label} · ~${frames} of ${totalFrames} frames`;
-      else help.textContent = `Custom · ${frames} of ${totalFrames} frames`;
     }
   }
 
@@ -3175,7 +3101,6 @@ export function initializeSpectra() {
           const key = input.dataset.param;
           const hidden = formField(key);
           if (hidden) hidden.value = String(input.value);
-          if (key === "max_processed_frames") syncFrameBudgetPresetFromValue(input.value);
         });
       } else if (input.type === "checkbox") {
         const key = input.dataset.param;

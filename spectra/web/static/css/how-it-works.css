@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────────────
    "How Spectra Works" — standalone documentation page.
    Loaded AFTER main.css so it can extend / override the shared
-   .flow-* + .flow-badge rules (defined in responsive.css).
+   shared .flow-* rules (defined in responsive.css).
    The landing shows ONLY the pipeline map; each topic opens as a
    full-screen popup, reachable from a stage card or the topic menu.
    ───────────────────────────────────────────────────────────── */
@@ -129,9 +129,6 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.doc-color-info__title--spaced {
-  margin-top: 10px;
-}
 .doc-color-row {
   --legend-rgb: 150, 160, 180;
   display: flex;
@@ -161,26 +158,6 @@
 .doc-color-row[data-legend-module="risk"] { --legend-rgb: 255, 88, 128; }
 .doc-color-row[data-legend-module="decision"] { --legend-rgb: 255, 190, 72; }
 .doc-color-row[data-legend-module="performance"] { --legend-rgb: 174, 118, 255; }
-.doc-style-row {
-  display: grid;
-  grid-template-columns: 18px 64px 1fr;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 5px 4px;
-  color: var(--text-soft);
-  font-size: 12px;
-}
-.doc-style-row b {
-  color: var(--text);
-  font-weight: 750;
-}
-.doc-style-row em {
-  color: var(--muted);
-  font-style: normal;
-  font-size: 11px;
-  line-height: 1.25;
-}
 .doc-style-swatch {
   width: 16px;
   height: 16px;
@@ -292,14 +269,7 @@
   justify-content: center;
 }
 
-/* Section lead + formula reused inside the popups. */
-.doc-section-lead {
-  margin: 0 0 22px;
-  max-width: 760px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
+/* Formula blocks reused inside the popups. */
 .doc-formula {
   margin: 8px 0 0;
   max-width: 760px;
@@ -765,7 +735,6 @@ body.doc-modal-open { overflow: hidden; }
 }
 .doc-modal__body > .flow-board,
 .doc-modal__body > .doc-formula,
-.doc-modal__body > .doc-section-lead,
 .doc-modal__body > .pipeline-group,
 .doc-modal__body > .frame-plan-table-wrap,
 .doc-modal__body > .frame-plan-note {
