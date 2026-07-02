@@ -1994,13 +1994,21 @@ export function initializeSpectra() {
     const etaY = (s) => CHART_Y_TOP + clamp(s / CAP, 0, 1) * (CHART_Y_BOT - CHART_Y_TOP);
     const guide1 = etaY(1);
     const guide3 = etaY(3);
-    // Y-axis ticks ARE the guide seconds, at their exact line positions.
-    setChartYAxis([
-      { text: "0s", y: CHART_Y_TOP },
-      { text: "1s", y: guide1 },
-      { text: "3s", y: guide3 },
-      { text: "6s", y: CHART_Y_BOT },
-    ]);
+    // Evenly-spaced ticks (0/1.5/3/4.5/6s) that land on the background grid
+    // lines, so a bar's top reads against a real, aligned gridline instead of
+    // the cramped non-uniform 0/1/3/6 labels (which made bars look ~1s off).
+    const evenTicks = [0, 1.5, 3, 4.5, 6];
+    setChartYAxis(evenTicks.map((s) => ({ text: `${s % 1 ? s.toFixed(1) : s}s`, y: etaY(s) })));
+
+    // Faint solid gridlines at the tick seconds so the eye has a reference the
+    // bars actually line up with.
+    evenTicks.forEach((s) => {
+      if (s === 0 || s === CAP) return;
+      areaGroup.appendChild(makeSvg("line", {
+        x1: 0, y1: etaY(s).toFixed(1), x2: W, y2: etaY(s).toFixed(1),
+        stroke: "rgba(255,255,255,0.06)", "stroke-width": 1,
+      }));
+    });
 
     [
       { y: 0, h: guide1, color: "rgba(255, 68, 68, 0.08)" },
