@@ -269,47 +269,6 @@
   justify-content: center;
 }
 
-/* Formula blocks reused inside the popups. */
-.doc-formula {
-  margin: 8px 0 0;
-  max-width: 760px;
-  padding: 16px 18px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text-soft);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12.5px;
-  line-height: 1.9;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-.doc-formula b,
-.formula-var--shared {
-  color: var(--red-hi);
-  font-weight: 800;
-}
-.formula-var {
-  display: inline;
-  white-space: normal;
-}
-.doc-formula-set {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 8px auto 24px;
-  max-width: 760px;
-}
-.doc-formula-set .doc-formula { margin: 0; max-width: none; }
-.doc-formula__label {
-  font-family: var(--font-sans, system-ui, sans-serif);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint, #8a8f98);
-  margin-bottom: 8px;
-}
 .doc-local-note {
   position: absolute;
   top: calc(100% + 8px);
@@ -734,10 +693,8 @@ body.doc-modal-open { overflow: hidden; }
   padding: 28px;
 }
 .doc-modal__body > .flow-board,
-.doc-modal__body > .doc-formula,
 .doc-modal__body > .pipeline-group,
-.doc-modal__body > .frame-plan-table-wrap,
-.doc-modal__body > .frame-plan-note {
+.doc-modal__body > .frame-plan-table-wrap {
   margin-left: auto;
   margin-right: auto;
   max-width: 1120px;
