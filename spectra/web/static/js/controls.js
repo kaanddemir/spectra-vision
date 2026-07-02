@@ -1976,7 +1976,14 @@ export function initializeSpectra() {
         const s = num(r.risk_score, 0);
         if (s > bestScore) { bestScore = s; best = r; }
       });
-      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc: zoneOf(bestScore), time_sec: best.time_sec });
+      // Colour by the frame's authoritative state (same field the State tab and
+      // banner use) so a score sitting on a band edge is not re-thresholded into
+      // a different colour — e.g. a CAUTION frame stays yellow even if its score
+      // lands exactly on the danger edge. Fall back to score banding if the row
+      // carries no explicit state.
+      const rowState = stateClass(sourceState(best));
+      const sc = rowState === "none" ? zoneOf(bestScore) : rowState;
+      bars.push({ x: ((k + 0.5) / N) * W, value: bestScore, sc, time_sec: best.time_sec });
     });
     if (!bars.length) return;
 
