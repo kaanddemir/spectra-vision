@@ -129,6 +129,46 @@ Manual run:
 python -m uvicorn spectra.app:app --host localhost --port 8000 --reload
 ```
 
+## Project Structure
+
+```text
+Spectra/
+├── models/               # Local model weights, ignored by git
+├── scripts/              # Model setup helpers
+├── spectra/
+│   ├── app.py            # FastAPI app, routes, upload validation, serialization
+│   ├── analysis/
+│   │   ├── video.py      # Frame loop, model scheduling, event collection
+│   │   ├── risk.py       # Risk scoring, TTC fusion, sensitivity bands
+│   │   ├── tracking.py   # IoU tracking and coasting
+│   │   └── overlay.py    # Rendered analysis overlays
+│   ├── vision/
+│   │   ├── detection.py  # YOLO wrapper
+│   │   ├── lanenet.py    # UFLDv2 ONNX wrapper
+│   │   ├── depth.py      # Depth map and nearness utilities
+│   │   ├── models.py     # ONNX Runtime depth/provider setup
+│   │   ├── motion.py     # DIS optical flow and ego-motion compensation
+│   │   ├── road.py       # Lane geometry and road filtering
+│   │   ├── brake_lights.py
+│   │   └── traffic_light.py
+│   └── web/static/       # Browser UI assets and logo
+├── tests/                # API, backend, pipeline, and UI smoke tests
+├── LICENSE
+├── requirements.txt
+├── start.sh
+├── stop.sh
+└── README.md
+```
+
+## Data Storage
+
+Spectra is local-first:
+
+- **Uploaded Videos**: Processed locally by the FastAPI service.
+- **Model Files**: Stored under `models/` and ignored by git because they are large runtime artifacts.
+- **Runtime Images**: Returned in the API payload under `payload.images`; events reference them by `image_ref`.
+- **No Backend Database**: The project does not include database-backed persistence.
+
 ## Routes
 
 - `GET /` - main analysis UI
@@ -178,54 +218,6 @@ The response shape is:
 
 Images are stored once under top-level `payload.images`. Events reference them with `image_ref`.
 
-## Project Structure
-
-```text
-Spectra/
-├── models/               # Local model weights, ignored by git
-├── scripts/              # Model setup helpers
-├── spectra/
-│   ├── app.py            # FastAPI app, routes, upload validation, serialization
-│   ├── analysis/
-│   │   ├── video.py      # Frame loop, model scheduling, event collection
-│   │   ├── risk.py       # Risk scoring, TTC fusion, sensitivity bands
-│   │   ├── tracking.py   # IoU tracking and coasting
-│   │   └── overlay.py    # Rendered analysis overlays
-│   ├── vision/
-│   │   ├── detection.py  # YOLO wrapper
-│   │   ├── lanenet.py    # UFLDv2 ONNX wrapper
-│   │   ├── depth.py      # Depth map and nearness utilities
-│   │   ├── models.py     # ONNX Runtime depth/provider setup
-│   │   ├── motion.py     # DIS optical flow and ego-motion compensation
-│   │   ├── road.py       # Lane geometry and road filtering
-│   │   ├── brake_lights.py
-│   │   └── traffic_light.py
-│   └── web/static/       # Browser UI assets and logo
-├── tests/                # API, backend, pipeline, and UI smoke tests
-├── requirements.txt
-├── start.sh
-├── stop.sh
-└── README.md
-```
-
-## Data & Model Storage
-
-Spectra is local-first:
-
-- **Uploaded Videos**: Processed locally by the FastAPI service.
-- **Model Files**: Stored under `models/` and ignored by git because they are large runtime artifacts.
-- **Runtime Images**: Returned in the API payload under `payload.images`; events reference them by `image_ref`.
-- **No Backend Database**: The project does not include database-backed persistence.
-
-## Basic Workflow
-
-1. Prepare the virtual environment and install dependencies.
-2. Download or place required model files under `models/`.
-3. Start the app with `./start.sh`.
-4. Upload a forward-facing driving video in the browser UI.
-5. Review risk states, event snapshots, timeline rows, and performance logs.
-6. Run tests before changing API contracts, risk logic, or UI behavior.
-
 ## Testing
 
 Run the full test suite:
@@ -246,6 +238,10 @@ pytest tests/test_api_contract.py tests/test_static_ui_smoke.py
 - YOLO runs through Ultralytics/PyTorch and prefers the best available local device.
 - Missing or unloadable required models are hard backend failures before analysis starts.
 - Traffic-light detections are advisory only; they are not tracked as collision participants.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
 
 ## Footer
 
