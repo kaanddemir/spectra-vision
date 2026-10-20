@@ -1,0 +1,290 @@
+.review-player__stage:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+.review-player__stage video {
+  cursor: pointer;
+}
+
+.review-player__cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background: var(--color-media-bg);
+  font-size: var(--text-sm);
+}
+
+.review-player__corner {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+}
+
+/* Overlay status: one short line in the corner of the stage. */
+.review-player__chip {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-overlay-chip);
+  color: var(--color-overlay-text);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  pointer-events: none;
+  max-width: calc(100% - 2 * var(--space-3));
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Controls over the bottom of the picture, on a soft gradient: the progress bar, then playback on the left
+ * and view settings on the right. While playing they fade after an idle period; see useControlsVisibility.
+ */
+.review-player__chrome {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-8) var(--space-2) var(--space-1);
+  background: linear-gradient(to top, var(--color-media-scrim), transparent);
+  color: var(--color-media-text);
+  transition: opacity var(--duration-base) var(--ease-standard);
+  /* The gradient itself lets clicks reach the picture; only the controls take them. */
+  pointer-events: none;
+}
+
+.review-player__chrome > * {
+  pointer-events: auto;
+}
+
+.review-player__stage[data-controls="hidden"] .review-player__chrome,
+.review-player__stage[data-controls="hidden"] .review-player__chrome > * {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.review-player__stage[data-controls="hidden"],
+.review-player__stage[data-controls="hidden"] video {
+  cursor: none;
+}
+
+.review-player__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+}
+
+.review-player__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-0-5);
+  min-width: 0;
+}
+
+.review-player__group > .tooltip-anchor,
+.review-player__group > .popover {
+  flex: none;
+}
+
+/* Light controls on the dark picture, in both themes. */
+.review-player__chrome .button--ghost {
+  color: var(--color-media-text);
+}
+
+.review-player__chrome .button--ghost:hover:not(:disabled),
+.review-player__chrome .button--ghost[aria-pressed="true"] {
+  background: var(--color-media-control-hover);
+  color: var(--color-media-text);
+}
+
+.review-player__chrome .button--ghost:disabled {
+  opacity: 0.5;
+}
+
+/* Menus open upwards, inside the picture. */
+.review-player__chrome .popover__panel {
+  top: auto;
+  bottom: calc(100% + var(--popover-gap));
+  max-height: none;
+}
+
+/* The progress bar: a tall touch area around a thin rail that thickens under the pointer or focus. */
+.review-player__seek {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: var(--seek-hit-h);
+  margin: 0 var(--space-1);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.review-player__seek[aria-disabled="true"] {
+  cursor: default;
+}
+
+.review-player__seek:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius-sm);
+}
+
+.review-player__seek-rail {
+  position: relative;
+  flex: 1;
+  height: var(--seek-rail-h);
+  border-radius: var(--radius-sm);
+  background: var(--color-media-rail);
+  transition: height var(--duration-fast) var(--ease-standard);
+}
+
+.review-player__seek-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--seek-progress) * 100%);
+  border-radius: inherit;
+  background: var(--color-brand);
+}
+
+.review-player__seek-thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--seek-progress) * 100%);
+  width: var(--seek-thumb);
+  height: var(--seek-thumb);
+  border-radius: var(--radius-full);
+  background: var(--color-brand);
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.review-player__seek:not([aria-disabled="true"]):hover .review-player__seek-rail,
+.review-player__seek:focus-visible .review-player__seek-rail {
+  height: var(--seek-rail-h-active);
+}
+
+.review-player__seek:not([aria-disabled="true"]):hover .review-player__seek-thumb,
+.review-player__seek:focus-visible .review-player__seek-thumb {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* Overlay layers: rows like the speed menu, a check showing each drawn layer. */
+.review-player__speed-panel.review-player__layer-panel {
+  right: 0;
+  left: auto;
+}
+
+.review-player__layer-option:has(input:checked) {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.review-player__layer-option:hover {
+  background: var(--color-surface-hover);
+}
+
+.review-player__layer-option:not(:has(input:checked)) .review-player__layer-check {
+  visibility: hidden;
+}
+
+.review-player__stage:has([role="alert"]) {
+  min-height: var(--empty-page-min-h);
+}
+
+.review-player__stage:has([role="alert"]) video {
+  position: absolute;
+  inset: 0;
+}
+
+.review-player__cover[role="alert"] {
+  position: relative;
+  inset: auto;
+}
+
+.review-player__time {
+  margin-left: var(--space-2);
+  color: var(--color-media-text);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.review-player__speed {
+  min-width: var(--speed-button-w);
+}
+
+.review-player__speed-panel {
+  right: auto;
+  left: 0;
+  width: var(--speed-menu-w);
+  padding: var(--space-1);
+}
+
+.review-player__speeds {
+  display: grid;
+  gap: var(--space-0-5);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.review-player__speed-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.review-player__speed-option:hover,
+.review-player__speed-option:has(input:checked) {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.review-player__speed-option:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.review-player__speed-check {
+  color: var(--color-accent-text);
+}
+
+/* Full screen gives the picture the whole screen; the controls stay over it. */
+.review-player:fullscreen {
+  display: flex;
+  background: var(--color-media-bg);
+}
+
+.review-player:fullscreen .review-player__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+/* On phones the clock keeps only the position; the duration stays on the progress bar. */
+@media (max-width: 640px) {
+  .review-player__duration {
+    display: none;
+  }
+
+  .review-player__time {
+    margin-left: var(--space-1);
+  }
+}

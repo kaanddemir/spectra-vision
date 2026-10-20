@@ -1,0 +1,62 @@
+.popover {
+  position: relative;
+  display: inline-flex;
+}
+
+.popover__panel {
+  position: absolute;
+  top: calc(100% + var(--popover-gap));
+  right: 0;
+  z-index: var(--z-dropdown);
+  max-width: calc(100vw - 2 * var(--popover-margin));
+  max-height: var(--popover-available-height, calc(100dvh - 2 * var(--popover-margin)));
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  transform: translateX(var(--popover-shift, 0));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.popover__panel--up {
+  top: auto;
+  bottom: calc(100% + var(--popover-gap));
+}
+
+.popover__panel[hidden] {
+  display: none;
+}
+
+/* Borderless header control: icon (and optional label) at control-h-sm. */
+.header-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1-5);
+  min-width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0 var(--space-1-5);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.header-control:hover,
+.header-control[aria-expanded="true"] {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.header-control:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}

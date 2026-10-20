@@ -1,0 +1,19 @@
+.spinner {
+  display: inline-flex;
+  animation: spinner-turn var(--duration-spin) linear infinite;
+}
+
+@keyframes spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-4);
+  color: var(--color-text-secondary);
+}

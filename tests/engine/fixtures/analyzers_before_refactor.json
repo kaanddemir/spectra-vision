@@ -1,0 +1,169 @@
+{
+  "false": {
+    "analyzers": [
+      {
+        "role": "event_analyzer",
+        "name": "apparent-approach",
+        "version": "3",
+        "checkpoint_sha256": null,
+        "params": {
+          "tau_s": 3.0,
+          "window_s": 1.0,
+          "min_observations": 5,
+          "confidence": 0.9,
+          "merge_gap_s": 1.0,
+          "edge_px": 2.0,
+          "path_half_width": 1.5,
+          "min_score": 0.6,
+          "size": "box width and height",
+          "fit": "Theil-Sen with Sen interval",
+          "passing": "episode fit of box centre against width",
+          "jump_ratio": 2.0,
+          "jump_window_s": 0.5
+        },
+        "interval_s": null
+      },
+      {
+        "role": "event_analyzer",
+        "name": "camera-vehicle-impact",
+        "version": "1",
+        "checkpoint_sha256": null,
+        "params": {
+          "close_height": 0.25,
+          "close_window_s": 0.5,
+          "lost_height": 0.1,
+          "jolt_window": [
+            -0.3,
+            1.0
+          ],
+          "jolt_z": 10.0,
+          "baseline_s": 5.0,
+          "min_baseline": 10,
+          "min_inliers": 20,
+          "min_inlier_ratio": 0.3,
+          "max_step_s": 0.25,
+          "min_spread": {
+            "rotation": 0.005,
+            "tx": 0.002,
+            "ty": 0.002,
+            "log_scale": 0.002
+          },
+          "settle_s": 2.0,
+          "approach": {
+            "name": "apparent-approach",
+            "version": "3",
+            "params": {
+              "tau_s": 3.0,
+              "window_s": 1.0,
+              "min_observations": 5,
+              "confidence": 0.9,
+              "merge_gap_s": 1.0,
+              "edge_px": 2.0,
+              "path_half_width": 1.5,
+              "min_score": 0.6,
+              "size": "box width and height",
+              "fit": "Theil-Sen with Sen interval",
+              "passing": "episode fit of box centre against width",
+              "jump_ratio": 2.0,
+              "jump_window_s": 0.5
+            }
+          },
+          "rule": "approach episode, ending close, with a jolt in reliable camera-motion estimates"
+        },
+        "interval_s": null
+      }
+    ],
+    "analysis_key": "f3cbb1f445b7fc7a7d79d49dbedbf85cdc0f8b4c0777836f598f950a341268ad"
+  },
+  "true": {
+    "analyzers": [
+      {
+        "role": "event_analyzer",
+        "name": "apparent-approach",
+        "version": "3",
+        "checkpoint_sha256": null,
+        "params": {
+          "tau_s": 3.0,
+          "window_s": 1.0,
+          "min_observations": 5,
+          "confidence": 0.9,
+          "merge_gap_s": 1.0,
+          "edge_px": 2.0,
+          "path_half_width": 1.5,
+          "min_score": 0.6,
+          "size": "box width and height",
+          "fit": "Theil-Sen with Sen interval",
+          "passing": "episode fit of box centre against width",
+          "jump_ratio": 2.0,
+          "jump_window_s": 0.5
+        },
+        "interval_s": null
+      },
+      {
+        "role": "event_analyzer",
+        "name": "lane-entry-cut-in",
+        "version": "2",
+        "checkpoint_sha256": null,
+        "params": {
+          "hold_s": 0.4,
+          "min_observations": 3,
+          "max_transition_s": 3.0,
+          "max_gap_s": 0.6,
+          "min_score": 0.6,
+          "suppressed_by": "completed ego lane changes"
+        },
+        "interval_s": null
+      },
+      {
+        "role": "event_analyzer",
+        "name": "camera-vehicle-impact",
+        "version": "1",
+        "checkpoint_sha256": null,
+        "params": {
+          "close_height": 0.25,
+          "close_window_s": 0.5,
+          "lost_height": 0.1,
+          "jolt_window": [
+            -0.3,
+            1.0
+          ],
+          "jolt_z": 10.0,
+          "baseline_s": 5.0,
+          "min_baseline": 10,
+          "min_inliers": 20,
+          "min_inlier_ratio": 0.3,
+          "max_step_s": 0.25,
+          "min_spread": {
+            "rotation": 0.005,
+            "tx": 0.002,
+            "ty": 0.002,
+            "log_scale": 0.002
+          },
+          "settle_s": 2.0,
+          "approach": {
+            "name": "apparent-approach",
+            "version": "3",
+            "params": {
+              "tau_s": 3.0,
+              "window_s": 1.0,
+              "min_observations": 5,
+              "confidence": 0.9,
+              "merge_gap_s": 1.0,
+              "edge_px": 2.0,
+              "path_half_width": 1.5,
+              "min_score": 0.6,
+              "size": "box width and height",
+              "fit": "Theil-Sen with Sen interval",
+              "passing": "episode fit of box centre against width",
+              "jump_ratio": 2.0,
+              "jump_window_s": 0.5
+            }
+          },
+          "rule": "approach episode, ending close, with a jolt in reliable camera-motion estimates"
+        },
+        "interval_s": null
+      }
+    ],
+    "analysis_key": "398c9e14f28c786d8a921633231892f1389b180364a73812ea485f58b9ac9164"
+  }
+}

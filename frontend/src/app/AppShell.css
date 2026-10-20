@@ -1,0 +1,156 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-tooltip);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  transform: translateY(calc(-100% - var(--space-4)));
+}
+
+.skip-link:focus-visible {
+  box-shadow: var(--shadow-md);
+  transform: none;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.app-header__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: var(--content-max);
+  min-height: var(--header-h);
+  margin: 0 auto;
+  padding: 0 var(--page-gutter);
+}
+
+.app-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+}
+
+.app-header__brand:hover {
+  text-decoration: none;
+}
+
+.app-header__mark {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.app-header__name {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.app-nav {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.app-nav ul {
+  display: flex;
+  height: 100%;
+  gap: var(--space-1);
+  overflow-x: auto;
+}
+
+.app-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-width-strong) solid transparent;
+  border-radius: 0;
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.app-nav__link:hover {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.app-nav__link[aria-current="page"],
+.app-nav__link.active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.app-nav__link:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.app-header__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.app-banner {
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4) var(--page-gutter) 0;
+}
+
+.app-banner code {
+  font-family: var(--font-mono);
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-6) var(--page-gutter) var(--space-12);
+}
+
+.app-main:focus {
+  outline: none;
+}
+
+@media (max-width: 960px) {
+  .app-header__inner {
+    flex-wrap: wrap;
+    gap: 0 var(--space-4);
+    padding-top: var(--space-2);
+  }
+
+  .app-header__tools {
+    margin-left: auto;
+  }
+
+  .app-nav {
+    order: 3;
+    flex-basis: 100%;
+    height: var(--control-h-lg);
+  }
+
+  .app-nav__link {
+    padding: 0 var(--space-2);
+  }
+}

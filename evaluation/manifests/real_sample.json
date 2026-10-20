@@ -1,0 +1,68 @@
+{
+  "manifest_version": "1.0",
+  "status": "approved for download on 2026-10-16; internal evaluation only",
+  "purpose": "Preliminary real-footage detector and tracker runtime and behaviour checks. No redistribution, no training, no re-identification of people or vehicles.",
+  "total_bytes": 258712195,
+  "clips": [
+    {
+      "id": "commons-i270-southbound",
+      "filename": "i270_southbound.webm",
+      "role": "normal_traffic",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/db/Driving_southbound_on_I-270_from_Shady_Grove_Road_to_the_I-270_Spur_%281_June_2026%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Driving_southbound_on_I-270_from_Shady_Grove_Road_to_the_I-270_Spur_(1_June_2026).webm",
+      "bytes": 137892159,
+      "sha1": "af4961f6871eccbe4e4a4c2c4fd0dd4f736b9c8a",
+      "licence": "CC BY-SA 4.0",
+      "author": "Illegitimate Barrister (own work)",
+      "sha256": "4ba849da58528bd18df86d6ef4407e08351bef669eddccdcab22d12a92433420"
+    },
+    {
+      "id": "commons-alboloduy-a1075",
+      "filename": "tramo_alboloduy.ogg",
+      "role": "curves_no_traffic",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/cc/Tramo_alboloduy.ogg",
+      "page": "https://commons.wikimedia.org/wiki/File:Tramo_alboloduy.ogg",
+      "bytes": 58729584,
+      "sha1": "30fd208f2620fd89b88d9f14634d76261a01c510",
+      "licence": "CC BY-SA 4.0",
+      "author": "Schumi4ever (own work)",
+      "sha256": "22a46d6169a4746f09ddf5008cc544b016d053509e97f88cc61e3ea777a288a0"
+    },
+    {
+      "id": "comma2k19-b0c9d2329ad1606b-10",
+      "filename": "comma2k19_b0c9d2329ad1606b_10.hevc",
+      "role": "normal_highway",
+      "url": "https://huggingface.co/datasets/commaai/comma2k19/resolve/main/compression_challenge/b0c9d2329ad1606b%7C2018-07-27--06-03-57/10/video.hevc",
+      "page": "https://huggingface.co/datasets/commaai/comma2k19",
+      "bytes": 37533786,
+      "sha256": "5f3ad3c056dda7fc480e4344ac2199c0320af0cfce52637cbc8885cc004f0e33",
+      "licence": "MIT",
+      "author": "comma.ai",
+      "assumed_fps": 20
+    },
+    {
+      "id": "commons-kumamoto-earthquake",
+      "filename": "kumamoto_earthquake.webm",
+      "role": "hard_negative_shake",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8e/2026%E5%B9%B4%E7%86%8A%E6%9C%AC%E5%9C%B0%E9%9C%87_%E6%97%A5%E5%A5%88%E4%B9%85%E3%82%A4%E3%83%B3%E3%82%BF%E3%83%BC%E3%83%81%E3%82%A7%E3%83%B3%E3%82%B8_%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%83%AC%E3%82%B3%E3%83%BC%E3%83%80%E6%98%A0%E5%83%8F%E8%A8%98%E9%8C%B2.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:2026%E5%B9%B4%E7%86%8A%E6%9C%AC%E5%9C%B0%E9%9C%87_%E6%97%A5%E5%A5%88%E4%B9%85%E3%82%A4%E3%83%B3%E3%82%BF%E3%83%BC%E3%83%81%E3%82%A7%E3%83%B3%E3%82%B8_%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%83%AC%E3%82%B3%E3%83%BC%E3%83%80%E6%98%A0%E5%83%8F%E8%A8%98%E9%8C%B2.webm",
+      "bytes": 19318909,
+      "sha1": "e1c77e9358538863c408eed0d462652b00232bb4",
+      "licence": "CC BY-SA 4.0",
+      "author": "Wikipkmmt (own work)",
+      "sha256": "63b8cb3ee1bcef5a63f9d722f703f9c1d1ef8384cb73c1c4b9f063bdc11e0898"
+    },
+    {
+      "id": "commons-bolide-2024",
+      "filename": "bolide_2024.webm",
+      "role": "hard_negative_lighting",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Bolide_9-22-24.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Bolide_9-22-24.webm",
+      "bytes": 5237757,
+      "sha1": "63b1efece6c9e92b1b302fe93ae768ef869a912e",
+      "licence": "CC BY 4.0",
+      "author": "WoodJesus (own work)",
+      "sha256": "1ffe991a6567707d3c9a14417362c6a35f3716027a04b2fea914e86d856bc5eb"
+    }
+  ]
+}

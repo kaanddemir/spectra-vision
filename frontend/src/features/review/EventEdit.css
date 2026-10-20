@@ -1,0 +1,65 @@
+/* Editing lives in the shared dialog; the form adds only its own spacing. */
+.event-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--color-text);
+}
+
+/* The detected interval and the action that restores it, on one line under the times. */
+.event-edit__detected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.event-edit__detected .type-caption {
+  font-variant-numeric: tabular-nums;
+}
+
+.event-edit__times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  .event-edit__times {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.event-edit__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.event-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  padding-block: var(--space-4);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+/* Plain text as written: line breaks kept, nothing interpreted. */
+.event-note__text {
+  max-width: 72ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.event-review__adjusted {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+/* In the dialog, every field spans the full width so the note lines up with Start and End. */
+.event-edit .control {
+  max-width: none;
+}

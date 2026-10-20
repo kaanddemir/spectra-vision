@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools==81.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectra"
+dynamic = ["version"]
+description = "Local video analysis and evidence review for recorded road footage"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy==2.2.6",
+    "pydantic==2.13.3",
+    "av==19.0.1",
+    "onnxruntime==1.25.1",
+    "opencv-python==4.11.0.86",
+    "supervision==0.30.9",
+    "trackers==2.6.1",
+    "fastapi==0.136.1",
+    "uvicorn==0.46.0",
+]
+
+[project.optional-dependencies]
+eval = ["scipy==1.13.1"]
+dev = ["pytest==9.0.3", "httpx==0.28.1"]
+
+[tool.setuptools.dynamic]
+version = { attr = "spectra.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["spectra*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "model: needs local ONNX models under models/engine",
+    "slow: takes more than 2 s",
+    "real_video: uses evaluation/datasets; never in CI",
+]
+addopts = "-m 'not real_video' -p no:cacheprovider"

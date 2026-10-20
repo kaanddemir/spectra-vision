@@ -1,0 +1,80 @@
+{
+  "description": "Pure fake-component fixture; no decoding or inference. Reconstruct VideoInfo via tests.engine.test_contracts.video().",
+  "video": {
+    "file_name": "clip.mp4",
+    "size_bytes": 10,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "container": "mp4",
+    "codec": "h264",
+    "width": 1280,
+    "height": 720,
+    "coded_width": 1280,
+    "coded_height": 720,
+    "rotation": 0,
+    "time_base": "1/1000",
+    "start_s": 0.0,
+    "duration_s": null,
+    "nominal_fps": null,
+    "timestamp_source": "container_pts",
+    "assumed_fps": null
+  },
+  "config": {
+    "interval_s": null,
+    "start_s": 0.0,
+    "end_s": null,
+    "max_width": null,
+    "assumed_fps": null
+  },
+  "provenance": {
+    "engine_version": "0",
+    "decoder": {
+      "pyav": "19.0.1"
+    },
+    "components": [
+      {
+        "role": "detector",
+        "name": "fake-detector",
+        "version": "1",
+        "checkpoint_sha256": null,
+        "params": {},
+        "interval_s": null
+      },
+      {
+        "role": "tracker",
+        "name": "fake-tracker",
+        "version": "1",
+        "checkpoint_sha256": null,
+        "params": {},
+        "interval_s": null
+      },
+      {
+        "role": "segmenter",
+        "name": "fake-segmenter",
+        "version": "1",
+        "checkpoint_sha256": null,
+        "params": {},
+        "interval_s": null
+      },
+      {
+        "role": "ego_lane",
+        "name": "fake-ego_lane",
+        "version": "1",
+        "checkpoint_sha256": null,
+        "params": {},
+        "interval_s": null
+      }
+    ]
+  },
+  "analyzers": [
+    {
+      "role": "event_analyzer",
+      "name": "fake-event_analyzer",
+      "version": "1",
+      "checkpoint_sha256": null,
+      "params": {},
+      "interval_s": null
+    }
+  ],
+  "perception_key": "6b38a70644046bf371bc47365da9da7a8b80d83b4650d2926fc4ec85582ddbcd",
+  "analysis_key": "bcf8dd7b1f5212d48127098c69c9514bf7c6109a065c84ace5d38c9840370a8f"
+}

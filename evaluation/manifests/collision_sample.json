@@ -1,0 +1,45 @@
+{
+  "manifest_version": "1.0",
+  "status": "approved for download on 2026-10-20; internal evaluation only",
+  "purpose": "Collision-positive real-footage check of incident detection and the Review workflow. No redistribution, no training, no re-identification of people or vehicles.",
+  "dataset_root": "evaluation/datasets/real_sample",
+  "total_bytes": 6906252,
+  "clips": [
+    {
+      "id": "commons-speeding-car-rear-ends-truck",
+      "filename": "speeding_car_rear_ends_truck.webm",
+      "role": "collision",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/ba/The_speeding_car_rear-ended_into_the_truck_in_front%2C_and_the_front_hood_was_blown_open.webm",
+      "page": "https://commons.wikimedia.org/wiki/File:The_speeding_car_rear-ended_into_the_truck_in_front,_and_the_front_hood_was_blown_open.webm",
+      "title": "The speeding car rear-ended into the truck in front, and the front hood was blown open",
+      "bytes": 6906252,
+      "sha1": "50b5a906ecc9b142181234d94b894886b27a8b20",
+      "sha1_source": "Wikimedia Commons imageinfo API, rechecked 2026-10-20; matched the downloaded file",
+      "sha256": "2fd641b0471cf5507a81d1902381e4c50003bb2ca089e4115a0f2ce94515f422",
+      "downloaded": "2026-10-20",
+      "licence": "Public domain (Commons {{PD-CCTV}})",
+      "licence_limitations": "PD-CCTV is a Commons community designation arguing that automatic recordings lack human authorship; it is not permission from the recorder or vehicle owner and is untested outside the United States. Treat as internal evaluation only.",
+      "author": "Unknown in-vehicle recorder; Commons author field reads 'CCTV footage does not create a copyright'",
+      "upstream_source": "https://www.douyin.com/video/7426747188534955324",
+      "commons_uploader": "Fumikas Sagisavas (2025-02-13, via video2commons)",
+      "provenance_notes": "Commons copy of a Douyin repost; the original recording was not located. Frames carry the recorder's own overlay (date/time, speed, gear, indicators and a 17-character vehicle identifier, top-right). No platform watermark seen in the previewed frames; Commons thumbnails were viewed at 2, 8, 12, 15, 18, 19, 20, 21, 22 and 27 s only, not the full clip.",
+      "media": {
+        "container": "matroska,webm",
+        "video_codec": "vp9",
+        "width": 1280,
+        "height": 720,
+        "duration_s": 30.103,
+        "nominal_fps": 29.0,
+        "timestamp_source": "container_pts",
+        "decoded_frames": 873,
+        "audio_codecs": []
+      },
+      "collision_evidence": {
+        "status": "visually confirmed from preview stills; no human-confirmed annotation",
+        "observation": "Forward-facing in-vehicle camera on an expressway at about 108-120 km/h. A tarpaulin-covered truck is ahead in the ego lane at 20 s; at 21 s the bonnet has flown up and blocks the view; at 27 s the vehicle has stopped (0 km/h, gear P).",
+        "approximate_impact_window_s": [20.0, 21.0],
+        "labels_note": "Impact time is bracketed from 1 s preview spacing only; ground-truth event timing and labels have not been established."
+      }
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+.server-status--neutral { --status-color: var(--color-text-secondary); }
+.server-status--success { --status-color: var(--color-success-text); }
+.server-status--warning { --status-color: var(--color-warning-text); }
+.server-status--danger { --status-color: var(--color-danger-text); }
+
+.server-status__dot {
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--status-color);
+}
+
+.server-status__panel {
+  width: var(--popover-w);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.server-status__title {
+  font-weight: var(--weight-semibold);
+}
+
+.server-status__note {
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+}
+
+.server-status__reasons {
+  margin-top: var(--space-2);
+  padding-left: var(--space-4);
+  list-style: disc;
+  color: var(--color-warning-text);
+  line-height: var(--leading-sm);
+}
+
+.server-status__rows {
+  display: grid;
+  gap: var(--space-1-5);
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.server-status__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.server-status__row dt {
+  color: var(--color-text-secondary);
+}
+
+.server-status__row dd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin: 0;
+}
+
+/* On narrow screens only the dot remains; the full status stays the button's accessible name. */
+@media (max-width: 640px) {
+  .server-status__label {
+    display: none;
+  }
+}

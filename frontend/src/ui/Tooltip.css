@@ -1,0 +1,36 @@
+.tooltip-anchor {
+  display: inline-flex;
+}
+
+/* Fixed to the viewport and placed by tooltipPosition.ts; invisible until measured, so it never flashes
+   at the wrong place. Long labels and paths wrap within --tooltip-max-w. */
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  width: max-content;
+  max-width: min(var(--tooltip-max-w), calc(100vw - 2 * var(--tooltip-margin)));
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-tooltip-bg);
+  color: var(--color-tooltip-text);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-regular);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  visibility: hidden;
+  transform: translate(var(--tooltip-x, 0), var(--tooltip-y, 0));
+}
+
+.tooltip[data-positioned] {
+  visibility: visible;
+}
+
+.tooltip[hidden] {
+  display: none;
+}

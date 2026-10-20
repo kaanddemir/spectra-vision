@@ -1,0 +1,248 @@
+/*
+ * Spectra design tokens. This is the only file that may contain raw colour values.
+ * Components consume the semantic tokens below; see DESIGN_SYSTEM.md for the rules.
+ *
+ * Breakpoints (CSS custom properties cannot be used inside @media, so these values are
+ * written literally in media queries and nowhere else):
+ *   --bp-sm   640px   single-column content, compact page gutters
+ *   --bp-md   960px   side panels stack below the main column
+ *   --bp-lg  1280px   comfortable desktop width
+ */
+
+:root {
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --text-xs: 0.75rem; /* 12px: captions, table headings */
+  --text-sm: 0.8125rem; /* 13px: labels, secondary text, dense tables */
+  --text-md: 0.875rem; /* 14px: body and controls */
+  --text-lg: 1rem; /* 16px: section headings */
+  --text-xl: 1.25rem; /* 20px: panel titles */
+  --text-2xl: 1.625rem; /* 26px: page titles */
+
+  --leading-xs: 1rem;
+  --leading-sm: 1.125rem;
+  --leading-md: 1.25rem;
+  --leading-lg: 1.5rem;
+  --leading-xl: 1.75rem;
+  --leading-2xl: 2.125rem;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --tracking-tight: -0.01em;
+  --tracking-caps: 0.05em;
+
+  /* Spacing: a 4px grid */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Borders and radii: precise, not playful */
+  --border-width: 1px;
+  --border-width-strong: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px; /* dots and spinners only */
+
+  /* Icons (Lucide). Stroke width is also exported from src/ui/Icon.tsx. */
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+  --icon-stroke: 1.75;
+
+  /* Component sizes and density */
+  --control-h-sm: 28px;
+  --control-h-md: 36px;
+  --control-h-lg: 40px;
+  --table-row-h: 48px;
+  --table-head-h: 40px;
+  --table-min-md: 720px;
+  --table-min-lg: 960px;
+  --table-primary-min: 240px;
+  --table-select-w: var(--space-10);
+  --table-flex-min: 160px;
+  --header-h: 56px;
+  --content-max: 1440px;
+  --page-gutter: var(--space-8);
+  --aside-w: 360px;
+  --popover-w: 240px;
+  --popover-gap: var(--space-2);
+  --popover-margin: var(--space-4);
+  --menu-w: 168px;
+  --empty-page-min-h: 320px;
+  --tooltip-max-w: 280px;
+  --tooltip-gap: var(--space-1-5); /* trigger to tooltip */
+  --tooltip-margin: var(--space-2); /* minimum distance from the viewport edge */
+  --dialog-w: 480px;
+  --toast-w: 360px;
+  --field-max-w: 360px;
+  --speed-button-w: 44px; /* the review player's playback-speed button */
+  --speed-menu-w: 112px;
+  --timeline-h: 44px;
+  --seek-hit-h: 16px; /* the review player's progress bar: touch area, thin rail and its hover size */
+  --seek-rail-h: 3px;
+  --seek-rail-h-active: 5px;
+  --seek-thumb: 12px;
+  --proposal-list-max-h: 480px;
+  --history-row-h: 72px; /* one Previous analyses row; the list scrolls beyond three */
+
+  /* Focus */
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --underline-offset: 2px;
+
+  /* Layers */
+  --z-sticky: 10;
+  --z-header: 20;
+  --z-dropdown: 30;
+  --z-dialog: 50;
+  --z-toast: 55;
+  --z-tooltip: 60;
+
+  /* Motion: only state feedback, never decoration */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-spin: 800ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Brand: the red of the Spectra logo */
+  --color-brand: #e40110;
+  --color-on-brand: #ffffff;
+
+  /* Review overlays: drawn on the dark media stage, identical in both themes */
+  --color-overlay-track: #e8eaed;
+  --color-overlay-related: #ff4752;
+  --color-overlay-lane: #f3f4f6;
+  --color-overlay-text: #ffffff;
+  --color-overlay-halo: rgb(0 0 0 / 0.7);
+  --color-overlay-chip: rgb(0 0 0 / 0.65);
+
+  /* Review player controls over the picture */
+  --color-media-scrim: rgb(0 0 0 / 0.62);
+  --color-media-control-hover: rgb(255 255 255 / 0.16);
+  --color-media-rail: rgb(255 255 255 / 0.3);
+}
+
+/* Light theme (also the default before the theme script runs) */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f8f9fa;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f2f3f5;
+  --color-surface-hover: #eef0f2;
+  --color-surface-selected: #fdf0f1;
+  --color-border: #e4e7eb;
+  --color-border-control: #8a919b; /* 3:1 against surfaces, for form-control outlines */
+  --color-text: #20242a;
+  --color-text-secondary: #5f6670;
+  --color-text-disabled: #a3a9b1;
+
+  --color-accent: var(--color-brand);
+  --color-accent-hover: #c9000f;
+  --color-accent-pressed: #ad000d;
+  --color-on-accent: var(--color-on-brand);
+  --color-accent-text: #c2000e;
+  --color-focus: #c2000e;
+
+  --color-success-text: #17734b;
+  --color-success-bg: #e7f5ee;
+  --color-success-border: #b5dfca;
+  --color-warning-text: #875000;
+  --color-warning-bg: #fcf1de;
+  --color-warning-border: #efd29d;
+  --color-danger-text: #b3131a;
+  --color-danger-bg: #fceaeb;
+  --color-danger-border: #f2b8bb;
+  --color-info-text: #285a99;
+  --color-info-bg: #e8f0fa;
+  --color-info-border: #bcd2ee;
+  --color-neutral-text: #48505a;
+  --color-neutral-bg: #edeff2;
+  --color-neutral-border: #d5d9df;
+
+  --color-media-bg: #0b0c0e;
+  --color-media-text: #e8eaed;
+  --color-backdrop: rgb(16 18 21 / 0.45);
+  --color-tooltip-bg: #20242a;
+  --color-tooltip-text: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgb(16 18 21 / 0.06);
+  --shadow-md: 0 1px 2px rgb(16 18 21 / 0.06), 0 8px 24px rgb(16 18 21 / 0.12);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #101215;
+  --color-surface: #1a1d21;
+  --color-surface-subtle: #24282d;
+  --color-surface-hover: #2a2e34;
+  --color-surface-selected: #2e1b1d;
+  --color-border: #343940;
+  --color-border-control: #6e7580;
+  --color-text: #f3f4f6;
+  --color-text-secondary: #a1a8b1;
+  --color-text-disabled: #5f6670;
+
+  --color-accent: var(--color-brand);
+  --color-accent-hover: #c9000f;
+  --color-accent-pressed: #ad000d;
+  --color-on-accent: var(--color-on-brand);
+  --color-accent-text: #ff6b71;
+  --color-focus: #ff6b71;
+
+  --color-success-text: #5ed39a;
+  --color-success-bg: #142a20;
+  --color-success-border: #24513b;
+  --color-warning-text: #f0b55a;
+  --color-warning-bg: #2f2514;
+  --color-warning-border: #5a4420;
+  --color-danger-text: #ff858a;
+  --color-danger-bg: #36191c;
+  --color-danger-border: #6a2a2f;
+  --color-info-text: #86b6f0;
+  --color-info-bg: #16253a;
+  --color-info-border: #2b4568;
+  --color-neutral-text: #c3c9d1;
+  --color-neutral-bg: #2a2e34;
+  --color-neutral-border: #41474f;
+
+  --color-media-bg: #000000;
+  --color-media-text: #e8eaed;
+  --color-backdrop: rgb(0 0 0 / 0.6);
+  --color-tooltip-bg: #f3f4f6;
+  --color-tooltip-text: #101215;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-gutter: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-spin: 2400ms; /* spinners keep turning slowly: they report activity */
+  }
+}

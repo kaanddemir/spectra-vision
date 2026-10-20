@@ -1,207 +1,120 @@
-"""Entrypoint: `python run.py` starts Spectra. Ctrl+C stops it.
+"""Start the local Spectra application with one command.
 
-Spectra needs three model files that git does not carry and a set of heavy
-dependencies, so most first runs fail on setup rather than on code. Uvicorn
-cannot say anything useful about that: it reports the import error or the
-taken port in its own words, several frames deep. Everything below runs
-before the server does, so the first thing anyone sees is either the banner
-or the one command that fixes what is missing.
+    python3 run.py          # serve Spectra on :8765 and open it in the browser
+    python3 run.py --dev    # API plus the Vite development server on :5173 (needs Node.js)
+
+``--library DIR`` (repeatable) also offers a folder from the start.
+
+Any Python may start it: the launcher replaces itself with the repository's ``.venv`` interpreter.
+Node.js is needed to build the web application when it is missing or older than its sources, and for
+``--dev``. ``--no-browser`` skips opening the browser.
+Other options (``--port``, ``--data-dir``, ``--models``, repeated ``--library``, ``--log-level``) are passed
+to ``python -m spectra.api``; ``--verbose`` shows the servers' routine logs. Warnings and errors always
+show. Ctrl+C stops everything this script started.
 """
+from __future__ import annotations
 
-import importlib.util
-import logging
+import argparse
+import contextlib
+import io
 import os
+import re
+import shutil
+import signal
 import socket
+import subprocess
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+FRONTEND = ROOT / "frontend"
+DEFAULT_PORT = 8765
+DEV_PORT = 5173
+DEV_ORIGIN = f"http://127.0.0.1:{DEV_PORT}"
+REEXEC_ENV = "SPECTRA_RUN_REEXEC"
+SETUP = ("Spectra's environment is missing ({venv}). Create it from the repository root:\n"
+         "  python3.12 -m venv .venv\n"
+         "  .venv/bin/python -m pip install -e .")
+# The API cancels a running analysis and waits up to 120 s for its worker; the development server stops at once.
+API_GRACE_S = 130
+WEB_GRACE_S = 5
+# Routine Vite lines that repeat the banner. Anything else (warnings, errors) passes through.
+VITE_NOISE = re.compile(r"^(> |VITE v[\d.]+\s+ready|➜\s+(Local|Network|press)|$)")
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-DEFAULT_PORT = 8000
 
-# Import name -> what to say it is, in the order the pipeline needs them.
-REQUIRED_PACKAGES = (
-    ("fastapi", "FastAPI"),
-    ("uvicorn", "Uvicorn"),
-    ("multipart", "python-multipart"),
-    ("cv2", "OpenCV"),
-    ("numpy", "NumPy"),
-    ("PIL", "Pillow"),
-    ("onnxruntime", "ONNX Runtime"),
-    ("ultralytics", "Ultralytics"),
-    ("torch", "PyTorch"),
-)
+def ensure_venv(root: Path = ROOT, prefix: str = sys.prefix, argv: list[str] = sys.argv,
+                environ=os.environ, execv=os.execv) -> None:
+    """Continue in the repository's virtual environment, replacing this process (no child process,
+    so arguments, signals and the exit code are the launcher's own). Never installs anything."""
+    venv = root / ".venv"
+    python = venv / "bin" / "python"
+    if Path(prefix).resolve() == venv.resolve():
+        return
+    if not python.is_file():
+        sys.exit(SETUP.format(venv=venv))
+    if environ.get(REEXEC_ENV):  # the environment's interpreter did not report the environment as its prefix
+        sys.exit(f"could not start Spectra with {python}; recreate the environment.\n" + SETUP.format(venv=venv))
+    environ[REEXEC_ENV] = "1"
+    execv(str(python), [str(python), str(root / "run.py"), *argv[1:]])
 
 
-def _paint(tty):
-    """Return a colouring function that is a no-op unless stdout is a terminal."""
-    codes = {"bold": "1", "dim": "2", "green": "32", "yellow": "33"}
+# Presentation ------------------------------------------------------------------------------------
 
-    def paint(text, *styles):
-        if not tty:
+def make_paint(tty: bool, environ=os.environ):
+    """A colouring function that is a no-op off a terminal, with NO_COLOR set, or on a dumb terminal."""
+    enabled = tty and "NO_COLOR" not in environ and environ.get("TERM") != "dumb"
+    codes = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33"}
+
+    def paint(text: str, *styles: str) -> str:
+        if not enabled or not styles:
             return text
-        prefix = "".join(f"\033[{codes[style]}m" for style in styles)
-        return f"{prefix}{text}\033[0m"
+        return "".join(f"\033[{codes[s]}m" for s in styles) + f"{text}\033[0m"
 
     return paint
 
 
-def _problem(paint, title, *fix):
-    """Format a setup problem as the one thing to read and the command to run."""
-    lines = ["", f"  {paint(title, 'yellow')}"]
-    lines += [f"  {paint(line, 'dim')}" for line in fix]
-    lines.append("")
-    return "\n".join(lines)
+def problem(paint, title: str, *details: str) -> str:
+    """One thing to read and, dimmed, what to do about it."""
+    return "\n".join(["", f"  {paint(title, 'yellow')}", *(f"  {paint(d, 'dim')}" for d in details), ""])
 
 
-def _missing_packages():
-    """Which required distributions are not importable, by display name.
-
-    ``find_spec`` locates a package without importing it. That matters here:
-    importing Ultralytics alone costs several seconds, which is a long time to
-    spend on a check that passes on every run after the first.
-    """
-    missing = []
-    for module_name, label in REQUIRED_PACKAGES:
-        try:
-            found = importlib.util.find_spec(module_name) is not None
-        except (ImportError, ValueError):
-            found = False
-        if not found:
-            missing.append(label)
-    return missing
-
-
-def _venv_python():
-    """The project venv's interpreter, if that venv exists."""
-    for relative in ("bin/python", "Scripts/python.exe"):
-        candidate = ROOT / ".venv" / relative
-        if candidate.exists():
-            return candidate
-    return None
-
-
-def _running_in_venv():
-    """Whether this interpreter is the project venv's.
-
-    Compares prefixes rather than executables: a venv's `python` is usually a
-    symlink to the interpreter it was built from, so resolving the two paths
-    makes them equal even when the imports differ.
-    """
-    return Path(sys.prefix).resolve() == (ROOT / ".venv").resolve()
-
-
-def _reexec_into_venv():
-    """Hand the process to the venv interpreter, or return if there is none.
-
-    `python run.py` without activating first is the ordinary way to start
-    this, and it fails on every import while the packages sit one directory
-    away. Switching interpreters is what the activation would have done, so
-    it happens here instead of being explained in an error.
-    """
-    venv_python = _venv_python()
-    if venv_python is None or _running_in_venv():
-        return
-    os.environ["SPECTRA_REEXEC"] = "1"
-    os.execv(str(venv_python), [str(venv_python), str(Path(__file__).resolve()), *sys.argv[1:]])
-
-
-def _python_hint():
-    """How to get an interpreter that has the dependencies.
-
-    Only reached when the venv is missing or when it is the venv itself that
-    is short a package — anything else has already been switched over.
-    """
-    if _venv_python() is None:
-        return ("python -m venv .venv", "source .venv/bin/activate")
-    return ()
-
-
-def _model_status():
-    """Each required model file, whether it is present, and how to get it.
-
-    The paths come from the vision modules rather than from a second list
-    here, so `SPECTRA_DEPTH_MODEL` and `SPECTRA_LANENET_MODEL` point this
-    check at the same file the pipeline will load.
-    """
-    from spectra.vision.detection import YOLO_MODEL_PATH
-    from spectra.vision.lanenet import LANENET_MODEL_PATH
-    from spectra.vision.models import DEPTH_MODEL_PATH
-
-    return (
-        ("depth", DEPTH_MODEL_PATH, "scripts/download_depth_model.py"),
-        ("lane", LANENET_MODEL_PATH, "scripts/download_lanenet_model.py"),
-        ("detector", YOLO_MODEL_PATH, "scripts/download_yolo_model.py"),
-    )
-
-
-def _setup_problem(paint):
-    """Return the first missing piece of local setup, or None if all is present."""
-    missing = _missing_packages()
-    if missing:
-        return _problem(
-            paint,
-            f"Missing dependencies: {', '.join(missing)}.",
-            *_python_hint(),
-            "pip install -r requirements.txt",
-        )
-
-    absent = [(name, script) for name, path, script in _model_status() if not path.is_file()]
-    if absent:
-        # All three are hard requirements — analysis refuses to start without
-        # any one of them — so every missing script is listed at once rather
-        # than one per attempted run.
-        return _problem(
-            paint,
-            "Model files are missing: " + ", ".join(name for name, _ in absent) + ".",
-            "They are large runtime artifacts and are not in git. Run:",
-            *(f"    python {script}" for _, script in absent),
-        )
-    return None
-
-
-def _onnx_runtime_line():
-    """Which execution provider the ONNX models will actually get."""
-    from spectra.vision.models import build_coreml_providers
-
-    providers = build_coreml_providers()
-    names = [p[0] if isinstance(p, tuple) else p for p in providers]
-    if "CoreMLExecutionProvider" in names:
-        return "CoreML, CPU fallback"
-    return "CPU"
-
-
-def _banner(port, reload_enabled, paint):
-    rows = [
-        ("Open", paint(f"http://localhost:{port}", "bold")),
-        ("Models", "depth, lane, detector ready"),
-        ("ONNX", _onnx_runtime_line()),
-        ("Stop", "Ctrl+C"),
-    ]
-    lines = [
-        "",
-        f"  {paint('Spectra', 'bold', 'green')}",
-        f"  {paint('─' * 44, 'dim')}",
-    ]
+def banner(paint, *, url: str, dev: bool, api_url: str) -> str:
+    rows = [("Open", paint(url, "bold"))]
+    if dev:
+        rows.append(("API", api_url))
+    rows.append(("Stop", "Ctrl+C"))
+    title = paint("Spectra", "bold", "red") + (paint("  development", "dim") if dev else "")
+    lines = ["", f"  {title}", f"  {paint('─' * 44, 'dim')}"]
     lines += [f"  {paint(label.ljust(10), 'dim')}{value}" for label, value in rows]
-    if reload_enabled:
-        # Worth saying on screen: a reload drops the loaded models, so the next
-        # analysis pays the full load cost again.
-        lines += [
-            "",
-            f"  {paint('! Auto-reload on: the models are reloaded on every file change.', 'yellow')}",
-        ]
-    lines.append("")
-    return "\n".join(lines)
+    return "\n".join([*lines, ""])
 
 
-def _port_is_free(port):
-    """Whether the app can still take `port`, checked before Uvicorn does.
+def option_values(args: list[str], name: str) -> list[str]:
+    """Every value given for `name`, as `--name value` or `--name=value`."""
+    values = []
+    for i, arg in enumerate(args):
+        if arg == name and i + 1 < len(args):
+            values.append(args[i + 1])
+        elif arg.startswith(name + "="):
+            values.append(arg.split("=", 1)[1])
+    return values
 
-    Uvicorn handles this failure itself and exits with a bare "Address already
-    in use", which does not say what is holding the port or what to do about
-    it. Asking first is what keeps the message ours.
-    """
+
+def forward(stream, noise: re.Pattern | None) -> None:
+    """Copy a child's output to ours, minus routine lines."""
+    for line in iter(stream.readline, ""):
+        if noise is None or not noise.match(ANSI.sub("", line).strip()):
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+
+# Processes ---------------------------------------------------------------------------------------
+
+def port_is_free(port: int) -> bool:
     with socket.socket() as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -211,79 +124,203 @@ def _port_is_free(port):
     return True
 
 
-def _port_in_use(port, paint):
-    return "\n".join((
-        "",
-        f"  {paint('Port ' + str(port) + ' is already in use.', 'yellow')}",
-        f"  {paint('Another copy is probably still running. Stop it there with', 'dim')}",
-        f"  {paint('Ctrl+C, or start this one elsewhere:', 'dim')}",
-        "",
-        f"      PORT={port + 1} python run.py",
-        "",
-    ))
+def accepts(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.2)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _quiet_framework_output(log_level):
-    """Silence Uvicorn's startup notes and its per-request access log.
+def start(command: list[str], cwd: Path, noise: re.Pattern | None = None) -> subprocess.Popen:
+    """A child in its own process group, so Ctrl+C reaches only this launcher, which stops the children in
+    order. stdout is filtered when `noise` is given; stderr (errors) always goes straight to the terminal."""
+    if noise is None:
+        return subprocess.Popen(command, cwd=cwd, start_new_session=True)
+    process = subprocess.Popen(command, cwd=cwd, start_new_session=True, stdout=subprocess.PIPE, text=True,
+                               encoding="utf-8", errors="replace", bufsize=1)
+    threading.Thread(target=forward, args=(process.stdout, noise), daemon=True).start()
+    return process
 
-    Uvicorn logs one line per request, and a single analysis produces a burst
-    of preview traffic that buries anything the app itself has to say.
-    LOG_LEVEL=DEBUG is the way back to all of it.
-    """
-    if log_level == "DEBUG":
+
+def stop(process: subprocess.Popen, sig: int, grace_s: float) -> None:
+    """Signal the child's process group, wait, then kill what remains."""
+    if process.poll() is not None:
         return
-    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
-
-def main():
-    paint = _paint(sys.stdout.isatty())
-    _reexec_into_venv()
-
-    if os.environ.get("SPECTRA_REEXEC") == "1":
-        # Said once, because which interpreter is serving is worth knowing when
-        # the one that was typed is not the one that ended up running.
-        print(f"\n  {paint('Switched to .venv, where the dependencies are.', 'dim')}", flush=True)
-
-    problem = _setup_problem(paint)
-    if problem:
-        print(problem, flush=True)
-        return 1
-
-    port = int(os.environ.get("PORT", DEFAULT_PORT))
-    if not _port_is_free(port):
-        print(_port_in_use(port, paint), flush=True)
-        return 1
-
-    # Off by default: a reload discards the loaded depth, lane and detector
-    # models, so it is a real cost here rather than the free convenience it is
-    # in an app that holds nothing.
-    reload_enabled = os.environ.get("RELOAD", "").strip().lower() in {"1", "true", "yes", "on"}
-    log_level = os.environ.get("LOG_LEVEL", "").strip().upper()
-
-    import uvicorn
-
-    _quiet_framework_output(log_level)
-
-    # flush: a piped stdout is block-buffered, and a banner that only appears
-    # once the server is stopped is worse than none.
-    print(_banner(port, reload_enabled, paint), flush=True)
-
     try:
-        uvicorn.run(
-            "spectra.app:app",
-            host="127.0.0.1",
-            port=port,
-            reload=reload_enabled,
-            log_level=log_level.lower() if log_level else "warning",
-        )
-    except KeyboardInterrupt:
+        os.killpg(process.pid, sig)
+        process.wait(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+    except ProcessLookupError:
         pass
 
-    # Uploads are written to a temporary directory that is removed as soon as
-    # the analysis returns, so nothing of the video outlives this process.
-    print(f"\n  {paint('Stopped. The uploaded video is gone with it.', 'dim')}\n", flush=True)
-    return 0
+
+def settings_error(api_args: list[str]) -> str | None:
+    """The API's own reason for refusing these options, as one sentence, or None when they are valid.
+    Checked before anything starts so a typo never produces a banner, a usage dump and a stopped server."""
+    from spectra.api.__main__ import parse_settings
+
+    stderr = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(stderr):
+            parse_settings(api_args)
+    except SystemExit:
+        message = stderr.getvalue().strip().splitlines()[-1] if stderr.getvalue().strip() else "invalid options"
+        message = message.split(" error: ", 1)[-1]
+        return message[:1].upper() + message[1:] + ("" if message.endswith(".") else ".")
+    return None
+
+
+def interrupt(*_) -> None:
+    """SIGTERM takes the same path as Ctrl+C, so `kill` also stops both servers."""
+    raise KeyboardInterrupt
+
+
+def silence(*_) -> None:
+    """The terminal is gone: discard the launcher's output from now on."""
+    sys.stdout = sys.stderr = open(os.devnull, "w")
+
+
+def hang_up(*_) -> None:
+    """Closing the terminal (SIGHUP) also stops both servers. They run in their own process group and never
+    see it, so without this they would outlive the launcher."""
+    silence()
+    raise KeyboardInterrupt
+
+
+def quiet_run(paint, title: str, command: list[str]) -> bool:
+    """Run a setup step with one status line; its output is shown only if it fails."""
+    print(f"  {paint('…', 'dim')} {title}", flush=True)
+    result = subprocess.run(command, cwd=FRONTEND, capture_output=True, text=True)
+    if result.returncode == 0:
+        return True
+    print((result.stdout + result.stderr).rstrip()[-4000:], file=sys.stderr)
+    print(problem(paint, f"{title.rstrip('…')} failed.", "Its output is above."), flush=True)
+    return False
+
+
+def build_is_current(frontend: Path = FRONTEND) -> bool:
+    """Whether frontend/dist exists and is newer than every source file of the web application."""
+    index = frontend / "dist" / "index.html"
+    if not index.is_file():
+        return False
+    built = index.stat().st_mtime
+    sources = [*frontend.joinpath("src").rglob("*"), *frontend.joinpath("public").rglob("*"),
+               frontend / "index.html", frontend / "package-lock.json"]
+    return all(p.stat().st_mtime <= built for p in sources if p.is_file())
+
+
+def web_build_step(frontend: Path = FRONTEND, npm: bool = True) -> str:
+    """What normal mode does about the web application: "serve" the current build, "build" it first, serve a
+    "stale" build because npm is missing, or stop because it is "missing" and cannot be built."""
+    if build_is_current(frontend):
+        return "serve"
+    if npm:
+        return "build"
+    return "stale" if (frontend / "dist" / "index.html").is_file() else "missing"
+
+
+# Main --------------------------------------------------------------------------------------------
+
+def main() -> int:
+    ensure_venv()
+    parser = argparse.ArgumentParser(description="Start the local Spectra application.")
+    parser.add_argument("--dev", action="store_true", help=f"also run the Vite development server on :{DEV_PORT}")
+    parser.add_argument("--verbose", action="store_true", help="show the servers' routine logs")
+    parser.add_argument("--no-browser", action="store_true", help="do not open Spectra in the browser")
+    args, api_args = parser.parse_known_args()
+    paint = make_paint(sys.stdout.isatty())
+
+    error = settings_error(api_args)
+    if error:
+        print(problem(paint, "Spectra could not start.", error), flush=True)
+        return 2
+    ports = option_values(api_args, "--port")
+    port = int(ports[-1]) if ports else DEFAULT_PORT  # validated above
+    npm = shutil.which("npm") is not None
+    step = "dev" if args.dev else web_build_step(npm=npm)
+    if step == "dev" and not npm:
+        print(problem(paint, "npm was not found.", "Development mode needs Node.js 22.12 or newer."), flush=True)
+        return 1
+    if step == "missing":
+        print(problem(paint, "The web application has not been built (frontend/dist).",
+                      "Install Node.js 22.12 or newer; Spectra then builds it on start."), flush=True)
+        return 1
+    for name, p in (("API", port), *((("web", DEV_PORT),) if args.dev else ())):
+        if not port_is_free(p):
+            hint = f"python3 run.py --port {port + 1} …" if name == "API" else "Stop the other development server."
+            print(problem(paint, f"Port {p} ({name}) is already in use.",
+                          "Another copy is probably still running. Stop it with Ctrl+C, or:", hint), flush=True)
+            return 1
+    if step == "stale":
+        print(problem(paint, "The web application build is older than its sources.",
+                      "Serving it anyway; install Node.js 22.12 or newer to rebuild it."), flush=True)
+    if step in ("dev", "build") and not (FRONTEND / "node_modules").is_dir() \
+            and not quiet_run(paint, "Installing web dependencies…", ["npm", "ci"]):
+        return 1
+    if step == "build" and not quiet_run(paint, "Building the web application…", ["npm", "run", "build"]):
+        return 1
+
+    api = [sys.executable, "-m", "spectra.api", *api_args]
+    if not option_values(api_args, "--log-level"):
+        api += ["--log-level", "info" if args.verbose else "warning"]
+    if args.dev:
+        api += ["--allow-origin", DEV_ORIGIN]
+    servers: list[tuple[str, subprocess.Popen, int, int, float]] = []  # name, process, port, stop signal, grace
+    signal.signal(signal.SIGTERM, interrupt)
+    signal.signal(signal.SIGHUP, hang_up)
+    try:
+        servers.append(("API", start(api, ROOT), port, signal.SIGINT, API_GRACE_S))
+        if args.dev:
+            web = start(["npm", "run", "dev", "--", "--clearScreen", "false"], FRONTEND,
+                        None if args.verbose else VITE_NOISE)
+            servers.append(("Web", web, DEV_PORT, signal.SIGTERM, WEB_GRACE_S))
+    except OSError as exc:
+        for _, process, _, sig, grace in servers:
+            stop(process, sig, grace)
+        print(problem(paint, f"Could not start a server: {exc}"), flush=True)
+        return 1
+
+    url = DEV_ORIGIN if args.dev else f"http://127.0.0.1:{port}"
+    print(banner(paint, url=url, dev=args.dev, api_url=f"http://127.0.0.1:{port}/api"), flush=True)
+
+    code, died = 0, None
+    waiting = {name: p for name, _, p, _, _ in servers}
+    try:
+        while True:
+            for name, process, *_ in servers:
+                if process.poll() is not None:
+                    code, died = process.returncode or 1, name
+                    raise SystemExit
+            for name, p in list(waiting.items()):
+                if accepts(p):
+                    del waiting[name]
+                    print(f"  {paint('✓', 'green')} {name} ready", flush=True)
+                    if not waiting and not args.no_browser:
+                        webbrowser.open(url)
+            time.sleep(0.2)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)  # a second Ctrl+C must not cut the orderly stop short
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGHUP, silence)  # closing the terminal now must not cut the stop short either
+        if died is None:
+            print(f"\n  {paint('Stopping…', 'dim')}", flush=True)
+        for _, process, _, sig, grace in reversed(servers):
+            stop(process, sig, grace)
+
+    if died:
+        others = " The other server was stopped too." if len(servers) > 1 else ""
+        print(problem(paint, f"The {died} server stopped.{others}",
+                      "Its error is above." if died == "API" else "The development server's output is above."),
+              flush=True)
+    else:
+        print(f"  {paint('Stopped.', 'dim')}\n", flush=True)
+    return code
 
 
 if __name__ == "__main__":

@@ -1,0 +1,89 @@
+.event-review {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Why and Uncertainty side by side under one thin rule; stacked on narrow screens. */
+.event-review__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-8);
+  padding-block: var(--space-4);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.event-review__columns--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 640px) {
+  .event-review__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.event-review__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  max-width: 72ch;
+}
+
+/* The time range reads as the title's subtitle, and seeks when chosen. */
+.event-review__time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Related events follow the columns under their own rule. */
+.event-review__columns ~ .event-review__part {
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.clip-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* One header row: analyser status, the reviewer's decision, then event actions; whole groups wrap. */
+.event-review__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+/* Thin rules between the analyser's status, the reviewer's decision and the event's actions, like the one before Accept. */
+.event-review__header-actions > .review-decision,
+.event-review__tools {
+  padding-left: var(--space-4);
+  border-left: var(--border-width) solid var(--color-border);
+}
+
+.event-review__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .event-review__header-actions > .review-decision,
+  .event-review__tools {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* The header sits midway between the rule above the event review and the rule under it. */
+.section:has(> .section__header .event-review__header-actions) {
+  gap: var(--space-6);
+}
+
+/* The same thin rule between the event's title and its time. */
+.section__title--inline > .section__description:has(.event-review__time) {
+  padding-left: var(--space-1);
+  border-left: var(--border-width) solid var(--color-border);
+}

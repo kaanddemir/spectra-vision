@@ -1,0 +1,131 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.field__label {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.field__description {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
+}
+
+.field__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-danger-text);
+}
+
+.control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: var(--field-max-w);
+}
+
+.control__input {
+  min-width: 0;
+  width: 100%;
+  height: var(--control-h-md);
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-md);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.control__input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.control__input:hover:not(:disabled) {
+  border-color: var(--color-text-secondary);
+}
+
+.control__input:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: 0;
+  border-color: var(--color-focus);
+}
+
+.control__input:disabled {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.control__input[aria-invalid="true"] {
+  border-color: var(--color-danger-text);
+}
+
+.control--textarea .control__input {
+  height: auto;
+  min-height: calc(var(--control-h-md) * 2);
+  padding: var(--space-2) var(--space-3);
+  line-height: var(--leading-md);
+  font: inherit;
+  resize: vertical;
+}
+
+.control--with-icon .control__input {
+  padding-left: calc(var(--space-3) + var(--icon-sm) + var(--space-2));
+}
+
+.control__icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.control--select .control__input {
+  appearance: none;
+  padding-right: calc(var(--space-3) + var(--icon-sm) + var(--space-2));
+  cursor: pointer;
+}
+
+.control__chevron {
+  position: absolute;
+  right: var(--space-3);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  min-height: var(--control-h-sm);
+  min-width: var(--control-h-sm);
+}
+
+.checkbox__input {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.checkbox__input:disabled {
+  cursor: not-allowed;
+}
+
+.checkbox__label {
+  font-size: var(--text-md);
+}

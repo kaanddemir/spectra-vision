@@ -1,0 +1,56 @@
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-12) var(--space-6);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.empty-state--compact {
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-4);
+}
+
+.empty-state--compact .empty-state__icon {
+  padding: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+/* Fills the remaining height of .app-main (a column flex container) and centres the group in it. */
+.empty-state--page {
+  flex: 1 0 auto;
+  justify-content: center;
+  min-height: var(--empty-page-min-h);
+}
+
+.empty-state__icon {
+  display: inline-flex;
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}
+
+.empty-state__text {
+  max-width: 52ch;
+}
+
+.empty-state__text code {
+  font-family: var(--font-mono);
+}
+
+.empty-state__action {
+  margin-top: var(--space-3);
+  max-width: 100%;
+}
+
+.empty-state__action .button {
+  max-width: 100%;
+  height: auto;
+  min-height: var(--control-h-md);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

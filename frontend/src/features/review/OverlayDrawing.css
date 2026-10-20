@@ -1,0 +1,49 @@
+/* Overlays sit on the dark media stage in both themes; strokes keep their width at any player size. */
+.overlay-drawing {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.overlay-drawing rect,
+.overlay-drawing polyline {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-width: var(--border-width-strong);
+}
+
+.overlay-drawing__track rect {
+  stroke: var(--color-overlay-track);
+}
+
+.overlay-drawing__track--related rect {
+  stroke: var(--color-overlay-related);
+}
+
+.overlay-drawing__track--predicted rect {
+  stroke-dasharray: var(--space-1) var(--space-1);
+}
+
+.overlay-drawing__track text {
+  fill: var(--color-overlay-text);
+  stroke: var(--color-overlay-halo);
+  paint-order: stroke;
+  font-family: var(--font-sans);
+  font-weight: var(--weight-semibold);
+}
+
+.overlay-drawing__track--related text {
+  fill: var(--color-overlay-related);
+}
+
+.overlay-drawing__lane {
+  stroke: var(--color-overlay-lane);
+  stroke-linejoin: round;
+}
+
+.overlay-drawing__lane--extrapolated {
+  stroke-dasharray: var(--space-1-5) var(--space-1-5);
+  opacity: 0.6;
+}

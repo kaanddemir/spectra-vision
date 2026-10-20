@@ -1,14 +1,18 @@
-# OS / editor
+# OS and editors
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 .claude/
 *.swp
 *.swo
+*~
 
-# Environment
+# Local environment; example templates are public
 .env
 .env.*
+!.env.example
+!.env.*.example
 
 # Python
 .venv/
@@ -19,26 +23,55 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.coverage
+.coverage*
 htmlcov/
-dist/
-build/
 *.egg-info/
 
-# Model weights, plus the export and CoreML caches the setup scripts leave there
-models/
+# Dependencies and generated builds (including release archives)
+node_modules/
+*.tsbuildinfo
+dist/
+build/
+coverage/
+
+# Local state, logs and temporary files
+/var/
+/data/
+/outputs/
 .cache/
 *.log
+*.tmp
+*.part
+*.db
+*.db[.-]*
+*.sqlite
+*.sqlite[.-]*
+*.sqlite3
+*.sqlite3[.-]*
 
-# Sample footage, in every container the analyze endpoint accepts.
-# Uppercase too: dashcams write .MP4 / .MOV, and a case-sensitive checkout
-# (Linux, or macOS with core.ignorecase off) would not match them otherwise.
-*.mp4
-*.MP4
-*.mov
-*.MOV
-*.avi
-*.mkv
-*.m4v
-data/
-outputs/
+# Local footage, including uppercase camera extensions
+*.[mM][pP]4
+*.[mM][oO][vV]
+*.[aA][vV][iI]
+*.[mM][kK][vV]
+*.[mM]4[vV]
+
+# Model checkpoints and exports; registries and other metadata stay public
+*.onnx
+*.onnx.data
+*.onnx.data.*
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# Local evaluation resources and generated results
+/evaluation/weights/
+/evaluation/third_party/
+/evaluation/datasets/
+/evaluation/caches/
+/evaluation/restricted/
+/evaluation/predictions/
+/evaluation/reports/
+/evaluation/**/results/
+/evaluation/**/results_log.jsonl

@@ -1,0 +1,188 @@
+/* Its own band under the player, set apart by spacing and a quiet label, no rule or box. */
+.review-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  padding-top: var(--space-2);
+}
+
+.review-timeline__heading {
+  margin-bottom: var(--space-1);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+/* Two lanes: events above (on a faint band), coverage as a thin strip below; the playhead crosses both. */
+.review-timeline__track {
+  position: relative;
+  height: var(--timeline-h);
+  cursor: pointer;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+}
+
+.review-timeline__track[aria-disabled="true"] {
+  cursor: default;
+}
+
+.review-timeline__track:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+.review-timeline__svg {
+  display: block;
+  overflow: visible;
+}
+
+.review-timeline__lane {
+  fill: var(--color-surface-subtle);
+}
+
+/* The selected event's wider review window: a quiet outlined band, not an event. */
+.review-timeline__window {
+  fill: var(--color-surface-hover);
+  stroke: var(--color-border-control);
+  stroke-width: var(--border-width);
+  stroke-dasharray: 3 3;
+}
+
+.review-timeline__analysed {
+  fill: var(--color-border-control);
+}
+
+.review-timeline__hatch {
+  stroke: var(--color-border-control);
+  stroke-width: var(--border-width-strong);
+}
+
+.review-timeline__unanalysed {
+  stroke: var(--color-border);
+  stroke-width: var(--border-width);
+}
+
+.review-timeline__span {
+  fill: var(--color-accent);
+  opacity: 0.45;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.review-timeline__peak {
+  stroke: var(--color-accent);
+  stroke-width: var(--border-width-strong);
+  stroke-linecap: round;
+}
+
+.review-timeline__marker--selected .review-timeline__span {
+  opacity: 1;
+}
+
+.review-timeline__playhead {
+  stroke: var(--color-text);
+  stroke-width: var(--border-width-strong);
+  pointer-events: none;
+}
+
+/* One button per suggested event over its bar: never narrower than a comfortable target. */
+.review-timeline__events {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 64%;
+  pointer-events: none;
+}
+
+.review-timeline__events li {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--at);
+  width: max(var(--w), var(--control-h-sm));
+  transform: translateX(-50%);
+}
+
+.review-timeline__hit {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.review-timeline__hit:hover {
+  border-color: var(--color-accent);
+}
+
+.review-timeline__hit[aria-current="true"] {
+  border-color: var(--color-accent);
+}
+
+.review-timeline__hit:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* The time under the pointer while hovering or dragging. */
+.review-timeline__tip {
+  position: absolute;
+  bottom: calc(100% + var(--space-1));
+  left: var(--at);
+  padding: var(--space-0-5) var(--space-1-5);
+  border-radius: var(--radius-sm);
+  background: var(--color-text);
+  color: var(--color-bg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.review-timeline__scale {
+  display: flex;
+  justify-content: space-between;
+}
+
+.review-timeline__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+}
+
+.review-timeline__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.review-timeline__swatch {
+  display: inline-block;
+  width: var(--space-3);
+  height: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.review-timeline__swatch--analysed {
+  background: var(--color-border-control);
+}
+
+.review-timeline__swatch--unanalysed {
+  border: var(--border-width) solid var(--color-border-control);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--color-border-control) 0 var(--border-width),
+    transparent var(--border-width) var(--space-1)
+  );
+}
+
+.review-timeline__swatch--window {
+  background: var(--color-surface-hover);
+  border: var(--border-width) dashed var(--color-border-control);
+}
+
+.review-timeline__swatch--proposal {
+  background: var(--color-accent);
+}

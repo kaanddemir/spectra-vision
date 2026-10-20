@@ -1,0 +1,445 @@
+{
+  "manifest_version": "1.0",
+  "status": "proposal catalog; downloaded subsets are recorded separately in real_sample.json and collision_sample.json",
+  "created": "2026-10-16",
+  "purpose": "Internal evaluation only. No redistribution, no training, no re-identification of people or vehicles.",
+  "labels_note": "candidate_labels are expectations from titles only; ground truth must come from our own annotation, with uncertain moments marked ambiguous.",
+  "total_bytes": 776148660,
+  "clips": [
+    {
+      "id": "commons-d400dbd496",
+      "title": "Multiple cars rear-end collision on highway.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision",
+        "approach"
+      ],
+      "note": "Chain rear-end on highway",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/b1/Multiple_cars_rear-end_collision_on_highway.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Multiple_cars_rear-end_collision_on_highway.webm",
+      "bytes": 15641916,
+      "duration_s": 30.1,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "d400dbd496b2921dfd0b564fe86ae54e1f1a4c94",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-50b5a906ec",
+      "title": "The speeding car rear-ended into the truck in front, and the front hood was blown open.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision",
+        "approach"
+      ],
+      "note": "Ego rear-ends truck",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/ba/The_speeding_car_rear-ended_into_the_truck_in_front%2C_and_the_front_hood_was_blown_open.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:The_speeding_car_rear-ended_into_the_truck_in_front,_and_the_front_hood_was_blown_open.webm",
+      "bytes": 6906252,
+      "duration_s": 30.1,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "50b5a906ecc9b142181234d94b894886b27a8b20",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-3f3e1890b2",
+      "title": "The van in front suddenly changed lanes and caused the vehicle to rear-end collision.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "cut_in",
+        "collision"
+      ],
+      "note": "Lead vehicle changes lane; may be a cut-out revealing an obstacle rather than a cut-in",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/79/The_van_in_front_suddenly_changed_lanes_and_caused_the_vehicle_to_rear-end_collision.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:The_van_in_front_suddenly_changed_lanes_and_caused_the_vehicle_to_rear-end_collision.webm",
+      "bytes": 19725940,
+      "duration_s": 48.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "3f3e1890b2a665059a288fa3fe616a7c0c002abf",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-bdd67a29eb",
+      "title": "White cars hit the lane divider at high speed on the highway.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision"
+      ],
+      "note": "Third-party collision; ego may not be involved",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/15/White_cars_hit_the_lane_divider_at_high_speed_on_the_highway.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:White_cars_hit_the_lane_divider_at_high_speed_on_the_highway.webm",
+      "bytes": 8903332,
+      "duration_s": 21.4,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "bdd67a29ebe2c1c3d5307a5530683e703800c615",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-060e05cd28",
+      "title": "Speeding electric motorcycle crashes into silver-gray van.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision"
+      ],
+      "note": "Two-wheeler involvement",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Speeding_electric_motorcycle_crashes_into_silver-gray_van.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Speeding_electric_motorcycle_crashes_into_silver-gray_van.webm",
+      "bytes": 17913674,
+      "duration_s": 37.8,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "060e05cd28baff9c67186cc19b687f9cec5f57f1",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-36792505f4",
+      "title": "The e-scooter rider hit the car and then rebounded and hit another e-scooter rider, 2024-11-18.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision"
+      ],
+      "note": "Vulnerable road users",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/82/The_e-scooter_rider_hit_the_car_and_then_rebounded_and_hit_another_e-scooter_rider%2C_2024-11-18.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:The_e-scooter_rider_hit_the_car_and_then_rebounded_and_hit_another_e-scooter_rider,_2024-11-18.webm",
+      "bytes": 23116216,
+      "duration_s": 31.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "36792505f464ba8d40c3ec007209b4b04eef68e6",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-64d77f4ecf",
+      "title": "400 SB Crash.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision"
+      ],
+      "note": "1080p highway",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/400_SB_Crash.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:400_SB_Crash.webm",
+      "bytes": 10203290,
+      "duration_s": 17.6,
+      "resolution": [
+        1920,
+        1080
+      ],
+      "sha1": "64d77f4ecfeb35a1e25933b45a4a1841075acc03",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "Dash"
+    },
+    {
+      "id": "commons-f8e1817ece",
+      "title": "INSANE Car Crash caught on TeslaCam- Kia Soul flying through air!.webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision"
+      ],
+      "note": "Third-party crash",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/5f/INSANE_Car_Crash_caught_on_TeslaCam-_Kia_Soul_flying_through_air%21.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:INSANE_Car_Crash_caught_on_TeslaCam-_Kia_Soul_flying_through_air!.webm",
+      "bytes": 4592598,
+      "duration_s": 29.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "f8e1817ece813243cb32c34a0d07c94daf70a961",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "Tesla autopilot"
+    },
+    {
+      "id": "commons-09ec242601",
+      "title": "Distracted woman driver crashes Turo rental car into mailbox in Snohomish County, Washington (August 2025).webm",
+      "source": "wikimedia_commons",
+      "role": "collision",
+      "candidate_labels": [
+        "collision"
+      ],
+      "note": "Low-speed impact; camera placement to verify",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/3/3e/Distracted_woman_driver_crashes_Turo_rental_car_into_mailbox_in_Snohomish_County%2C_Washington_%28August_2025%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Distracted_woman_driver_crashes_Turo_rental_car_into_mailbox_in_Snohomish_County,_Washington_(August_2025).webm",
+      "bytes": 26028487,
+      "duration_s": 49.5,
+      "resolution": [
+        1278,
+        720
+      ],
+      "sha1": "09ec2426019dc96a9a3d69a710042fe271fbbbc1",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV"
+    },
+    {
+      "id": "commons-a4efc5454b",
+      "title": "80,000 pound truck loses brakes and heads for a school bus in Ohio (January 2021).webm",
+      "source": "wikimedia_commons",
+      "role": "near_miss",
+      "candidate_labels": [
+        "approach",
+        "collision?"
+      ],
+      "note": "Label after viewing",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/15/80%2C000_pound_truck_loses_brakes_and_heads_for_a_school_bus_in_Ohio_%28January_2021%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:80,000_pound_truck_loses_brakes_and_heads_for_a_school_bus_in_Ohio_(January_2021).webm",
+      "bytes": 27214936,
+      "duration_s": 40.3,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "a4efc5454b28895ca02abea7afe4e9c0346816bc",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV"
+    },
+    {
+      "id": "commons-746a85caee",
+      "title": "Bad traffic meeting in cave tunnel.webm",
+      "source": "wikimedia_commons",
+      "role": "near_miss",
+      "candidate_labels": [
+        "approach?"
+      ],
+      "note": "Tunnel lighting; oncoming conflict",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/ac/Bad_traffic_meeting_in_cave_tunnel.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Bad_traffic_meeting_in_cave_tunnel.webm",
+      "bytes": 22828949,
+      "duration_s": 97.3,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "746a85caee1123299a81090af9519035c1c41e0d",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-6b12337cb7",
+      "title": "Connect to the opposite lane and bypass the traffic accident section.webm",
+      "source": "wikimedia_commons",
+      "role": "hard_negative",
+      "candidate_labels": [],
+      "note": "Ego swerves around accident scene: lateral motion without cut-in",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/cd/Connect_to_the_opposite_lane_and_bypass_the_traffic_accident_section.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Connect_to_the_opposite_lane_and_bypass_the_traffic_accident_section.webm",
+      "bytes": 11653664,
+      "duration_s": 30.2,
+      "resolution": [
+        1906,
+        1080
+      ],
+      "sha1": "6b12337cb714cfad9cd558517d03b950ede323dd",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "CCTV footage does not create a copyright"
+    },
+    {
+      "id": "commons-e1c77e9358",
+      "title": "2026年熊本地震 日奈久インターチェンジ ドライブレコーダ映像記録.webm",
+      "source": "wikimedia_commons",
+      "role": "hard_negative",
+      "candidate_labels": [],
+      "note": "Earthquake camera shake: collision false-alarm test",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8e/2026%E5%B9%B4%E7%86%8A%E6%9C%AC%E5%9C%B0%E9%9C%87_%E6%97%A5%E5%A5%88%E4%B9%85%E3%82%A4%E3%83%B3%E3%82%BF%E3%83%BC%E3%83%81%E3%82%A7%E3%83%B3%E3%82%B8_%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%83%AC%E3%82%B3%E3%83%BC%E3%83%80%E6%98%A0%E5%83%8F%E8%A8%98%E9%8C%B2.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:2026%E5%B9%B4%E7%86%8A%E6%9C%AC%E5%9C%B0%E9%9C%87_%E6%97%A5%E5%A5%88%E4%B9%85%E3%82%A4%E3%83%B3%E3%82%BF%E3%83%BC%E3%83%81%E3%82%A7%E3%83%B3%E3%82%B8_%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%83%AC%E3%82%B3%E3%83%BC%E3%83%80%E6%98%A0%E5%83%8F%E8%A8%98%E9%8C%B2.webm",
+      "bytes": 19318909,
+      "duration_s": 38,
+      "resolution": [
+        1920,
+        1080
+      ],
+      "sha1": "e1c77e9358538863c408eed0d462652b00232bb4",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "author_or_credit": "Wikipkmmt"
+    },
+    {
+      "id": "commons-63b1efece6",
+      "title": "Bolide 9-22-24.webm",
+      "source": "wikimedia_commons",
+      "role": "hard_negative",
+      "candidate_labels": [],
+      "note": "Sudden lighting change",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Bolide_9-22-24.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Bolide_9-22-24.webm",
+      "bytes": 5237757,
+      "duration_s": 6.8,
+      "resolution": [
+        1920,
+        1080
+      ],
+      "sha1": "63b1efece6c9e92b1b302fe93ae768ef869a912e",
+      "licence": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0",
+      "author_or_credit": "WoodJesus"
+    },
+    {
+      "id": "commons-ade37c7a2a",
+      "title": "2013 Russian meteor event (Magnitogorsk).webm",
+      "source": "wikimedia_commons",
+      "role": "hard_negative",
+      "candidate_labels": [],
+      "note": "Sudden lighting change",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/a8/2013_Russian_meteor_event_%28Magnitogorsk%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:2013_Russian_meteor_event_(Magnitogorsk).webm",
+      "bytes": 5589184,
+      "duration_s": 120.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "ade37c7a2af75a7acbd18526ef3cb6b254d5e705",
+      "licence": "Public domain",
+      "licence_url": null,
+      "author_or_credit": "Noo4891"
+    },
+    {
+      "id": "commons-af4961f687",
+      "title": "Driving southbound on I-270 from Shady Grove Road to the I-270 Spur (1 June 2026).webm",
+      "source": "wikimedia_commons",
+      "role": "normal",
+      "candidate_labels": [
+        "approach?",
+        "cut_in?"
+      ],
+      "note": "5 min highway traffic; natural merges likely",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/db/Driving_southbound_on_I-270_from_Shady_Grove_Road_to_the_I-270_Spur_%281_June_2026%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Driving_southbound_on_I-270_from_Shady_Grove_Road_to_the_I-270_Spur_(1_June_2026).webm",
+      "bytes": 137892159,
+      "duration_s": 300.5,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "af4961f6871eccbe4e4a4c2c4fd0dd4f736b9c8a",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "author_or_credit": "Illegitimate Barrister (talk · contribs)"
+    },
+    {
+      "id": "commons-69ea005906",
+      "title": "Driving from Broad Creek to Jennifer Road in Annapolis, Maryland (1 June 2026).webm",
+      "source": "wikimedia_commons",
+      "role": "normal",
+      "candidate_labels": [
+        "approach?",
+        "cut_in?"
+      ],
+      "note": "5 min suburban traffic",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Driving_from_Broad_Creek_to_Jennifer_Road_in_Annapolis%2C_Maryland_%281_June_2026%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Driving_from_Broad_Creek_to_Jennifer_Road_in_Annapolis,_Maryland_(1_June_2026).webm",
+      "bytes": 141060500,
+      "duration_s": 300.5,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "69ea00590614dd7ef1e0409366fa2f9d2affa84a",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "author_or_credit": "Illegitimate Barrister (talk · contribs)"
+    },
+    {
+      "id": "commons-c0cdcdf407",
+      "title": "Driving eastbound on I-495 from the I-270 Spur to Cedar Lane (1 June 2026).webm",
+      "source": "wikimedia_commons",
+      "role": "normal",
+      "candidate_labels": [
+        "approach?",
+        "cut_in?"
+      ],
+      "note": "5 min Beltway traffic",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/9/94/Driving_eastbound_on_I-495_from_the_I-270_Spur_to_Cedar_Lane_%281_June_2026%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:Driving_eastbound_on_I-495_from_the_I-270_Spur_to_Cedar_Lane_(1_June_2026).webm",
+      "bytes": 163297875,
+      "duration_s": 300.5,
+      "resolution": [
+        1280,
+        720
+      ],
+      "sha1": "c0cdcdf407b9e2cc45b092ee40ca6b074e5defcf",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "author_or_credit": "Illegitimate Barrister (talk · contribs)"
+    },
+    {
+      "id": "commons-478b7b0984",
+      "title": "US 33 in West Virginia 1-ftOd1hgDi5c.webm",
+      "source": "wikimedia_commons",
+      "role": "normal",
+      "candidate_labels": [],
+      "note": "Rural curves: cut-in corridor false-alarm test",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/d8/US_33_in_West_Virginia_1-ftOd1hgDi5c.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "page": "https://commons.wikimedia.org/wiki/File:US_33_in_West_Virginia_1-ftOd1hgDi5c.webm",
+      "bytes": 71523022,
+      "duration_s": 60.0,
+      "resolution": [
+        2560,
+        1440
+      ],
+      "sha1": "478b7b09847deaa5bb0e37d20248e98c9272b061",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0",
+      "author_or_credit": "Andy Arthur"
+    },
+    {
+      "id": "comma2k19-b0c9d2329ad1606b-10",
+      "title": "b0c9d2329ad1606b|2018-07-27--06-03-57/10/video.hevc",
+      "source": "comma2k19",
+      "role": "normal",
+      "candidate_labels": [
+        "approach?",
+        "cut_in?"
+      ],
+      "note": "1-min highway segment; HEVC, no audio",
+      "url": "https://huggingface.co/datasets/commaai/comma2k19/resolve/main/compression_challenge/b0c9d2329ad1606b%7C2018-07-27--06-03-57/10/video.hevc",
+      "page": "https://huggingface.co/datasets/commaai/comma2k19",
+      "bytes": 37500000,
+      "duration_s": 60.0,
+      "resolution": null,
+      "sha1": null,
+      "licence": "MIT",
+      "licence_url": "https://github.com/commaai/comma2k19",
+      "author_or_credit": "comma.ai"
+    }
+  ]
+}

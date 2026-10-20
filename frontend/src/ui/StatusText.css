@@ -1,0 +1,28 @@
+.status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.status-text__icon {
+  display: inline-flex;
+}
+
+.status-text--success .status-text__icon {
+  color: var(--color-success-text);
+}
+
+.status-text--warning .status-text__icon {
+  color: var(--color-warning-text);
+}
+
+.status-text--danger .status-text__icon {
+  color: var(--color-danger-text);
+}
+
+.status-text--info .status-text__icon,
+.status-text--neutral .status-text__icon {
+  color: var(--color-text-secondary);
+}

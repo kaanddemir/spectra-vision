@@ -1,1 +1,0 @@
-"""Video analysis pipeline components."""

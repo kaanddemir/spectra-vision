@@ -1,0 +1,646 @@
+{
+  "schema_version": "1.0",
+  "datasets": [
+    {
+      "id": "nexar-collision-2025",
+      "name": "Nexar Collision Prediction",
+      "url": "https://huggingface.co/datasets/nexar-ai/nexar_collision_prediction",
+      "annotations": "Per-clip collision/near-miss label and event/alert times (paper arXiv:2503.03848)",
+      "event_coverage": [
+        "collision",
+        "near_miss",
+        "normal"
+      ],
+      "clips": "Train: 1,500 clips (about 750 positive collision/near-miss, 750 negative), about 40 s each; test: about 10 s clips cut 0.5/1.0/1.5 s before the event",
+      "clip_format": "Real dashcam video, 1280x720 at 30 fps; metadata columns label, time_of_event, time_of_alert, light_conditions, weather, scene",
+      "access": "Gated on Hugging Face: login, acceptance of the Nexar licence and sharing contact details. Acceptance must be done by the user",
+      "terms": {
+        "statement": "Free use with copyright notice retained; no sale, sublicensing or redistribution for profit without written consent from Nexar; attribution and citation required; no re-identification of people or vehicles, including by cross-referencing; no systems intended to cause harm or simulate unsafe driving; no termination clause",
+        "status": "confirmed",
+        "source": "https://huggingface.co/datasets/nexar-ai/nexar_collision_prediction/blob/main/LICENSE",
+        "accessed": "2026-10-16"
+      },
+      "evaluation_use": "evaluation_only",
+      "training_use": "undecided",
+      "dashcam_relevance": "Highest of the candidates: real forward dashcams, unedited",
+      "storage_estimate": "About 31.4 GB total (dataset card). Sample of 16 x 40 s training clips at 720p: about 0.3-0.5 GB (expectation from typical bitrates; confirm by file listing)",
+      "notes": "Positive labels mix collisions and near-misses in one class and give one event time, so they score collision timing only partially; approach and cut-in labels must be added by our own annotators. Licence does not explicitly address training a model shipped free of charge; ask Nexar in writing before any training use."
+    },
+    {
+      "id": "dota",
+      "name": "Detection of Traffic Anomaly (DoTA)",
+      "url": "https://github.com/MoonBlvd/Detection-of-Traffic-Anomaly",
+      "annotations": "Per-clip JSON in dataset/DoTA_annotations.zip (10.4 MB, 4,677 files, checked 2026-10-17): video_name, channel, num_frames, ignore, ego_involve, night, anomaly_start/end (clip frames at 10 fps; end exclusive in 4,337 files, inclusive in 340), video_start/end, accident_id/accident_name (10 anomaly categories plus normal) and per-frame objects (obj_track_id, xyxy bbox, category, trunc). Objects occur only on anomaly frames: they are the anomaly participants, not every road user",
+      "event_coverage": [
+        "collision",
+        "cut_in_like (lateral)",
+        "approach_like (leading vehicle)"
+      ],
+      "clips": "4,677 clips (61 marked ignore), about 55 GB as frames (Google Drive split zips) or by YouTube URL list; no per-clip official download; 6 source videos removed from YouTube",
+      "clip_format": "YouTube dashcam compilations, downloaded by URL list; annotations at 10 fps; 1280x720 typical",
+      "access": "Google Drive archives or YouTube download script (requires YouTube cookies); no small official subset",
+      "terms": {
+        "statement": "Repository code MIT. No explicit dataset licence; authors state channel owners permitted sharing. Video rights remain with YouTube uploaders",
+        "status": "secondary",
+        "source": "https://github.com/MoonBlvd/Detection-of-Traffic-Anomaly",
+        "accessed": "2026-10-16"
+      },
+      "evaluation_use": "blocked",
+      "training_use": "blocked",
+      "dashcam_relevance": "Medium: real dashcams but edited compilations with cuts and overlays",
+      "storage_estimate": "Not published; estimate tens of GB for all videos (hypothesis)",
+      "notes": "Blocked: video rights belong to YouTube uploaders; author statement of channel permission is not a licence to us; downloading via YouTube scripts conflicts with YouTube terms. Annotation metadata imported by evaluation/importers/dota.py as source labels only: categories are anomaly types, not our event types, and participants cannot score detection."
+    },
+    {
+      "id": "ccd",
+      "name": "Car Crash Dataset (CCD)",
+      "url": "https://github.com/Cogito2012/CarCrashDataset",
+      "annotations": "Accident start frame, ego-involved flag, day/night, weather, object boxes",
+      "event_coverage": [
+        "collision",
+        "normal"
+      ],
+      "clips": "1,500 accident clips plus 3,000 normal clips (normal clips from BDD100K)",
+      "clip_format": "50 frames at 10 fps (5 s); YouTube sources for accidents",
+      "access": "Download links in repository",
+      "terms": {
+        "statement": "Repository MIT; dataset terms unstated; underlying YouTube and BDD100K footage carries its own terms",
+        "status": "secondary",
+        "source": "https://github.com/Cogito2012/CarCrashDataset",
+        "accessed": "2026-10-16"
+      },
+      "evaluation_use": "undecided",
+      "training_use": "blocked",
+      "dashcam_relevance": "Low-medium: 5 s at 10 fps is far from 30 fps continuous footage; no context before the event",
+      "storage_estimate": "Not verified; several GB (hypothesis)",
+      "notes": "Useful for condition breakdowns (day/night, weather). The 10 fps rate limits timing-error and jerk measurements."
+    },
+    {
+      "id": "dad",
+      "name": "Dashcam Accident Dataset (DAD)",
+      "url": "https://aliensunmin.github.io/project/dashcam/",
+      "annotations": "Accident clip label with accident in the last frames; object tracks for some objects",
+      "event_coverage": [
+        "collision",
+        "normal"
+      ],
+      "clips": "about 1,750 clips of 100 frames (620 positive) per the original paper; to verify",
+      "clip_format": "YouTube dashcam footage from Taiwan, 20 fps, 1280x720 per paper; to verify",
+      "access": "Not verified in this session",
+      "terms": {
+        "statement": "Not checked",
+        "status": "unknown"
+      },
+      "evaluation_use": "undecided",
+      "training_use": "undecided",
+      "dashcam_relevance": "Medium",
+      "storage_estimate": "Unknown",
+      "notes": "Lowest priority; overlaps with CCD and DoTA."
+    },
+    {
+      "id": "bdd100k",
+      "name": "BDD100K",
+      "url": "https://bdd-data.berkeley.edu/",
+      "annotations": "Frame-level boxes, drivable area, lanes, weather/time-of-day/scene tags; no incident labels",
+      "event_coverage": [
+        "normal"
+      ],
+      "clips": "100,000 videos of about 40 s",
+      "clip_format": "Real phone dashcam video, 720p at 30 fps",
+      "access": "Registration at bdd-data.berkeley.edu (unreachable from this machine on 2026-10-16)",
+      "terms": {
+        "statement": "Data and labels: UC Regents grant use, copy, modify and distribute for educational, research and not-for-profit purposes; commercial use only for BDD and BAIR Commons members and affiliates, otherwise by licence from UC Berkeley OTL. Code: BSD-3-Clause",
+        "status": "confirmed",
+        "source": "https://github.com/bdd100k/bdd100k/blob/master/doc/source/license.rst",
+        "accessed": "2026-10-16"
+      },
+      "evaluation_use": "blocked",
+      "training_use": "blocked",
+      "dashcam_relevance": "High for normal driving and condition variety (night, rain, curves)",
+      "storage_estimate": "Full video set about 1.8 TB (published figure, secondary); a 50-clip sample is about 1-2 GB (hypothesis)",
+      "notes": "Blocked for a commercially compatible product unless UC Berkeley OTL grants a licence or Spectra qualifies as not-for-profit (legal question)."
+    },
+    {
+      "id": "own-consented",
+      "name": "Own and consented user footage",
+      "url": "n/a",
+      "annotations": "Our annotation schema",
+      "event_coverage": [
+        "collision",
+        "approach",
+        "cut_in",
+        "normal"
+      ],
+      "clips": "0 so far",
+      "clip_format": "Target domain",
+      "access": "Consent form required",
+      "terms": {
+        "statement": "Written consent per contributor, including bystander privacy terms",
+        "status": "unknown"
+      },
+      "evaluation_use": "undecided",
+      "training_use": "undecided",
+      "dashcam_relevance": "Highest",
+      "storage_estimate": "About 100 MB per minute at 1080p",
+      "notes": "Only realistic source of labelled approach and cut-in events in normal, unedited footage."
+    },
+    {
+      "id": "wikimedia-commons-dashcam",
+      "name": "Wikimedia Commons, Category:Dashcam videos",
+      "url": "https://commons.wikimedia.org/wiki/Category:Dashcam_videos",
+      "annotations": "None; titles and descriptions only",
+      "event_coverage": [
+        "collision",
+        "near_miss",
+        "normal",
+        "hard_negatives (shake, lighting)"
+      ],
+      "clips": "53 files in category (2026-10-16); 19 selected",
+      "clip_format": "WebM, mostly 1280x720 or 1920x1080, 7 s to 5 min",
+      "access": "Public, per-file download, no account",
+      "terms": {
+        "statement": "Per-file licence. Incident clips mostly {{PD-CCTV}} (public-domain claim that automatic camera footage lacks human authorship; re-uploads from Douyin and Reddit). Normal-driving clips own work under CC BY-SA 4.0 / CC BY 4.0 / CC BY 3.0",
+        "status": "confirmed",
+        "source": "https://commons.wikimedia.org/wiki/Template:PD-CCTV",
+        "accessed": "2026-10-16"
+      },
+      "evaluation_use": "undecided",
+      "training_use": "undecided",
+      "dashcam_relevance": "High: real dashcams, short clips; some re-encoded, cropped or watermarked",
+      "storage_estimate": "Selected 19 clips: about 739 MB",
+      "notes": "PD-CCTV rests on a jurisdiction-dependent no-human-authorship theory and the provenance chain (Douyin/Reddit uploader) is unverified; low risk for internal evaluation without redistribution, owner decision required. CC BY/BY-SA require attribution if redistributed. Contains identifiable people and plates: keep local, no re-identification."
+    },
+    {
+      "id": "comma2k19",
+      "name": "comma2k19",
+      "url": "https://huggingface.co/datasets/commaai/comma2k19",
+      "annotations": "No event labels; CAN speed, steering, radar, IMU, GNSS and poses in the full chunks",
+      "event_coverage": [
+        "normal"
+      ],
+      "clips": "2,019 one-minute segments, 33 h, California highway commute",
+      "clip_format": "HEVC road-facing camera",
+      "access": "Public Hugging Face (not gated); full data as about 10 GB zip chunks; one standalone 37.5 MB segment under compression_challenge/",
+      "terms": {
+        "statement": "MIT",
+        "status": "confirmed",
+        "source": "https://huggingface.co/datasets/commaai/comma2k19",
+        "accessed": "2026-10-16"
+      },
+      "evaluation_use": "evaluation_only",
+      "training_use": "undecided",
+      "dashcam_relevance": "Medium-high: real forward camera, mostly one highway route",
+      "storage_estimate": "One segment 37.5 MB; a full chunk about 10 GB",
+      "notes": "Only permissively licensed real driving source found. CAN radar lead distance in full chunks could support weak approach labels later (would need a 10 GB chunk approval)."
+    },
+    {
+      "id": "prevention",
+      "name": "PREVENTION (UAH)",
+      "url": "https://prevention-dataset.uah.es/",
+      "annotations": "Per drive (processed_data.zip, members stored uncompressed; readable by HTTP range): detection_camera1/lane_changes.txt (id_l id_d type f0 fe ff blk), logs/log_camera1.txt (cloud frame t0 t1, t0 in microseconds), detections_tracked.txt (authors' detector), lanes.txt, labels.txt and trajectories.txt (empty on RECORD4/DRIVE3). Released types: 3 left 381, 4 right 468, 5 hazardous 2, 6 pedestrian 1; no cut-in (1) or cut-out (2) labels. Surrounding vehicles only",
+      "event_coverage": [
+        "lane_change of surrounding vehicles (target lane not stated)"
+      ],
+      "clips": "5 records, 11 drives of 7-52 min (about 6 h); front and rear cameras, LiDAR, radar",
+      "clip_format": "Front camera mp4 per drive (192.8 MB to 1.44 GB); camera log gives 10.7-11.7 fps",
+      "access": "Direct download, no account. RECORD4/DRIVE3 (smallest, 18 lane changes): video_camera1.mp4 192,798,168 B; processed_data.zip 365,621,255 B, of which lane_changes.txt 882 B, log_camera1.txt 227,280 B, detections_tracked.txt 24,866,683 B, lanes.txt 952,626 B (Content-Length and zip directory, 2026-10-17)",
+      "terms": {
+        "statement": "CC BY-NC-SA 4.0",
+        "status": "confirmed",
+        "source": "https://prevention-dataset.uah.es/",
+        "accessed": "2026-10-17"
+      },
+      "evaluation_use": "undecided",
+      "training_use": "blocked",
+      "dashcam_relevance": "Medium: one calibrated research vehicle on Spanish highways; real lane changes of surrounding traffic",
+      "storage_estimate": "193 MB for the RECORD4/DRIVE3 front video; about 25 MB more for its tracked detections",
+      "notes": "CC BY-NC-SA 4.0: private, non-commercial evaluation; labels and clips stay in evaluation/restricted/ and are not redistributed with the MIT code. Owner decision on evaluation_use pending. RECORD4/DRIVE1 and DRIVE2 camera logs have missed-carry timestamp defects. id_l/id_d meaning unconfirmed."
+    }
+  ],
+  "models": [
+    {
+      "id": "rf-detr-nano-small",
+      "function": "object detection",
+      "repository": "https://github.com/roboflow/rf-detr",
+      "version": "rfdetr 1.11.2; Nano checkpoint https://storage.googleapis.com/rfdetr/nano_coco/checkpoint_best_regular.pth (366 MB incl. optimizer state, md5 fb6504cce7fbdc783f7a46991f07639f, sha256 d8d6b9ee57d4d0ed2b1f305163624712a0532cb7bce0c747317984fc5457440d, last-modified 2025-07-22); 384x384",
+      "code_licence": {
+        "statement": "Apache-2.0",
+        "status": "confirmed",
+        "source": "https://github.com/roboflow/rf-detr",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "Apache-2.0 for Nano/Small/Medium/Large detection; XL/2XL/Atto/Femto/Pico under PML 1.0",
+        "status": "confirmed",
+        "source": "https://github.com/roboflow/rf-detr",
+        "accessed": "2026-10-16"
+      },
+      "training_data": {
+        "statement": "Backbone DINOv2 (Nano/Small); detector benchmarked on COCO and RF100-VL. Per-size training data not stated in the README; Objects365 not mentioned",
+        "status": "unknown",
+        "source": "https://github.com/roboflow/rf-detr",
+        "accessed": "2026-10-16"
+      },
+      "distribution_obligations": "Apache-2.0 NOTICE; DINOv2 and COCO attribution; avoid the rfdetr_plus extra (PML 1.0)",
+      "use": "undecided",
+      "measured_here": true,
+      "open_questions": [
+        "Training data of each released checkpoint and the DINOv2 backbone (Meta) terms",
+        "Dependencies add transformers 5.20, supervision 0.30.9, huggingface_hub 2.2, tokenizers (about 200 MB in the evaluation venv)",
+        "Shipping weights should strip optimizer state (366 MB -> model only)"
+      ]
+    },
+    {
+      "id": "d-fine-n-s-coco",
+      "function": "object detection",
+      "repository": "https://github.com/Peterande/D-FINE",
+      "version": "dfine_n_coco.pth (4 M params, 42.8 AP) and dfine_s_coco.pth (10 M, 48.5 AP) from github.com/Peterande/storage releases dfinev1.0; measured: dfine_n_coco.pth sha256 41973938d2784d38a9836990d805b8392855ebf611aba55f0f7add90e110744c (15.5 MB), repo commit 956d1709314c2c6a4df6f34de232054578a7449f",
+      "code_licence": {
+        "statement": "Apache-2.0",
+        "status": "confirmed",
+        "source": "https://github.com/Peterande/D-FINE",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "No separate checkpoint licence; repository Apache-2.0. README warns only *_obj365 and *_obj2coco checkpoints may be subject to Objects365 terms",
+        "status": "secondary",
+        "source": "https://github.com/Peterande/D-FINE",
+        "accessed": "2026-10-16"
+      },
+      "training_data": {
+        "statement": "COCO train2017 for *_coco checkpoints; HGNetV2 backbone pretraining data to confirm",
+        "status": "secondary",
+        "source": "https://github.com/Peterande/D-FINE",
+        "accessed": "2026-10-16"
+      },
+      "distribution_obligations": "Code: Apache-2.0 NOTICE; COCO attribution. Checkpoint redistribution has not been cleared; see THIRD_PARTY_NOTICES.md",
+      "use": "undecided",
+      "measured_here": true,
+      "open_questions": [
+        "HGNetV2 backbone (PPHGNetV2_B0_stage1) pretraining data and licence; construction auto-downloads it unless pretrained=False",
+        "Inference import chain requires tensorboard; calflops is stubbed in the adapter",
+        "Repo targets Python 3.11.9; works on 3.12 / torch 2.11 / macOS ARM64 (measured)"
+      ]
+    },
+    {
+      "id": "bytetrack",
+      "function": "multi-object tracking (association only)",
+      "repository": "https://github.com/ifzhang/ByteTrack",
+      "version": "Candidate implementation: supervision 0.30.9 sv.ByteTrack (MIT, Roboflow, confirmed from installed licence file)",
+      "code_licence": {
+        "statement": "MIT",
+        "status": "confirmed",
+        "source": "https://github.com/ifzhang/ByteTrack",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "No weights needed for association",
+        "status": "confirmed"
+      },
+      "training_data": {
+        "statement": "Not applicable to the association step",
+        "status": "confirmed"
+      },
+      "distribution_obligations": "MIT notice of whichever implementation is used",
+      "use": "undecided",
+      "measured_here": false,
+      "open_questions": [
+        "Which implementation (original repo pulls YOLOX and heavy deps; a small standalone port is preferable)"
+      ]
+    },
+    {
+      "id": "oc-sort",
+      "function": "multi-object tracking (association only)",
+      "repository": "https://github.com/noahcao/OC_SORT",
+      "version": "algorithm",
+      "code_licence": {
+        "statement": "MIT reported; not verified in this session",
+        "status": "unknown"
+      },
+      "checkpoint_licence": {
+        "statement": "No weights needed",
+        "status": "confirmed"
+      },
+      "training_data": {
+        "statement": "Not applicable",
+        "status": "confirmed"
+      },
+      "distribution_obligations": "Licence notice",
+      "use": "undecided",
+      "measured_here": false,
+      "open_questions": [
+        "Verify licence file"
+      ]
+    },
+    {
+      "id": "legacy-yolov8n",
+      "function": "object detection (legacy)",
+      "repository": "https://github.com/ultralytics/ultralytics",
+      "version": "yolov8n.pt with ultralytics 8.4.46",
+      "code_licence": {
+        "statement": "AGPL-3.0 (or Ultralytics commercial licence)",
+        "status": "confirmed",
+        "source": "Historical Spectra README (no longer present); upstream: https://github.com/ultralytics/ultralytics",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "AGPL-3.0",
+        "status": "confirmed"
+      },
+      "training_data": {
+        "statement": "COCO",
+        "status": "secondary"
+      },
+      "distribution_obligations": "AGPL source disclosure for the whole networked application",
+      "use": "evaluation_only",
+      "measured_here": true,
+      "open_questions": []
+    },
+    {
+      "id": "legacy-depth-anything-v2-metric-vkitti-small",
+      "function": "metric depth (legacy)",
+      "repository": "https://github.com/DepthAnything/Depth-Anything-V2/tree/main/metric_depth",
+      "version": "Historical ViT-S metric VKITTI ONNX export; removed from models/",
+      "code_licence": {
+        "statement": "Apache-2.0 for Small per repository",
+        "status": "secondary"
+      },
+      "checkpoint_licence": {
+        "statement": "Not stated on the metric-depth page",
+        "status": "unknown"
+      },
+      "training_data": {
+        "statement": "Fine-tuned on Virtual KITTI 2 (CC BY-NC-SA 3.0, non-commercial)",
+        "status": "confirmed",
+        "source": "https://europe.naverlabs.com/research/computer-vision/proxy-virtual-worlds-vkitti-2/",
+        "accessed": "2026-10-16"
+      },
+      "distribution_obligations": "Non-commercial training-data terms make distribution unsafe",
+      "use": "evaluation_only",
+      "measured_here": true,
+      "open_questions": []
+    },
+    {
+      "id": "legacy-ufldv2-culane-r18",
+      "function": "lane detection (legacy)",
+      "repository": "https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2",
+      "version": "Historical CULane ResNet-18 ONNX export (825 MB); removed from models/",
+      "code_licence": {
+        "statement": "MIT",
+        "status": "secondary"
+      },
+      "checkpoint_licence": {
+        "statement": "Unstated",
+        "status": "unknown"
+      },
+      "training_data": {
+        "statement": "CULane, research-use terms per this repository's README",
+        "status": "secondary"
+      },
+      "distribution_obligations": "Not distributable until the CULane terms are cleared",
+      "use": "blocked",
+      "measured_here": false,
+      "open_questions": []
+    },
+    {
+      "id": "yolop",
+      "function": "drivable area, lanes, detection",
+      "repository": "https://github.com/hustvl/YOLOP",
+      "version": "End-to-end weights",
+      "code_licence": {
+        "statement": "MIT",
+        "status": "confirmed",
+        "source": "https://github.com/hustvl/YOLOP",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "Not stated",
+        "status": "unknown"
+      },
+      "training_data": {
+        "statement": "BDD100K (see dataset entry)",
+        "status": "secondary"
+      },
+      "distribution_obligations": "Blocked by BDD100K terms until cleared",
+      "use": "evaluation_only",
+      "measured_here": false,
+      "open_questions": [
+        "Usable as an internal reference path estimator to score the model-free corridor"
+      ]
+    },
+    {
+      "id": "roboflow-trackers",
+      "function": "multi-object tracking (SORT, ByteTrack, OC-SORT, BoT-SORT with camera motion compensation)",
+      "repository": "https://github.com/roboflow/trackers",
+      "version": "trackers 2.6.1 (PyPI, 2026-09-25)",
+      "code_licence": {
+        "statement": "Apache-2.0 (PyPI licence field and repository LICENSE)",
+        "status": "confirmed",
+        "source": "https://pypi.org/pypi/trackers/json",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "No weights for the motion-only trackers used",
+        "status": "confirmed"
+      },
+      "training_data": {
+        "statement": "Not applicable",
+        "status": "confirmed"
+      },
+      "distribution_obligations": "Apache-2.0 NOTICE; requires numpy>=2.0.2, supervision, scipy, opencv-python",
+      "use": "undecided",
+      "measured_here": true,
+      "open_questions": [
+        "Identity accuracy not verified against human identity labels"
+      ]
+    },
+    {
+      "id": "boxmot",
+      "function": "multi-object tracking collection",
+      "repository": "https://github.com/mikel-brostrom/boxmot",
+      "version": "25.0.0",
+      "code_licence": {
+        "statement": "AGPL-3.0",
+        "status": "confirmed",
+        "source": "https://pypi.org/pypi/boxmot/json",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "Re-ID weights vary",
+        "status": "unknown"
+      },
+      "training_data": {
+        "statement": "Not checked",
+        "status": "unknown"
+      },
+      "distribution_obligations": "AGPL source disclosure",
+      "use": "blocked",
+      "measured_here": false,
+      "open_questions": []
+    },
+    {
+      "id": "opencv-classical-lanes",
+      "function": "historical lane-marking baseline (evaluation/lanes.py was removed)",
+      "repository": "https://github.com/opencv/opencv",
+      "version": "unpinned",
+      "code_licence": {
+        "statement": "Apache-2.0",
+        "status": "confirmed"
+      },
+      "checkpoint_licence": {
+        "statement": "no weights",
+        "status": "confirmed"
+      },
+      "training_data": {
+        "statement": "none",
+        "status": "confirmed"
+      },
+      "distribution_obligations": "unknown",
+      "use": "blocked",
+      "measured_here": true,
+      "open_questions": [
+        "Fails on vehicle edges, dashboard rims and at night on the sample clips"
+      ]
+    },
+    {
+      "id": "openpilot-driving-model",
+      "function": "lane lines, road edges, planned path",
+      "repository": "https://github.com/commaai/openpilot",
+      "version": "unpinned",
+      "code_licence": {
+        "statement": "MIT",
+        "status": "confirmed"
+      },
+      "checkpoint_licence": {
+        "statement": "No model-specific licence; repo MIT by default",
+        "status": "unknown"
+      },
+      "training_data": {
+        "statement": "Unpublished comma fleet and simulator data",
+        "status": "unknown"
+      },
+      "distribution_obligations": "unknown",
+      "use": "evaluation_only",
+      "measured_here": false,
+      "open_questions": [
+        "Weight and data provenance",
+        "Needs camera calibration warp for generic dashcams",
+        "Download size unverified"
+      ]
+    },
+    {
+      "id": "comma10k-trained-segmentation",
+      "function": "road and lane-marking segmentation trained in-house",
+      "repository": "https://github.com/commaai/comma10k",
+      "version": "unpinned",
+      "code_licence": {
+        "statement": "MIT (baseline yassineyousfi/comma10k-baseline)",
+        "status": "secondary"
+      },
+      "checkpoint_licence": {
+        "statement": "none published",
+        "status": "confirmed"
+      },
+      "training_data": {
+        "statement": "comma10k MIT per README",
+        "status": "secondary"
+      },
+      "distribution_obligations": "unknown",
+      "use": "undecided",
+      "measured_here": false,
+      "open_questions": [
+        "Backbone pretraining licence",
+        "Training cost on M1",
+        "Ego-lane derivation from segmentation"
+      ]
+    },
+    {
+      "id": "badas-open",
+      "function": "collision anticipation (V-JEPA2 ViT-L)",
+      "repository": "https://github.com/getnexar/BADAS-Open",
+      "version": "unpinned",
+      "code_licence": {
+        "statement": "Apache-2.0",
+        "status": "secondary"
+      },
+      "checkpoint_licence": {
+        "statement": "Apache-2.0 tag on gated HF card",
+        "status": "secondary"
+      },
+      "training_data": {
+        "statement": "Nexar Open Data License plus DAD/DADA/DoTA re-annotations",
+        "status": "unknown"
+      },
+      "distribution_obligations": "unknown",
+      "use": "blocked",
+      "measured_here": false,
+      "open_questions": [
+        "Gated terms not accepted",
+        "Meta V-JEPA2 base licence",
+        "ViT-L size too large for target hardware"
+      ]
+    },
+    {
+      "id": "comma10k-segnet",
+      "function": "road / lane-marking / vehicle / my-car segmentation (U-Net, EfficientNet-B2)",
+      "repository": "https://huggingface.co/commaai/comma10k-segnet",
+      "version": "b642c614eb0737fe7befa229f47fbd0245033038",
+      "code_licence": {
+        "statement": "segmentation-models-pytorch 0.5.0 MIT; timm 1.0.30 Apache-2.0",
+        "status": "confirmed",
+        "source": "https://pypi.org/pypi/segmentation-models-pytorch/json",
+        "accessed": "2026-10-16"
+      },
+      "checkpoint_licence": {
+        "statement": "MIT (model card metadata, commaai organisation, not gated); model.safetensors sha256 8208672861ad1b111dc98f3a7c54196d29875b709c7353e2dd1b7614343fb3a8, 38,502,740 bytes",
+        "status": "confirmed",
+        "source": "https://huggingface.co/commaai/comma10k-segnet",
+        "accessed": "2026-10-16"
+      },
+      "training_data": {
+        "statement": "comma10k, MIT per dataset README; training recipe and any encoder initialisation not documented",
+        "status": "secondary",
+        "source": "https://github.com/commaai/comma10k",
+        "accessed": "2026-10-16"
+      },
+      "distribution_obligations": "MIT notice; no full LICENSE file in the model repository",
+      "use": "undecided",
+      "measured_here": true,
+      "open_questions": [
+        "Training recipe and encoder initialisation undocumented",
+        "No published accuracy metrics",
+        "comma10k images are comma fleet captures; contributor consent terms not reviewed"
+      ]
+    },
+    {
+      "id": "deimv2",
+      "function": "real-time object detection (HGNetv2 Atto-N, DINOv3-derived S-X)",
+      "repository": "https://github.com/Intellindust-AI-Lab/DEIMv2",
+      "version": "not acquired; repository state of 2026-10-17",
+      "code_licence": {
+        "statement": "DEIMv2 License: use, modification and redistribution solely for Non-Commercial Purposes; no rights for Commercial Use",
+        "status": "confirmed",
+        "source": "https://github.com/Intellindust-AI-Lab/DEIMv2/blob/master/LICENSE.md",
+        "accessed": "2026-10-17"
+      },
+      "checkpoint_licence": {
+        "statement": "Same DEIMv2 License (section 5): weights for Non-Commercial Purposes only",
+        "status": "confirmed",
+        "source": "https://github.com/Intellindust-AI-Lab/DEIMv2/blob/master/LICENSE.md",
+        "accessed": "2026-10-17"
+      },
+      "training_data": {
+        "statement": "COCO; S-X use DINOv3-derived backbones under the DINOv3 License",
+        "status": "secondary",
+        "source": "https://github.com/Intellindust-AI-Lab/DEIMv2",
+        "accessed": "2026-10-17"
+      },
+      "distribution_obligations": "Not distributable with an MIT application that permits commercial use",
+      "use": "blocked",
+      "measured_here": false,
+      "open_questions": [
+        "Mirrors and earlier listings reported Apache-2.0; the official LICENSE.md now grants non-commercial rights only"
+      ]
+    }
+  ]
+}

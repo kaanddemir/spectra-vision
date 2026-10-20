@@ -1,0 +1,176 @@
+/* Tables sit directly on the page: no card, only the header rule and row dividers. */
+.table-region {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.table-region:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+
+/* Minimum widths before the table scrolls horizontally inside its region */
+.table--min-md {
+  min-width: var(--table-min-md);
+}
+
+.table--min-lg {
+  min-width: var(--table-min-lg);
+}
+
+.table th {
+  height: var(--table-head-h);
+  padding: 0 var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.table td {
+  height: var(--table-row-h);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover td {
+  background: var(--color-surface-subtle);
+}
+
+.table tbody tr.is-selected td {
+  background: var(--color-surface-selected);
+}
+
+.table .cell-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table .cell-secondary {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.table .cell-select {
+  width: var(--table-select-w);
+  padding-right: 0;
+}
+
+/*
+ * Fit sizing (Table columns="fit"): every column is as narrow as its content and never wraps, and the
+ * remaining width goes to `cell-primary` (and any `cell-flex` column), which truncate. Status, metadata
+ * and actions therefore stay compact while the name gets the space.
+ */
+.table--fit th,
+.table--fit td {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.table.table--fit .cell-primary,
+.table.table--fit .cell-flex {
+  width: auto;
+  max-width: 0;
+}
+
+.table.table--fit .cell-flex {
+  min-width: var(--table-flex-min);
+}
+
+.table--fit .cell-flex > * {
+  display: block;
+}
+
+/*
+ * In fit tables the compact columns (status, review, times, sizes, dates) centre header and content on one
+ * axis, so a heading sits over its badge or value whatever their widths. Icon-and-label pairs are inline-flex
+ * and centre as one unit. Names stay left (they truncate), actions right, the selection box in place.
+ */
+.table--fit th:not(.cell-primary, .cell-flex, .cell-select, .cell-actions),
+.table--fit td:not(.cell-primary, .cell-flex, .cell-select, .cell-actions) {
+  text-align: center;
+}
+
+.table .cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table .cell-primary {
+  max-width: 0;
+  width: 40%;
+  min-width: var(--table-primary-min);
+}
+
+/* A folder row: same height and alignment as file rows, with its name as the only content. */
+.table tr.is-folder .cell-primary__title {
+  font-weight: var(--weight-regular);
+}
+
+.cell-primary__content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.cell-primary__icon {
+  color: var(--color-text-secondary);
+}
+
+.cell-primary__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cell-primary__title {
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.cell-primary__subtitle {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
+}
+
+a.cell-primary__title,
+button.cell-primary__title {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+a.cell-primary__title:hover,
+button.cell-primary__title:hover {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+  text-underline-offset: var(--underline-offset);
+}
+
+/* On narrow screens names wrap instead of truncating, so touch users see them in full. */
+@media (max-width: 640px) {
+  .table .cell-primary .truncate {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

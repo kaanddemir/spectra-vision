@@ -1,0 +1,107 @@
+/* The reviewer's decision, in the event header: status chip, then the buttons that change it. A save error takes its own line. */
+.review-decision {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.review-decision > :not(.review-decision__row) {
+  flex-basis: 100%;
+}
+
+.review-decision__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.review-decision__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The stored decision, shown as a status chip apart from the buttons that change it. */
+.review-decision__status {
+  padding: var(--space-0-5) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-weight: var(--weight-medium);
+}
+
+.review-decision__status--not_reviewed {
+  border-style: dashed;
+}
+
+.review-decision__status--accepted {
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+}
+
+.review-decision__status--accepted .status-text {
+  color: var(--color-success-text);
+}
+
+.review-decision__status--rejected {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+.review-decision__status--rejected .status-text {
+  color: var(--color-danger-text);
+}
+
+.review-decision__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-4);
+  border-left: var(--border-width) solid var(--color-border);
+}
+
+/* Unselected: light, tinted only by icon and on hover. Selected: border, background and text together. */
+.review-decision__action--accept .icon {
+  color: var(--color-success-text);
+}
+
+.review-decision__action--reject .icon {
+  color: var(--color-danger-text);
+}
+
+.review-decision__action.button {
+  border: var(--border-width) solid transparent;
+}
+
+.review-decision__action--accept.button:hover:not(:disabled) {
+  background: var(--color-success-bg);
+}
+
+.review-decision__action--reject.button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+}
+
+.review-decision__action--accept.button[aria-pressed="true"] {
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  font-weight: var(--weight-semibold);
+}
+
+.review-decision__action--reject.button[aria-pressed="true"] {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  font-weight: var(--weight-semibold);
+}
+
+@media (max-width: 640px) {
+  .review-decision__actions {
+    padding-left: 0;
+    border-left: 0;
+  }
+}

@@ -1,0 +1,49 @@
+.theme-toggle__panel {
+  width: var(--menu-w);
+  padding: var(--space-1);
+}
+
+.theme-toggle {
+  display: grid;
+  gap: var(--space-0-5);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.theme-toggle__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.theme-toggle__option:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.theme-toggle__option:has(input:checked) {
+  color: var(--color-text);
+}
+
+.theme-toggle__option:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.theme-toggle__label {
+  flex: 1;
+}
+
+.theme-toggle__check {
+  color: var(--color-accent-text);
+}

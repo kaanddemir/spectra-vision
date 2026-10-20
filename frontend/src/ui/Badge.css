@@ -1,0 +1,51 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  max-width: 100%;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--badge-border);
+  border-radius: var(--radius-sm);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+/* A flex box the size of the icon, so it centres on the label instead of sitting on its baseline. */
+.badge__icon {
+  display: inline-flex;
+}
+
+.badge--neutral {
+  --badge-text: var(--color-neutral-text);
+  --badge-bg: var(--color-neutral-bg);
+  --badge-border: var(--color-neutral-border);
+}
+
+.badge--info {
+  --badge-text: var(--color-info-text);
+  --badge-bg: var(--color-info-bg);
+  --badge-border: var(--color-info-border);
+}
+
+.badge--success {
+  --badge-text: var(--color-success-text);
+  --badge-bg: var(--color-success-bg);
+  --badge-border: var(--color-success-border);
+}
+
+.badge--warning {
+  --badge-text: var(--color-warning-text);
+  --badge-bg: var(--color-warning-bg);
+  --badge-border: var(--color-warning-border);
+}
+
+.badge--danger {
+  --badge-text: var(--color-danger-text);
+  --badge-bg: var(--color-danger-bg);
+  --badge-border: var(--color-danger-border);
+}
