@@ -1,0 +1,44 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Model weights, plus the export and CoreML caches the setup scripts leave there
+models/
+.cache/
+*.log
+
+# Sample footage, in every container the analyze endpoint accepts.
+# Uppercase too: dashcams write .MP4 / .MOV, and a case-sensitive checkout
+# (Linux, or macOS with core.ignorecase off) would not match them otherwise.
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.avi
+*.mkv
+*.m4v
+data/
+outputs/

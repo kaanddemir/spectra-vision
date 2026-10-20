@@ -1,0 +1,173 @@
+import numpy as np
+import pytest
+
+from spectra.analysis import video
+from spectra.vision import lanenet, models
+from spectra.vision.detection import ObjectDetector
+
+
+def _reset_depth_singleton(monkeypatch):
+    monkeypatch.setattr(models, "_depth_model_singleton", None)
+    monkeypatch.setattr(models, "_depth_load_failed", False)
+    monkeypatch.setattr(models, "_depth_load_error", None)
+
+
+def _reset_lanenet_singleton(monkeypatch):
+    monkeypatch.setattr(lanenet, "_lanenet_singleton", None)
+    monkeypatch.setattr(lanenet, "_lanenet_load_failed", False)
+    monkeypatch.setattr(lanenet, "_lanenet_load_error", None)
+
+
+class _FakeTensor:
+    def __init__(self, value):
+        self.value = np.asarray(value)
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.value
+
+
+class _FakeBoxes:
+    def __init__(self, xyxy, cls, conf):
+        self.xyxy = _FakeTensor(xyxy)
+        self.cls = _FakeTensor(cls)
+        self.conf = _FakeTensor(conf)
+
+    def __len__(self):
+        return len(self.conf.value)
+
+
+class _FakeYoloResult:
+    names = {2: "car", 7: "truck"}
+
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+
+class _FakeYoloModel:
+    names = {2: "car", 7: "truck"}
+
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+    def predict(self, **kwargs):
+        return [_FakeYoloResult(self.boxes)]
+
+
+def test_depth_model_load_failure_is_cached_and_reported(monkeypatch):
+    _reset_depth_singleton(monkeypatch)
+
+    class BrokenDepthModel:
+        def __init__(self, model_path):
+            raise ValueError("bad depth graph")
+
+    monkeypatch.setattr(models, "is_depth_available", lambda: True)
+    monkeypatch.setattr(models, "DepthAnythingONNX", BrokenDepthModel)
+
+    with pytest.raises(RuntimeError, match="Depth Anything metric ONNX model failed to load"):
+        models.get_depth_model()
+    with pytest.raises(RuntimeError, match="bad depth graph"):
+        models.get_depth_model()
+
+
+def test_lanenet_model_load_failure_is_cached_and_reported(monkeypatch):
+    _reset_lanenet_singleton(monkeypatch)
+
+    class BrokenLaneModel:
+        def __init__(self, model_path):
+            raise ValueError("bad lane graph")
+
+    monkeypatch.setattr(lanenet, "is_lanenet_available", lambda: True)
+    monkeypatch.setattr(lanenet, "UFLDv2ONNX", BrokenLaneModel)
+
+    with pytest.raises(RuntimeError, match="UFLDv2 ONNX model failed to load"):
+        lanenet.get_lanenet_model()
+    with pytest.raises(RuntimeError, match="bad lane graph"):
+        lanenet.get_lanenet_model()
+
+
+def test_required_model_check_surfaces_backend_load_failures(monkeypatch):
+    monkeypatch.setattr(video, "is_depth_available", lambda: True)
+    monkeypatch.setattr(video, "is_yolo_available", lambda: True)
+    monkeypatch.setattr(video, "is_lanenet_available", lambda: True)
+    monkeypatch.setattr(video, "get_depth_model", lambda: object())
+    monkeypatch.setattr(video, "get_lanenet_model", lambda: object())
+    monkeypatch.setattr(video, "get_detector", lambda: (_ for _ in ()).throw(RuntimeError("yolo load failed")))
+
+    with pytest.raises(RuntimeError, match="yolo load failed"):
+        video._ensure_required_models()
+
+
+def test_yolo_inference_failure_raises_runtime_error():
+    class FailingModel:
+        def predict(self, **kwargs):
+            raise ValueError("predict crashed")
+
+    detector = ObjectDetector()
+    detector._model = FailingModel()
+    detector._device = "cpu"
+
+    with pytest.raises(RuntimeError, match="YOLOv8 inference failed"):
+        detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
+
+
+def test_yolo_unloaded_detector_raises_runtime_error():
+    with pytest.raises(RuntimeError, match="YOLOv8 detector is not loaded"):
+        ObjectDetector().detect(np.zeros((32, 48, 3), dtype=np.uint8))
+
+
+def test_yolo_empty_results_remain_empty_detections():
+    class EmptyModel:
+        def predict(self, **kwargs):
+            return []
+
+    detector = ObjectDetector()
+    detector._model = EmptyModel()
+    detector._device = "cpu"
+
+    assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
+
+
+def test_yolo_class_confidence_gate_filters_and_keeps_expected_detections():
+    detector = ObjectDetector()
+    detector._device = "cpu"
+
+    # Box [4,5,24,25] on a 32px-tall frame is NEAR/LARGE (bottom at 0.78), so it
+    # gets the low 0.35 vehicle floor. Car below it is filtered, at it is kept —
+    # this near/large case used to require >= 0.50.
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.34]))
+    assert detector.detect(np.zeros((32, 48, 3), dtype=np.uint8)) == []
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[2], conf=[0.36]))
+    detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
+    assert len(detections) == 1
+    assert detections[0].class_name == "car"
+    assert detections[0].confidence == pytest.approx(0.36)
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[4, 5, 24, 25]], cls=[7], conf=[0.55]))
+    detections = detector.detect(np.zeros((32, 48, 3), dtype=np.uint8))
+    assert len(detections) == 1
+    assert detections[0].class_name == "truck"
+    assert detections[0].confidence == pytest.approx(0.55)
+
+
+def test_far_small_vehicle_box_keeps_stricter_confidence_floor():
+    # A small box high in a 200px frame (bottom 0.275, height 0.075) is FAR/SMALL,
+    # so vehicle classes keep the stricter 0.50 floor — a 0.40 truck is dropped,
+    # preventing low-confidence distant traffic from feeding the tracker.
+    detector = ObjectDetector()
+    detector._device = "cpu"
+    frame = np.zeros((200, 200, 3), dtype=np.uint8)
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[90, 40, 110, 55]], cls=[7], conf=[0.40]))
+    assert detector.detect(frame) == []
+
+    detector._model = _FakeYoloModel(_FakeBoxes(xyxy=[[90, 40, 110, 55]], cls=[7], conf=[0.52]))
+    detections = detector.detect(frame)
+    assert len(detections) == 1
+    assert detections[0].class_name == "truck"
